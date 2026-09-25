@@ -55,3 +55,20 @@ Terraform state will be stored in S3, hosted by Garage, which is run as a Cluste
 
 # Secrets
 All code in the Repo will use Vars for Non-sensitive PII, that will be read from my Inventory (not in this repo), and then secrets are stored in Hashicorp Vault per-application and read by the task var_lookup.yaml.
+
+Each Application has its own secret store in the Vault.
+
+# Inventory
+
+#
+Flow
+
+flowchart LR
+    semaphore[Semaphore] --> ansible[Ansible]
+    ansible --> terraform[Terraform]
+    terraform --> vm[VM]
+    ansible -->|configures| vm
+    vm --> apps[App Services]
+    vm --> k8s[Kubernetes]
+    k8s --> s3[(S3)]
+    apps --> s3

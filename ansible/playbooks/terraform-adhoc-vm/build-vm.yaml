@@ -1,0 +1,88 @@
+---
+# Builds a Proxmox VM from a template, or updates it when its VMID already has state; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+- name: Build or update an ad-hoc Proxmox VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # Load secrets, validate the shared inputs and initialise this VM's state
+    - name: Load secrets and initialise this VM's state
+      ansible.builtin.include_tasks: tasks/setup.yaml
+
+    # Start from just the VMID so an earlier build in the same play cannot leak values in
+    - name: Reset the build inputs
+      ansible.builtin.set_fact:
+        adhoc_vars:
+          vm_id: "{{ adhoc_vm_id }}"
+
+    # A blank field keeps the value recorded by the last run; with nothing recorded it is left out and variables.tf supplies the default
+    - name: Resolve each input against the recorded values
+      ansible.builtin.set_fact:
+        adhoc_vars: "{{ adhoc_vars | combine({item.var: resolved}) }}"
+      vars:
+        given: "{{ lookup('ansible.builtin.vars', item.input, default='') | default('', true) | string }}"
+        resolved: "{{ given if given | length > 0 else (adhoc_recorded[item.var].value | default('') | string) }}"
+      # Input name on the left, Terraform variable on the right
+      loop:
+        - { input: vm_name, var: vm_name }
+        - { input: template_name, var: template_name }
+        - { input: target_node, var: target_node }
+        - { input: storage_pool, var: storage_pool }
+        - { input: cores, var: cores }
+        - { input: vcpus, var: vcpus }
+        - { input: memory, var: memory }
+        - { input: osdisk_size, var: osdisk_size }
+        - { input: data_disk_size, var: data_disk_size }
+        - { input: data_storage_pool, var: data_storage_pool }
+        - { input: vm_tags, var: tags }
+      loop_control:
+        label: "{{ item.input }}"
+
+    # A blank ip_mode keeps the current network config; a new VM falls back to DHCP
+    - name: Resolve the network config
+      ansible.builtin.set_fact:
+        adhoc_ipconfig0: >-
+          {%- if ip_mode | default('', true) == 'dhcp' -%}
+          ip=dhcp
+          {%- elif ip_mode | default('', true) == 'static' -%}
+          ip={{ static_ip | default('', true) }}/{{ static_prefix | default('24', true) }}{{ (',gw=' ~ gateway) if gateway | default('', true) else '' }}
+          {%- else -%}
+          {{ adhoc_recorded.ipconfig0.value | default('') }}
+          {%- endif -%}
+
+    # Stop before Terraform runs when a new VM is missing its name or template, or the network input is inconsistent
+    - name: Validate the build inputs
+      ansible.builtin.assert:
+        that:
+          - adhoc_vars.vm_name | length > 0
+          - adhoc_vars.template_name | length > 0
+          - ip_mode | default('', true) in ['', 'dhcp', 'static']
+          - ip_mode | default('', true) != 'static' or static_ip | default('', true) | length > 0
+        fail_msg: >-
+          vm_name and template_name are required when the state has no recorded value,
+          ip_mode must be dhcp or static, and static needs static_ip.
+
+    # Anything still blank is left out so Terraform uses the default from variables.tf
+    - name: Drop inputs that are still blank
+      ansible.builtin.set_fact:
+        adhoc_vars: >-
+          {{ adhoc_vars | combine({'ipconfig0': adhoc_ipconfig0})
+             | dict2items | rejectattr('value', 'equalto', '') | items2dict }}
+
+    # Plan and apply; a re-run that changes nothing reports no change
+    - name: Apply the VM with Terraform
+      community.general.terraform:
+        project_path: "{{ adhoc_tf_path }}"
+        state: present
+        variables: "{{ adhoc_vars }}"
+      environment: "{{ adhoc_tf_env }}"
+      register: adhoc_apply
+
+    # Report the outcome without any secret values
+    - name: Summarise the result
+      ansible.builtin.debug:
+        msg:
+          - "VM         {{ adhoc_apply.outputs.vm_name.value }} (VMID {{ adhoc_vm_id }})"
+          - "Changed    {{ adhoc_apply.changed }}"
+          - "State key  {{ adhoc_state_key }}"

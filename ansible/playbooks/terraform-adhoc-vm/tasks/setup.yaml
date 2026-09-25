@@ -1,0 +1,87 @@
+---
+# Shared by build-vm.yaml and delete-vm.yaml; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+
+- name: Set the Vault connection
+  ansible.builtin.set_fact:
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+    vault_kv_path: "{{ lookup('ansible.builtin.env', 'KV_PATH') }}"
+  no_log: true
+
+- name: List the secrets this flow needs
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - { path: "{{ vault_kv_path }}", field: GARAGE_ACCESS_KEY, var: garage_access_key }
+      - { path: "{{ vault_kv_path }}", field: GARAGE_SECRET_KEY, var: garage_secret_key }
+      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_URL, var: proxmox_api_url }
+      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
+      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
+
+- name: Load secrets from Vault
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+
+# The module path defaults to the repo layout; adhoc_project_path overrides it
+- name: Resolve the VMID, Garage endpoint, state key format and module path
+  ansible.builtin.set_fact:
+    adhoc_tf_path: "{{ adhoc_project_path | default(playbook_dir ~ '/../../../terraform/proxmox/adhoc-vm') }}"
+    adhoc_vm_id: "{{ vm_id | default('', true) | string }}"
+    adhoc_garage_url: "{{ garage_url | default(lookup('ansible.builtin.env', 'GARAGE_URL'), true) }}"
+    adhoc_key_format: >-
+      {{ state_key_format | default(lookup('ansible.builtin.env', 'STATE_KEY_FORMAT'), true)
+         | default('vm-{vm_id}.tfstate', true) }}
+
+# Only the VMID is allowed in the key, since it never changes; a renamable field would orphan the state
+- name: Validate the shared inputs
+  ansible.builtin.assert:
+    that:
+      - adhoc_vm_id is match('^[0-9]+$')
+      - adhoc_garage_url | length > 0
+      - "'{vm_id}' in adhoc_key_format"
+    fail_msg: >-
+      vm_id must be numeric, garage_url (or GARAGE_URL) must be set,
+      and state_key_format must contain {vm_id}.
+
+# Secrets go to Terraform through the environment, so they never appear in a task's logged command line
+- name: Build the Terraform environment
+  ansible.builtin.set_fact:
+    adhoc_state_key: "{{ adhoc_key_format | replace('{vm_id}', adhoc_vm_id) }}"
+    adhoc_tf_env:
+      AWS_ACCESS_KEY_ID: "{{ garage_access_key }}"
+      AWS_SECRET_ACCESS_KEY: "{{ garage_secret_key }}"
+      AWS_ENDPOINT_URL_S3: "{{ adhoc_garage_url }}"
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_proxmox_api_url: "{{ proxmox_api_url }}"
+      TF_VAR_proxmox_api_token_id: "{{ proxmox_api_token_id }}"
+      TF_VAR_proxmox_api_token_secret: "{{ proxmox_api_token_secret }}"
+  no_log: true
+
+# Reconfigure every run, since each VMID has its own state key
+- name: Initialise Terraform against this VM's state
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - init
+      - -reconfigure
+      - -input=false
+      - "-backend-config=key={{ adhoc_state_key }}"
+    chdir: "{{ adhoc_tf_path }}"
+  environment: "{{ adhoc_tf_env }}"
+  changed_when: false
+
+# -json reports {} or fails cleanly when nothing is recorded, unlike -raw which prints a warning to stdout
+- name: Read the inputs recorded by the last run
+  ansible.builtin.command:
+    argv: [terraform, output, -json]
+    chdir: "{{ adhoc_tf_path }}"
+  environment: "{{ adhoc_tf_env }}"
+  register: adhoc_outputs
+  changed_when: false
+  failed_when: false
+
+- name: Store the recorded inputs
+  ansible.builtin.set_fact:
+    adhoc_recorded: >-
+      {{ adhoc_outputs.stdout | from_json
+         if (adhoc_outputs.rc == 0 and adhoc_outputs.stdout is match('\s*\{'))
+         else {} }}

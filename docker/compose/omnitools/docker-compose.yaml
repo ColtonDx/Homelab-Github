@@ -1,0 +1,13 @@
+services:
+  omni-tools:
+    container_name: omni-tools
+    restart: unless-stopped
+    image: iib0011/omni-tools:latest
+    networks:
+      - reverseproxy-nw
+    labels:
+      - "AppPort=80"
+
+networks:
+  reverseproxy-nw:
+    external: true

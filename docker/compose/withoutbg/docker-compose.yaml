@@ -1,0 +1,13 @@
+services:
+  withoutbg:
+    container_name: withoutbg
+    restart: unless-stopped
+    image: withoutbg/app:latest
+    networks:
+      - reverseproxy-nw
+    labels:
+      - "AppPort=80"
+
+networks:
+  reverseproxy-nw:
+    external: true

@@ -1,0 +1,23 @@
+services:
+  changedetection:
+    container_name: changedetection
+    restart: unless-stopped
+    image: lscr.io/linuxserver/changedetection.io:latest
+    networks:
+      - reverseproxy-nw
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - data:/config
+    labels:
+      - "Backup=Changedetection"
+      - "AppPort=5000"
+
+networks:
+  reverseproxy-nw:
+    external: true
+
+volumes:
+  data:

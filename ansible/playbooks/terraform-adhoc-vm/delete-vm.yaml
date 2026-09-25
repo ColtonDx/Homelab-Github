@@ -1,0 +1,45 @@
+---
+# Destroys the VM recorded in the state for the given VMID; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+- name: Delete an ad-hoc Proxmox VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Load secrets and initialise this VM's state
+      ansible.builtin.include_tasks: tasks/setup.yaml
+
+    - name: List the resources in this VM's state
+      ansible.builtin.command:
+        argv: [terraform, state, list]
+        chdir: "{{ adhoc_tf_path }}"
+      environment: "{{ adhoc_tf_env }}"
+      register: adhoc_state_list
+      changed_when: false
+      # Exits non-zero when no state exists, which the next task reports clearly
+      failed_when: false
+
+    # An empty state usually means a mistyped VMID or a changed key format, so fail rather than report success
+    - name: Fail when there is nothing to delete
+      ansible.builtin.assert:
+        that:
+          - adhoc_state_list.rc == 0
+          - adhoc_state_list.stdout | trim | length > 0
+        fail_msg: "No state found at {{ adhoc_state_key }}. Check the VMID and state_key_format."
+
+    - name: Show what is about to be deleted
+      ansible.builtin.debug:
+        msg: "Deleting {{ adhoc_recorded.vm_name.value | default('unnamed VM') }} (VMID {{ adhoc_vm_id }})"
+
+    # Destroy works from state, but Terraform still needs values for variables with no default
+    - name: Destroy the VM with Terraform
+      community.general.terraform:
+        project_path: "{{ adhoc_tf_path }}"
+        state: absent
+        variables:
+          vm_id: "{{ adhoc_vm_id }}"
+          vm_name: destroy
+          template_name: destroy
+          target_node: destroy
+          storage_pool: destroy
+      environment: "{{ adhoc_tf_env }}"

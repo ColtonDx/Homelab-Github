@@ -1,0 +1,13 @@
+services:
+  it-tools:
+    container_name: it-tools
+    restart: unless-stopped
+    image: corentinth/it-tools:latest
+    networks:
+      - reverseproxy-nw
+    labels:
+      - "AppPort=80"
+
+networks:
+  reverseproxy-nw:
+    external: true
