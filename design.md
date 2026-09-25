@@ -60,9 +60,9 @@ Each Application has its own secret store in the Vault.
 
 # Inventory
 
-#
-Flow
+# Flow
 
+```mermaid
 flowchart LR
     semaphore[Semaphore] --> ansible[Ansible]
     ansible --> terraform[Terraform]
@@ -72,3 +72,4 @@ flowchart LR
     vm --> k8s[Kubernetes]
     k8s --> s3[(S3)]
     apps --> s3
+```
