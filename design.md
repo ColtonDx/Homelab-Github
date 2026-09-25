@@ -65,11 +65,13 @@ Each Application has its own secret store in the Vault.
 ```mermaid
 flowchart LR
     semaphore[Semaphore] --> ansible[Ansible]
+    vault[(HashiCorp Vault)] -->|secrets| ansible
     ansible --> terraform[Terraform]
+    terraform -->|state files| s3[(S3)]
     terraform --> vm[VM]
     ansible -->|configures| vm
     vm --> apps[App Services]
     vm --> k8s[Kubernetes]
-    k8s --> s3[(S3)]
+    k8s --> s3
     apps --> s3
 ```
