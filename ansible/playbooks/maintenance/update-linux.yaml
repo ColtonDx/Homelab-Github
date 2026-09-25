@@ -1,0 +1,123 @@
+---
+# Updates packages on Linux hosts, one host at a time; hosts with update_stop_services in the inventory have those services stopped first and restored afterwards
+# Extra vars: target_hosts (default linux), distro_upgrade (default false), reboot (default false)
+# Inventory: update_stop_services on a host or group lists services to stop (bare names get .service); an extra var of the same name overrides it
+- hosts: "{{ target_hosts | default('linux') }}"
+  serial: 1
+  ignore_unreachable: true
+  gather_facts: false
+  vars:
+    reboot_requested: "{{ reboot | default(false) | bool }}"
+    distro_upgrade_requested: "{{ distro_upgrade | default(false) | bool }}"
+    # Accept a list, a single name, or a comma-separated string
+    service_list: >-
+      {{ (update_stop_services.split(',') if update_stop_services is string else update_stop_services)
+         | map('trim') | reject('equalto', '') | map('regex_replace', '^([^.]+)$', '\1.service') | list
+         if update_stop_services | default('') | length > 0 else [] }}
+  tasks:
+    # Find out which hosts are reachable, so the rest can be skipped rather than failed
+    - name: Check host connectivity
+      ansible.builtin.ping:
+      register: ping_result
+      ignore_unreachable: true
+      failed_when: false
+
+    - name: Update a reachable host
+      when: ping_result is defined and ping_result.ping is defined
+      become: true
+      block:
+        # Detect the distribution so the right package manager is used
+        - name: Check distribution type
+          ansible.builtin.setup:
+
+        # Read every listed service's current state so it can be restored exactly
+        - name: Gather service facts
+          ansible.builtin.service_facts:
+          when: service_list | length > 0
+
+        # Stop early on a misspelled name or a service not installed on this host
+        - name: Check every service to stop exists
+          ansible.builtin.assert:
+            that:
+              - item in ansible_facts.services
+            fail_msg: "Service '{{ item }}' in update_stop_services was not found on {{ inventory_hostname }}."
+          loop: "{{ service_list }}"
+
+        # Remember which services were running and enabled before the update
+        - name: Record the services' starting state
+          ansible.builtin.set_fact:
+            services_running: "{{ service_list | select('in', running_names) | list }}"
+            services_enabled: "{{ service_list | select('in', enabled_names) | list }}"
+          vars:
+            running_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list }}"
+            enabled_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list }}"
+
+        - name: Stop services, update and reboot if needed
+          block:
+            # Stop in the order given, so dependents can be listed before what they depend on
+            - name: Stop services
+              ansible.builtin.systemd:
+                name: "{{ item }}"
+                state: stopped
+              loop: "{{ service_list }}"
+
+            # Keep them from starting on their own if the host reboots mid-update
+            - name: Disable services for the update
+              ansible.builtin.systemd:
+                name: "{{ item }}"
+                enabled: false
+              loop: "{{ services_enabled }}"
+
+            # Refresh the package index and upgrade everything on Debian-family hosts
+            - name: Upgrade packages (Debian-based)
+              ansible.builtin.apt:
+                update_cache: true
+                upgrade: "{{ 'dist' if distro_upgrade_requested else 'yes' }}"
+              when: ansible_facts['os_family'] == "Debian"
+
+            # Upgrade everything on Red Hat-family hosts
+            - name: Upgrade packages (Red Hat-based)
+              ansible.builtin.dnf:
+                name: "*"
+                state: latest
+                update_cache: true
+              when: ansible_facts['os_family'] in ["RedHat", "Fedora"]
+
+            # Debian flags a pending reboot with this file
+            - name: Check whether a reboot is required (Debian-based)
+              ansible.builtin.stat:
+                path: /var/run/reboot-required
+              register: reboot_required_file
+              when: ansible_facts['os_family'] == "Debian"
+
+            # needs-restarting exits 1 when a reboot is needed; a host without it is treated as not needing one
+            - name: Check whether a reboot is required (Red Hat-based)
+              ansible.builtin.shell: command -v needs-restarting >/dev/null || exit 0; needs-restarting -r
+              register: reboot_required_cmd
+              changed_when: false
+              failed_when: reboot_required_cmd.rc not in [0, 1]
+              when: ansible_facts['os_family'] in ["RedHat", "Fedora"]
+
+            # Reboot only when the update asked for it and the run allows reboots
+            - name: Reboot the host
+              ansible.builtin.reboot:
+                msg: "Reboot initiated by Ansible because updates were installed."
+                test_command: whoami
+              when:
+                - reboot_requested
+                - (reboot_required_file.stat.exists | default(false)) or (reboot_required_cmd.rc | default(0)) == 1
+
+          always:
+            # Re-enable only what was enabled before, so services disabled on purpose stay that way
+            - name: Re-enable services
+              ansible.builtin.systemd:
+                name: "{{ item }}"
+                enabled: true
+              loop: "{{ services_enabled | default([]) }}"
+
+            # Start in reverse order so dependencies come up first, and only what was running before
+            - name: Start services
+              ansible.builtin.systemd:
+                name: "{{ item }}"
+                state: started
+              loop: "{{ services_running | default([]) | reverse | list }}"

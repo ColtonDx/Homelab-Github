@@ -1,0 +1,53 @@
+services:
+  bookstack:
+    container_name: bookstack
+    restart: unless-stopped
+    image: lscr.io/linuxserver/bookstack:latest
+    depends_on:
+      - mariadb
+    networks:
+      - default
+      - reverseproxy-nw
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - APP_URL=https://bookstack.${DOCKER_DOMAIN}
+      - APP_KEY=${BOOKSTACK_APP_KEY}
+      - DB_HOST=bookstack_mariadb
+      - DB_PORT=3306
+      - DB_USERNAME=Bookstack
+      - DB_PASSWORD=${BOOKSTACK_DB_PASSWORD}
+      - DB_DATABASE=Bookstack
+    volumes:
+      - data:/config
+    labels:
+      - "Backup=Bookstack"
+
+  mariadb:
+    container_name: bookstack_mariadb
+    restart: unless-stopped
+    image: lscr.io/linuxserver/mariadb:latest
+    networks:
+      - default
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - MYSQL_ROOT_PASSWORD=${BOOKSTACK_MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=Bookstack
+      - MYSQL_USER=Bookstack
+      - MYSQL_PASSWORD=${BOOKSTACK_DB_PASSWORD}
+    volumes:
+      - data:/config
+    labels:
+      - "Backup=Bookstack"
+      - "AppPort=80"
+
+networks:
+  default:
+  reverseproxy-nw:
+    external: true
+
+volumes:
+    data:
