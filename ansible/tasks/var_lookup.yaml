@@ -1,0 +1,125 @@
+---
+# Loads secrets from Vault KV2 and settings from the inventory into facts, fetching each Vault path once
+# Each vault_secrets entry needs var (the fact to set), plus any of: path (default vault_kv_path), field (omit for the whole document)
+# inventory names an inventory variable used before Vault; an entry with only inventory never reads Vault
+# required defaults to true; default is the value used when an optional entry is missing
+
+# Check the caller passed a usable list of entries
+- name: Ensure Vault secret list is provided
+  assert:
+    that:
+      - vault_secrets is defined
+      - vault_secrets | length > 0
+      - vault_secrets | selectattr('var', 'undefined') | list | length == 0
+    fail_msg: "vault_secrets must be a non-empty list of entries, each with at least a var."
+
+# Clear working facts so a second lookup in the same play starts fresh
+- name: Reset results from any earlier lookup in this play
+  set_fact:
+    vault_from_inventory: {}
+    vault_needed: []
+    vault_documents: {}
+    vault_missing: []
+
+# Use the inventory value for any entry whose inventory variable is set
+- name: Take values the inventory already provides
+  set_fact:
+    vault_from_inventory: "{{ vault_from_inventory | combine({item.var: inventory_value}) }}"
+  loop: "{{ vault_secrets }}"
+  loop_control:
+    label: "{{ item.var }}"
+  vars:
+    inventory_value: "{{ lookup('ansible.builtin.vars', item.inventory, default='') if item.inventory is defined else '' }}"
+  when: inventory_value | string | length > 0
+  no_log: true
+
+# An entry with only inventory has no Vault location to fall back to
+- name: List the entries that still need Vault
+  set_fact:
+    vault_needed: "{{ vault_needed + [item] }}"
+  loop: "{{ vault_secrets }}"
+  loop_control:
+    label: "{{ item.var }}"
+  when:
+    - item.var not in vault_from_inventory
+    - item.inventory is not defined or item.field is defined or item.path is defined
+
+# Work out which Vault paths to read, each only once
+- name: List the distinct Vault paths to fetch
+  set_fact:
+    vault_paths: "{{ vault_needed | map(attribute='path', default=vault_kv_path) | unique | list }}"
+
+# A missing path is tolerated here and reported below only if a required entry needs it; other failures still retry and fail
+- name: Fetch secrets from HashiCorp Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "{{ vault_addr | regex_replace('/+$', '') }}"
+    auth_method: token
+    token: "{{ vault_token }}"
+    engine_mount_point: "{{ vault_kv_mount | default('secret') }}"
+    path: "{{ item }}"
+  register: vault_results
+  retries: 5
+  delay: 3
+  until: vault_results is not failed or vault_path_missing
+  failed_when: vault_results is failed and not vault_path_missing
+  vars:
+    vault_path_missing: "{{ 'Invalid or missing path' in (vault_results.msg | default('')) }}"
+  loop: "{{ vault_paths }}"
+  no_log: true
+  delegate_to: localhost
+
+# Store each fetched Vault document under its path
+- name: Index the fetched documents by path
+  set_fact:
+    vault_documents: "{{ vault_documents | combine({item.item: item.secret}) }}"
+  loop: "{{ vault_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.secret is defined
+  no_log: true
+
+# Note every required entry that could not be found anywhere
+- name: Collect every required entry that neither the inventory nor Vault holds
+  set_fact:
+    vault_missing: >-
+      {{ vault_missing + [('inventory:' ~ item.inventory ~ ' (not set)') if inventory_only | bool
+         else entry_path ~ (' (path not found)' if entry_path not in vault_documents else ':' ~ item.field)] }}
+  loop: "{{ vault_secrets }}"
+  loop_control:
+    label: "{{ item.var }}"
+  vars:
+    entry_path: "{{ item.path | default(vault_kv_path) }}"
+    inventory_only: "{{ item.inventory is defined and item.field is not defined and item.path is not defined }}"
+  when:
+    - item.required | default(true) | bool
+    - item.var not in vault_from_inventory
+    - inventory_only | bool or entry_path not in vault_documents or (item.field is defined and item.field not in vault_documents[entry_path])
+
+# Stop with one message naming everything that is missing
+- name: Fail listing every missing entry at once
+  assert:
+    that:
+      - vault_missing | length == 0
+    fail_msg: >-
+      {{ vault_missing | unique | length }} required entr{{ 'y is' if vault_missing | unique | length == 1 else 'ies are' }}
+      missing (Vault mount '{{ vault_kv_mount | default('secret') }}'): {{ vault_missing | unique | join(', ') }}.
+      Add them and re-run.
+
+# Whole documents default to {}, single fields to ''; an entry's own default overrides either
+- name: Set secret facts
+  set_fact:
+    "{{ item.var }}": >-
+      {{ vault_from_inventory[item.var] if item.var in vault_from_inventory else
+         (item.default | default('')) if inventory_only | bool else
+         (vault_documents[entry_path] if entry_path in vault_documents else item.default | default({}))
+           if item.field is not defined else
+         (vault_documents[entry_path][item.field]
+           if (entry_path in vault_documents and item.field in vault_documents[entry_path])
+           else item.default | default('')) }}
+  loop: "{{ vault_secrets }}"
+  loop_control:
+    label: "{{ item.var }}"
+  vars:
+    entry_path: "{{ item.path | default(vault_kv_path) }}"
+    inventory_only: "{{ item.inventory is defined and item.field is not defined and item.path is not defined }}"
+  no_log: true
