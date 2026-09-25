@@ -66,12 +66,17 @@ Each Application has its own secret store in the Vault.
 flowchart LR
     semaphore[Semaphore] --> ansible[Ansible]
     vault[(HashiCorp Vault)] -->|secrets| ansible
+    gitlab[GitLab] -->|playbooks and code| ansible
     ansible --> terraform[Terraform]
     terraform -->|state files| s3[(S3)]
     terraform --> vm[VM]
     ansible -->|configures| vm
     vm --> apps[App Services]
-    vm --> k8s[Kubernetes]
-    k8s --> s3
-    apps --> s3
+    vm --> talos[Talos]
+    talos --> k8s[Kubernetes]
+    k8s -->|backups| s3
+    apps -->|backups| s3
+    s3 --> zfs[(TrueNAS ZFS)]
+    zfs --> replication[Replication]
+    s3 --> replication
 ```
