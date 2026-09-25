@@ -1,0 +1,103 @@
+---
+# Replaces a user's authorized_keys on SSH hosts with that user's rotated public key(s), so only those keys can log in
+# Extra vars: target_user (required), target_hosts (default ssh), confirm_self_rotation (required when rotating the account Ansible connects as)
+# Key source: the ssh_public_key extra var (e.g. a Semaphore survey field) when given, else inventory variable ssh_public_key_<user> (non-alphanumerics become _)
+# A value can hold several keys, one per line or as a list; the previous file is kept on the host as a timestamped backup
+- name: Rotate a user's SSH authorized keys
+  hosts: "{{ target_hosts | default('ssh') }}"
+  become: true
+
+  vars:
+    # Inventory variable names cannot contain dashes, so the user name is normalised for the lookup
+    inventory_key_var: "ssh_public_key_{{ target_user | default('') | regex_replace('[^A-Za-z0-9_]', '_') }}"
+
+  pre_tasks:
+    # Fail before touching any host when no user was given
+    - name: Check a target user was given
+      ansible.builtin.assert:
+        that:
+          - target_user | default('') | length > 0
+        fail_msg: "Pass target_user, the account whose authorized_keys should be replaced."
+
+    # Replacing the connecting account's keys locks Ansible out unless the new key is the one it uses
+    - name: Refuse to rotate the account Ansible connects as without confirmation
+      ansible.builtin.assert:
+        that:
+          - target_user != (ansible_user | default(ansible_user_id)) or confirm_self_rotation | default(false) | bool
+        fail_msg: >-
+          {{ target_user }} is the account Ansible connects to {{ inventory_hostname }} as. Make sure the new key is
+          the one Ansible uses, then re-run with confirm_self_rotation=true.
+
+  tasks:
+    # Accept one key, several keys on separate lines, or a list; the run's ssh_public_key wins over the inventory
+    - name: Normalise the keys into a list
+      ansible.builtin.set_fact:
+        rotated_keys: >-
+          {{ (key_source if key_source is not string else key_source.splitlines())
+             | map('trim') | reject('equalto', '') | list }}
+      vars:
+        key_source: "{{ ssh_public_key if ssh_public_key | default('') | length > 0 else lookup('ansible.builtin.vars', inventory_key_var, default='') }}"
+
+    # Parse each key with ssh-keygen on the controller, which rejects truncated or malformed pastes
+    - name: Validate each key with ssh-keygen
+      ansible.builtin.command:
+        cmd: ssh-keygen -l -f /dev/stdin
+        stdin: "{{ item }}"
+      loop: "{{ rotated_keys }}"
+      loop_control:
+        label: "{{ item | truncate(40) }}"
+      register: key_checks
+      changed_when: false
+      failed_when: false
+      # Read-only, so it runs in check mode too and a dry run catches bad keys
+      check_mode: false
+      delegate_to: localhost
+      become: false
+
+    # Refuse to write anything unless every key parsed, since a bad value would lock the user out
+    - name: Check every value is a valid SSH public key
+      ansible.builtin.assert:
+        that:
+          - rotated_keys | length > 0
+          - key_checks.results | default([]) | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0) | list | length == rotated_keys | length
+        fail_msg: >-
+          No valid SSH public key for {{ target_user }}: set ssh_public_key for this run or {{ inventory_key_var }}
+          in the inventory, and check each value is a complete public key. Nothing was changed.
+
+    # Find the user's real home directory and primary group rather than assuming /home/<user>
+    - name: Look up the user's account
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ target_user }}"
+        fail_key: false
+
+    # Stop with a clear message rather than getent's generic one
+    - name: Check the user exists on this host
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.getent_passwd[target_user] is not none
+        fail_msg: "User {{ target_user }} does not exist on {{ inventory_hostname }}; nothing was changed."
+
+    - name: Record the user's home directory and primary group
+      ansible.builtin.set_fact:
+        target_home: "{{ ansible_facts.getent_passwd[target_user][4] | regex_replace('/+$', '') }}"
+        target_gid: "{{ ansible_facts.getent_passwd[target_user][2] }}"
+
+    # sshd ignores the key file unless .ssh is owned by the user and not writable by others
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: "{{ target_home }}/.ssh"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_gid }}"
+        mode: "0700"
+
+    # Replaces the whole file, so any key not in the list stops working; the old file is backed up alongside it
+    - name: Replace authorized_keys with the rotated keys
+      ansible.builtin.copy:
+        dest: "{{ target_home }}/.ssh/authorized_keys"
+        content: "{{ rotated_keys | join('\n') }}\n"
+        owner: "{{ target_user }}"
+        group: "{{ target_gid }}"
+        mode: "0600"
+        backup: true
