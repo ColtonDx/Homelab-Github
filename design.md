@@ -69,9 +69,10 @@ flowchart LR
     gitlab[GitLab] -->|playbooks and code| ansible
     ansible --> terraform[Terraform]
     terraform -->|state files| s3[(S3)]
-    terraform --> vm[VM]
+    terraform -->|builds| vm[VM]
     ansible -->|configures| vm
-    vm --> apps[App Services]
+    vm --> docker[Docker]
+    docker --> apps[App Services]
     vm --> talos[Talos]
     talos --> k8s[Kubernetes]
     k8s -->|backups| s3
@@ -79,4 +80,5 @@ flowchart LR
     s3 --> zfs[(TrueNAS ZFS)]
     zfs --> replication[Replication]
     s3 --> replication
+
 ```
