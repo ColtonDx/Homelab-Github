@@ -12,11 +12,11 @@ services:
     volumes:
       - data:/config
     labels:
-      - "Backup=Changedetection"
-      - "AppPort=5000"
+      - "Backup=Changedetection" # Sets the DVBM Backup Job Label
+      - "AppPort=5000" # Sets the Application Port for the Reverse Proxy Job
 
 networks:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true
 
 volumes:

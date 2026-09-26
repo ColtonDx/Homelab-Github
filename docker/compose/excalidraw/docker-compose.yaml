@@ -1,8 +1,8 @@
 services:
-  withoutbg:
-    container_name: withoutbg
+  excalidraw:
+    container_name: excalidraw
     restart: unless-stopped
-    image: withoutbg/app:latest
+    image: docker.io/excalidraw/excalidraw:latest
     networks:
       - reverseproxy-nw
     labels:

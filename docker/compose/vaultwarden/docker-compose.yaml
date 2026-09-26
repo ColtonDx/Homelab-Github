@@ -1,0 +1,27 @@
+services:
+  vaultwarden:
+    container_name: vaultwarden
+    hostname: Vaultwarden
+    restart: unless-stopped
+    image: vaultwarden/server
+    networks:
+      - reverseproxy-nw
+    environment:
+      ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN}
+      WEBSOCKET_ENABLED: 'true' # Required to use websockets
+      SIGNUPS_ALLOWED: 'false'   # set to false to disable signups
+      LOG_FILE: /data/vaultwarden.log
+      LOG_LEVEL: 'warn'
+      EXTENDED_LOGGING: 'true'
+    volumes:
+      - data:/data
+    labels:
+      - "Backup=Vaultwarden" # Sets the DVBM Backup Job Label
+      - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
+
+volumes:
+    data:
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true

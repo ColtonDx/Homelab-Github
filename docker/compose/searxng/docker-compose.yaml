@@ -10,8 +10,8 @@ services:
       - config:/etc/searxng/:Z
       - core-data:/var/cache/searxng/
     labels:
-      - "Backup=SearxNG"
-      - "AppPort=8080"
+      - "Backup=SearxNG" # Sets the DVBM Backup Job Label
+      - "AppPort=8080" # Sets the Application Port for the Reverse Proxy Job
 
   valkey:
     container_name: searxng-valkey
@@ -23,7 +23,7 @@ services:
     volumes:
       - valkey-data:/data/
     labels:
-      - "Backup=SearxNG"
+      - "Backup=SearxNG" # Sets the DVBM Backup Job Label
 
 volumes:
   core-data:
@@ -32,5 +32,5 @@ volumes:
 
 networks:
   searxng:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true

@@ -6,8 +6,8 @@ services:
     networks:
       - reverseproxy-nw
     labels:
-      - "AppPort=80"
+      - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
 
 networks:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true

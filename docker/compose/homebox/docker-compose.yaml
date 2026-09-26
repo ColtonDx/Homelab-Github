@@ -1,0 +1,25 @@
+services:
+  homebox:
+    container_name: homebox
+    restart: unless-stopped
+    image: ghcr.io/hay-kot/homebox:latest
+    networks:
+      - reverseproxy-nw
+#    ports:
+#      - 3100:7745
+    environment:
+      - HBOX_LOG_LEVEL=info
+      - HBOX_LOG_FORMAT=text
+      - HBOX_WEB_MAX_UPLOAD_SIZE=10
+    volumes:
+      - data:/data/
+    labels:
+      - "Backup=Homebox" # Sets the DVBM Backup Job Label
+      - "AppPort=7745" # Sets the Application Port for the Reverse Proxy Job
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+   data:

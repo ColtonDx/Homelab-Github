@@ -22,7 +22,7 @@ services:
     volumes:
       - data:/config
     labels:
-      - "Backup=Bookstack"
+      - "Backup=Bookstack" # Sets the DVBM Backup Job Label
 
   mariadb:
     container_name: bookstack_mariadb
@@ -41,12 +41,12 @@ services:
     volumes:
       - data:/config
     labels:
-      - "Backup=Bookstack"
-      - "AppPort=80"
+      - "Backup=Bookstack" # Sets the DVBM Backup Job Label
+      - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
 
 networks:
   default:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true
 
 volumes:

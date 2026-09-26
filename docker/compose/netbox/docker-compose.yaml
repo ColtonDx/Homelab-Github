@@ -1,0 +1,64 @@
+services:
+  netbox:
+    container_name: netbox
+    restart: unless-stopped
+    image: lscr.io/linuxserver/netbox:latest
+    networks:
+      - default
+      - reverseproxy-nw
+    environment:
+      - TZ=Etc/UTC
+      - SUPERUSER_EMAIL=${EMAIL}
+      - SUPERUSER_PASSWORD=${NETBOX_SUPER_PASSWORD}
+      - ALLOWED_HOST="*"
+      - DB_NAME=netbox
+      - DB_USER=netbox
+      - DB_PASSWORD=${NETBOX_DB_PASSWORD}
+      - DB_HOST=netbox-db
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB_TASK=1
+      - REDIS_DB_CACHE=0
+    volumes:
+      - data:/config
+    labels:
+      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+      - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+
+
+  postgres:
+    container_name: netbox-db
+    restart: unless-stopped
+    image: postgres
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: ${NETBOX_DB_PASSWORD}
+      POSTGRES_DB: netbox
+    volumes:
+      - db:/var/lib/postgresql/18/docker
+    labels:
+      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+
+  redis:
+    container_name: netbox-redis
+    restart: unless-stopped
+    image: docker.io/redis:7-alpine
+    networks:
+      - default
+    volumes:
+      - redis:/data
+    labels:
+      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+
+volumes:
+  data:
+  redis:
+  db:
+
+networks:
+  default:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true

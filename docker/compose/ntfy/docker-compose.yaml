@@ -1,0 +1,29 @@
+services:
+  ntfy:
+    container_name: ntfy
+    restart: unless-stopped
+    image: binwiederhier/ntfy
+    networks:
+      - reverseproxy-nw
+    environment:
+      NTFY_BASE_URL: https://ntfy.${DOCKER_DOMAIN}
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      #NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      #NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_BEHIND_PROXY: true
+      NTFY_ATTACHMENT_CACHE_DIR: /var/lib/ntfy/attachments
+      #NTFY_ENABLE_LOGIN: true
+    volumes:
+      - data_var:/var/lib/ntfy
+    command: serve
+    labels:
+      - "Backup=Ntfy" # Sets the DVBM Backup Job Label
+      - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
+
+networks:
+  default:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+    data_var:

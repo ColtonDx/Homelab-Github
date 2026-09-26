@@ -21,11 +21,11 @@ services:
         soft: 1000000
         hard: 1000000
     labels:
-      - "Backup=Cryptpad"
-      - "AppPort=3000"
+      - "Backup=Cryptpad" # Sets the DVBM Backup Job Label
+      - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
 
 networks:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true
 
 volumes:

@@ -1,0 +1,20 @@
+services:
+  kiwix:
+    container_name: kiwix
+    restart: unless-stopped
+    image: ghcr.io/kiwix/kiwix-serve
+    networks:
+      - reverseproxy-nw
+    volumes:
+      - data:/data
+    command: "*.zim"
+    labels:
+      - "Backup=Kiwix" # Sets the DVBM Backup Job Label
+      - "AppPort=8080" # Sets the Application Port for the Reverse Proxy Job
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+  data:

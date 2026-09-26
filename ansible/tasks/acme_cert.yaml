@@ -1,0 +1,211 @@
+---
+# Issues and renews an ACME (Let's Encrypt) certificate via Cloudflare DNS-01.
+# This is a reusable task for any service that requires an ACME certificate.
+#
+# Required vars (set by calling playbook via set_fact):
+#   cloudflare_api_token  - Cloudflare API token
+#   acme_email            - Email for Let's Encrypt registration
+#   acme_domain           - Domain to issue/renew
+#   acme_ssl_dir          - Directory for cert files
+#   acme_key_path         - Full path for installed private key
+#   acme_fullchain_path   - Full path for installed fullchain cert
+#   acme_reloadcmd        - Shell command to reload service after cert install
+#
+# Optional vars:
+#   acme_ssl_owner        - Owner of ssl dir/files (default: root)
+#   acme_ssl_group        - Group of ssl dir/files (default: root)
+
+# Stop early if the calling playbook did not set everything this task needs
+- name: Validate required ACME variables
+  assert:
+    that:
+      - acme_domain is defined and acme_domain | length > 0
+      - acme_ssl_dir is defined
+      - acme_key_path is defined
+      - acme_fullchain_path is defined
+      - acme_reloadcmd is defined
+      - cloudflare_api_token is defined
+      - acme_email is defined
+
+# acme.sh renews through cron, so Debian hosts need the cron package
+- name: Ensure cron daemon is installed (Debian)
+  apt:
+    name: cron
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    install_recommends: false
+  when: ansible_os_family == 'Debian'
+
+# Red Hat hosts get cron from the cronie package
+- name: Ensure cron daemon is installed (RedHat)
+  package:
+    name: cronie
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+# Keep cron running so scheduled renewals actually happen
+- name: Ensure cron daemon is enabled and running
+  service:
+    name: "{{ 'crond' if ansible_os_family == 'RedHat' else 'cron' }}"
+    state: started
+    enabled: true
+
+# Create the folder the service reads its certificate from
+- name: Ensure SSL directory exists
+  file:
+    path: "{{ acme_ssl_dir }}"
+    state: directory
+    owner: "{{ acme_ssl_owner | default('root') }}"
+    group: "{{ acme_ssl_group | default('root') }}"
+    mode: "0750"
+
+# Skip the download and install steps when acme.sh is already present
+- name: Check if acme.sh is installed
+  stat:
+    path: /root/.acme.sh/acme.sh
+  register: acme_sh_stat
+
+# acme.sh lives in root's home, readable only by root
+- name: Ensure acme.sh directory exists
+  file:
+    path: /root/.acme.sh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# Fetch acme.sh on first run only
+- name: Download acme.sh source archive
+  get_url:
+    url: https://github.com/acmesh-official/acme.sh/archive/master.tar.gz
+    dest: /root/.acme.sh/acme.tar.gz
+    mode: "0600"
+  when: not acme_sh_stat.stat.exists
+
+# Unpack the download into the acme.sh folder
+- name: Extract acme.sh
+  unarchive:
+    src: /root/.acme.sh/acme.tar.gz
+    dest: /root/.acme.sh
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+  when: not acme_sh_stat.stat.exists
+
+# Run acme.sh's own installer, which is skipped once acme.sh exists
+- name: Install acme.sh
+  shell: |
+    cd /root/.acme.sh
+    ./acme.sh --install --home /root/.acme.sh
+  args:
+    creates: /root/.acme.sh/acme.sh
+  when: not acme_sh_stat.stat.exists
+
+# Writes the Cloudflare token to disk, readable only by root
+- name: Write Cloudflare credentials for acme.sh
+  copy:
+    dest: /root/.acme.sh/cloudflare.env
+    mode: "0600"
+    content: |
+      CF_Token="{{ cloudflare_api_token }}"
+      CF_Email="{{ acme_email }}"
+  no_log: true
+
+# acme.sh defaults to ZeroSSL, so point it at Let's Encrypt
+- name: Set default CA to Let's Encrypt
+  shell: /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+  changed_when: false
+
+# Check for due renewals every night at midnight
+- name: Ensure acme.sh cron job is installed
+  cron:
+    name: "acme.sh auto-renew"
+    minute: "0"
+    hour: "0"
+    job: '"/root/.acme.sh"/acme.sh --cron --home "/root/.acme.sh" > /dev/null'
+    user: root
+
+# Start with nothing changed so the install step only runs when needed
+- name: Initialize ACME change flags
+  set_fact:
+    acme_issue_changed: false
+    acme_renew_changed: false
+
+# Request the certificate through a Cloudflare DNS challenge; skipped once a key exists for the domain
+- name: Issue certificate using Cloudflare DNS
+  shell: |
+    export CF_Token="{{ cloudflare_api_token }}"
+    export CF_Email="{{ acme_email }}"
+    /root/.acme.sh/acme.sh --issue \
+      --dns dns_cf \
+      -d "{{ acme_domain }}" \
+      --keylength ec-256
+  args:
+    creates: "/root/.acme.sh/{{ acme_domain }}_ecc/{{ acme_domain }}.key"
+  register: issue_result
+  changed_when: true
+  no_log: true
+
+# Remember that a new certificate was issued
+- name: Mark ACME issue change
+  set_fact:
+    acme_issue_changed: true
+  when: issue_result is defined and (issue_result.rc | default(1)) == 0
+
+# See whether acme.sh already holds a certificate for this domain
+- name: Check issued key in acme.sh store
+  stat:
+    path: "/root/.acme.sh/{{ acme_domain }}_ecc/{{ acme_domain }}.key"
+  register: acme_issued_key_stat
+
+# Renew only when due; acme.sh exits 2 when it is not, which is not an error
+- name: Renew certificate if near expiry
+  shell: |
+    export CF_Token="{{ cloudflare_api_token }}"
+    export CF_Email="{{ acme_email }}"
+    /root/.acme.sh/acme.sh --renew \
+      --dns dns_cf \
+      -d "{{ acme_domain }}" \
+      --ecc
+  register: renew_result
+  changed_when: renew_result.rc == 0
+  failed_when: renew_result.rc not in [0, 2]
+  when: acme_issued_key_stat.stat.exists
+  no_log: true
+
+# Remember that the certificate was renewed
+- name: Mark ACME renew change
+  set_fact:
+    acme_renew_changed: true
+  when: renew_result is defined and renew_result.rc == 0
+
+# See whether the service's key file is already in place
+- name: Check installed key
+  stat:
+    path: "{{ acme_key_path }}"
+  register: acme_key_stat
+
+# See whether the service's certificate file is already in place
+- name: Check installed fullchain
+  stat:
+    path: "{{ acme_fullchain_path }}"
+  register: acme_fullchain_stat
+
+# Copy the certificate to the service and reload it, only when it changed or is missing; acme.sh remembers this for cron renewals
+- name: Install certificate into target directory and reload service
+  shell: |
+    /root/.acme.sh/acme.sh --install-cert -d "{{ acme_domain }}" \
+      --ecc \
+      --key-file       {{ acme_key_path }} \
+      --fullchain-file {{ acme_fullchain_path }} \
+      --reloadcmd      "{{ acme_reloadcmd }}"
+  when: >
+    acme_issue_changed
+    or acme_renew_changed
+    or (not acme_key_stat.stat.exists)
+    or (not acme_fullchain_stat.stat.exists)
+
+# Report which domain was handled and where its certificate lives
+- name: Show ACME certificate target domain
+  debug:
+    msg: "ACME certificate installed for {{ acme_domain }} at {{ acme_ssl_dir }}"
