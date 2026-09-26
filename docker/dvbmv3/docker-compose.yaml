@@ -1,0 +1,53 @@
+services:
+  docker-volume-backup-manager:
+    container_name: docker-volume-backup-manager
+    restart: unless-stopped
+    image: coltondx/docker-volume-backup-manager-v3:latest
+    networks:
+       - reverseproxy-nw
+    environment:
+       - APP_PASSWORD=${DVBM3_PASSWORD}
+       - JWT_SECRET=${DVBM3_JWT}
+       - DB_ENCRYPTION_KEY=${DVBM3_ENCRYPTION_KEY}
+       - MIGRATE_ENCRYPTED_DB=true
+
+      # ── Allowed hosts / CORS ──────────────────────────────────────────────
+      # Restrict which Host header values are accepted (default: any).
+      # Include every hostname/IP used to reach this container, e.g.:
+      #   ALLOWED_HOSTS=myhost.example.com,localhost
+      # - ALLOWED_HOSTS=*
+      #
+      # Restrict CORS origins (default: any).
+      #   ALLOWED_ORIGINS=https://myhost.example.com
+      # - ALLOWED_ORIGINS=*
+
+      # ── HTTPS / TLS ───────────────────────────────────────────────────────
+      # Enabled by default. A self-signed cert is generated on first start
+      # and stored in /data/certs (persisted in the data volume).
+      # Access the UI at https://localhost:8000 and accept the cert warning,
+      # or import /data/certs/cert.pem into your OS/browser trust store.
+      #
+      # Disable TLS (plain HTTP):
+      # - SSL_ENABLED=false
+      #
+      # Use a custom cert (e.g. from Let's Encrypt via a bind-mount):
+      # - SSL_CERT_FILE=/data/certs/fullchain.pem
+      # - SSL_KEY_FILE=/data/certs/privkey.pem
+    volumes:
+      # Required: Docker socket so we can manage containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent data (SQLite database + auto-generated TLS certs)
+      - data:/data
+      # Temp direct*ory for building archives before upload
+      - temp:/backups
+      # Optional: local backup storage directory
+      - ./local-backups:/local-backups
+      - /mnt/NASPool/Docker/rclone/rclone.conf:/root/.config/rclone/rclone.conf:ro
+
+volumes:
+  data:
+  temp:
+
+networks:
+  reverseproxy-nw:
+    external: true
