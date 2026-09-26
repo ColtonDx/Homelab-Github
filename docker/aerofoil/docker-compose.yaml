@@ -1,0 +1,25 @@
+services:
+  aerofoil:
+    container_name: aerofoil
+    image: luketanti/aerofoil:latest
+    environment:
+     - USER_ADMIN_NAME=${USERNAME}
+     - USER_ADMIN_PASSWORD=${AEROFOIL_ADMIN_PASSWORD}
+    volumes:
+      - games:/games
+      - config:/app/config
+      - data:/app/data
+    networks:
+      - reverseproxy-nw
+    labels:
+      - "Backup=Aerofoil"
+      - "AppPort=8465"
+
+volumes:
+  config:
+  data:
+  games:
+
+networks:
+  reverseproxy-nw:
+    external: true
