@@ -1,5 +1,8 @@
 ---
-# Builds a Proxmox VM from a template, or updates it when its VMID already has state; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+# Builds a Proxmox VM from a template, or updates it when its VMID already has state; shared inputs are listed in tasks/setup.yaml
+# Required for a new VM: vm_id, vm_name, template_name, target_node, storage_pool
+# Optional: cores, vcpus (sockets), memory (MB), osdisk_size, data_disk_size, data_storage_pool, vm_tags, ip_mode (dhcp or static) with static_ip, static_prefix, gateway
+# On a re-run, blank fields keep the value from the last run; disks can grow but never shrink, and a changed template_name is ignored
 - name: Build or update an ad-hoc Proxmox VM
   hosts: localhost
   connection: local

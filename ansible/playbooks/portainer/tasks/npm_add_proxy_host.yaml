@@ -1,0 +1,123 @@
+---
+# Adds or updates an Nginx Proxy Manager proxy host for a stack, at <npm_forward_host>.<npm_domain>
+# Needs: npm_url, npm_user, npm_password, npm_domain, npm_forward_host (the container name, also the subdomain), npm_forward_port
+# Optional: npm_forward_scheme (http), npm_certificate_id (0 = none), npm_ssl_forced, npm_websockets, npm_block_exploits, npm_http2 (all true), npm_caching, npm_hsts (false), npm_validate_certs (true)
+
+# Log in to get a bearer token
+- name: Authenticate with Nginx Proxy Manager
+  ansible.builtin.uri:
+    url: "{{ npm_url }}/api/tokens"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ npm_user }}"
+      secret: "{{ npm_password }}"
+    status_code: 200
+    validate_certs: "{{ npm_validate_certs | default(true) }}"
+  register: npm_auth
+  no_log: true
+
+# Kept for the API calls below
+- name: Set NPM bearer token fact
+  ansible.builtin.set_fact:
+    npm_token: "{{ npm_auth.json.token }}"
+  no_log: true
+
+# Existing hosts are matched by domain name
+- name: Get all existing proxy hosts
+  ansible.builtin.uri:
+    url: "{{ npm_url }}/api/nginx/proxy-hosts"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    status_code: 200
+    validate_certs: "{{ npm_validate_certs | default(true) }}"
+  register: npm_proxy_hosts
+
+# The container name becomes the subdomain
+- name: Set full proxy hostname
+  ansible.builtin.set_fact:
+    npm_full_domain: "{{ npm_forward_host }}.{{ npm_domain }}"
+
+# Empty when no host serves this domain yet
+- name: Find existing host matching domain
+  ansible.builtin.set_fact:
+    npm_existing_host: >-
+      {{ npm_proxy_hosts.json | selectattr('domain_names', 'contains', npm_full_domain) | list | first | default({}) }}
+
+# Say whether the host will be created or updated
+- name: Show proxy host status
+  ansible.builtin.debug:
+    msg: >-
+      Proxy host '{{ npm_full_domain }}':
+      {{ ('exists (ID: ' ~ npm_existing_host.id ~ '), will update') if npm_existing_host else 'does not exist, will create' }}
+
+# New host pointing at the container over the shared proxy network
+- name: Create new proxy host
+  ansible.builtin.uri:
+    url: "{{ npm_url }}/api/nginx/proxy-hosts"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      domain_names: ["{{ npm_full_domain }}"]
+      forward_scheme: "{{ npm_forward_scheme | default('http') }}"
+      forward_host: "{{ npm_forward_host }}"
+      forward_port: "{{ npm_forward_port | int }}"
+      access_list_id: 0
+      certificate_id: "{{ npm_certificate_id | default(0) | int }}"
+      ssl_forced: "{{ npm_ssl_forced | default(true) | bool }}"
+      allow_websocket_upgrade: "{{ npm_websockets | default(true) | bool }}"
+      block_exploits: "{{ npm_block_exploits | default(true) | bool }}"
+      caching_enabled: "{{ npm_caching | default(false) | bool }}"
+      http2_support: "{{ npm_http2 | default(true) | bool }}"
+      hsts_enabled: "{{ npm_hsts | default(false) | bool }}"
+      advanced_config: ""
+      locations: []
+    status_code: 201
+    validate_certs: "{{ npm_validate_certs | default(true) }}"
+  register: npm_create_result
+  when: npm_existing_host == {}
+
+# Report the new host's ID
+- name: Report proxy host creation
+  ansible.builtin.debug:
+    msg: "Proxy host '{{ npm_full_domain }}' created (ID: {{ npm_create_result.json.id }})"
+  when: npm_existing_host == {}
+
+# Refresh the target, keeping any access list, advanced config and locations set by hand in NPM
+- name: Update existing proxy host
+  ansible.builtin.uri:
+    url: "{{ npm_url }}/api/nginx/proxy-hosts/{{ npm_existing_host.id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      domain_names: ["{{ npm_full_domain }}"]
+      forward_scheme: "{{ npm_forward_scheme | default('http') }}"
+      forward_host: "{{ npm_forward_host }}"
+      forward_port: "{{ npm_forward_port | int }}"
+      access_list_id: "{{ npm_existing_host.access_list_id | default(0) }}"
+      certificate_id: "{{ npm_certificate_id | default(0) | int }}"
+      ssl_forced: "{{ npm_ssl_forced | default(true) | bool }}"
+      allow_websocket_upgrade: "{{ npm_websockets | default(true) | bool }}"
+      block_exploits: "{{ npm_block_exploits | default(true) | bool }}"
+      caching_enabled: "{{ npm_caching | default(false) | bool }}"
+      http2_support: "{{ npm_http2 | default(true) | bool }}"
+      hsts_enabled: "{{ npm_hsts | default(false) | bool }}"
+      advanced_config: "{{ npm_existing_host.advanced_config | default('') }}"
+      locations: "{{ npm_existing_host.locations | default([]) }}"
+    status_code: 200
+    validate_certs: "{{ npm_validate_certs | default(true) }}"
+  register: npm_update_result
+  when: npm_existing_host != {}
+
+# Report the updated host's ID
+- name: Report proxy host update
+  ansible.builtin.debug:
+    msg: "Proxy host '{{ npm_full_domain }}' updated (ID: {{ npm_existing_host.id }})"
+  when: npm_existing_host != {}

@@ -1,0 +1,29 @@
+---
+# Sends a notification to an ntfy topic; a failed send never fails the play, so it cannot hide the outcome it reports
+# Needs: ntfy_url (the full topic URL), ntfy_message; optional ntfy_title, ntfy_priority (urgent/high/default/low/min), ntfy_tags, ntfy_validate_certs (default true)
+
+# Stop early with a clear message when the inputs are missing
+- name: Ensure ntfy notification inputs are provided
+  ansible.builtin.assert:
+    that:
+      - ntfy_url | default('') | length > 0
+      - ntfy_message | default('') | length > 0
+    fail_msg: "ntfy_url and ntfy_message must both be set before including ntfy_notify.yaml."
+
+# Title, priority and tags are only sent when set
+- name: Send ntfy notification
+  ansible.builtin.uri:
+    url: "{{ ntfy_url }}"
+    method: POST
+    body: "{{ ntfy_message }}"
+    headers: >-
+      {{
+        {'Content-Type': 'text/plain'}
+        | combine({'Title': ntfy_title} if ntfy_title is defined else {})
+        | combine({'Priority': ntfy_priority} if ntfy_priority is defined else {})
+        | combine({'Tags': ntfy_tags} if ntfy_tags is defined else {})
+      }}
+    status_code: 200
+    validate_certs: "{{ ntfy_validate_certs | default(true) }}"
+  delegate_to: localhost
+  failed_when: false

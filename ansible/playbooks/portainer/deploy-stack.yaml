@@ -1,0 +1,128 @@
+---
+# Deploys docker/<app_name>/docker-compose.yaml to Portainer as a Git stack, creating it or redeploying it, with env values from the inventory and Vault
+# Connection settings and Vault fields are listed in tasks/setup.yaml; env value sources are listed in tasks/stack_env.yaml
+# Required: app_name, portainer_endpoint, repo_url (the repository Portainer clones)
+# Optional: repo_ref (default refs/heads/main), repo_auth with vault_repo_path, stack_prune (default false), stack_pull_image (default true)
+# Optional: npm_add_proxy with npm_domain to register the AppPort container in NPM; DVBM_JOB=true in the environment to register the Backup label's job
+- name: Deploy a Docker stack to Portainer
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # Validates inputs, loads credentials, reads the compose file and finds the environment and stack
+    - name: Prepare the stack
+      ansible.builtin.include_tasks: tasks/setup.yaml
+
+    # Portainer clones from Git, so it needs to know which repository to use
+    - name: Require the repository URL
+      ansible.builtin.assert:
+        that:
+          - repo_url | default('') | length > 0
+        fail_msg: "Pass repo_url, the Git repository Portainer clones the compose file from."
+
+    # List what was found so a missing variable is easy to spot
+    - name: Show variables discovered in the compose file
+      ansible.builtin.debug:
+        msg: "Variables in {{ stack_compose_path }}: {{ compose_vars }}"
+
+    # Resolves every compose variable from the inventory and Vault, and warns about any not found
+    - name: Build the stack env from the inventory and Vault
+      ansible.builtin.include_tasks: tasks/stack_env.yaml
+
+    # Say whether this run creates or redeploys
+    - name: Show stack status
+      ansible.builtin.debug:
+        msg: >-
+          Stack '{{ stack_name }}':
+          {{ ('exists (ID: ' ~ existing_stack.Id ~ '), will redeploy') if existing_stack else 'does not exist, will create' }}
+
+    # The body carries every env value, so it is hidden; the check below reports Portainer's answer instead
+    - name: Create new stack in Portainer from the repository
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/stacks/create/standalone/repository?endpointId={{ portainer_endpoint_id }}"
+        method: POST
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          name: "{{ stack_name }}"
+          repositoryURL: "{{ repo_url }}"
+          repositoryReferenceName: "{{ repo_ref | default('refs/heads/main') }}"
+          composeFile: "{{ stack_compose_path }}"
+          repositoryAuthentication: "{{ repo_auth | default(false) | bool }}"
+          repositoryUsername: "{{ repo_username | default('') }}"
+          repositoryPassword: "{{ repo_password | default('') }}"
+          env: "{{ stack_env }}"
+        validate_certs: "{{ portainer_validate_certs }}"
+        status_code: [-1, 200, 400, 401, 403, 404, 409, 500]
+      register: create_result
+      when: existing_stack == {}
+      no_log: true
+
+    # Report the outcome without the request body
+    - name: Check the stack was created
+      ansible.builtin.assert:
+        that:
+          - create_result.status == 200
+        fail_msg: "Portainer refused to create the stack ({{ create_result.status }}): {{ create_result.json.message | default(create_result.json.details | default(create_result.msg | default('no details'))) }}"
+        success_msg: "Stack '{{ stack_name }}' created (ID: {{ create_result.json.Id | default('?') }})"
+      when: existing_stack == {}
+
+    # Pulls the latest commit and, by default, the latest images; the body is hidden for the same reason
+    - name: Redeploy existing stack from the repository
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/stacks/{{ existing_stack.Id }}/git/redeploy?endpointId={{ portainer_endpoint_id }}"
+        method: PUT
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          repositoryReferenceName: "{{ repo_ref | default('refs/heads/main') }}"
+          repositoryAuthentication: "{{ repo_auth | default(false) | bool }}"
+          repositoryUsername: "{{ repo_username | default('') }}"
+          repositoryPassword: "{{ repo_password | default('') }}"
+          env: "{{ stack_env }}"
+          prune: "{{ stack_prune | default(false) | bool }}"
+          pullImage: "{{ stack_pull_image | default(true) | bool }}"
+        validate_certs: "{{ portainer_validate_certs }}"
+        status_code: [-1, 200, 400, 401, 403, 404, 409, 500]
+      register: update_result
+      when: existing_stack != {}
+      no_log: true
+
+    # Report the outcome without the request body
+    - name: Check the stack was redeployed
+      ansible.builtin.assert:
+        that:
+          - update_result.status == 200
+        fail_msg: "Portainer refused to redeploy the stack ({{ update_result.status }}): {{ update_result.json.message | default(update_result.json.details | default(update_result.msg | default('no details'))) }}"
+        success_msg: "Stack '{{ stack_name }}' redeployed (ID: {{ existing_stack.Id }})"
+      when: existing_stack != {}
+
+    # Points NPM at the container carrying the AppPort label
+    - name: Register proxy host in Nginx Proxy Manager
+      ansible.builtin.include_tasks: tasks/npm_add_proxy_host.yaml
+      vars:
+        npm_forward_host: "{{ stack_proxy_container }}"
+        npm_forward_port: "{{ stack_proxy_port }}"
+      when:
+        - npm_add_proxy | default(false) | bool
+        - stack_proxy_container | length > 0
+        - npm_domain | default('') | length > 0
+        - npm_url | length > 0
+        - npm_user | length > 0
+        - npm_password | length > 0
+
+    # Creates the DVBM job for the Backup label, so update-stack.yaml can back the stack up before updating
+    - name: Register backup job in DVBMv3
+      ansible.builtin.include_tasks: tasks/dvbm_register_backup_job.yaml
+      vars:
+        dvbm_backup_name: "{{ stack_backup_label }}"
+      when:
+        - lookup('ansible.builtin.env', 'DVBM_JOB') | default('false', true) | bool
+        - stack_backup_label | length > 0
+        - dvbm_url | length > 0
+        - dvbm_password | length > 0

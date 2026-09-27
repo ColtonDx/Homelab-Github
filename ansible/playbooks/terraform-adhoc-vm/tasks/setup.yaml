@@ -1,5 +1,8 @@
 ---
-# Shared by build-vm.yaml and delete-vm.yaml; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+# Shared by build-vm.yaml and delete-vm.yaml: loads secrets, validates the VMID and Garage endpoint, and initialises the VM's state file
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, KV_PATH, plus GARAGE_URL unless garage_url is passed
+# Vault fields at KV_PATH: GARAGE_ACCESS_KEY, GARAGE_SECRET_KEY, PROXMOX_API_URL, PROXMOX_API_TOKEN_ID, PROXMOX_API_TOKEN_SECRET
+# State file: vm-{vm_id}.tfstate by default; state_key_format (or STATE_KEY_FORMAT) changes it and must contain {vm_id}
 
 - name: Set the Vault connection
   ansible.builtin.set_fact:

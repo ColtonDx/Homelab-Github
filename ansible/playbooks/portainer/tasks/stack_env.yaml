@@ -1,0 +1,79 @@
+---
+# Builds a stack's Portainer env from the inventory and Vault; needs shared_secrets and compose_vars, both set by setup.yaml
+# Inventory: docker_stack_vars applies to every stack, docker_app_vars.<app_name> to one; secrets belong in Vault, not here
+# Lowest to highest precedence: shared KV_PATH, docker_stack_vars, docker_app_vars.<app_name>, kv/<app_name>
+- name: Resolve this app's Vault path and inventory settings
+  ansible.builtin.set_fact:
+    stack_app_kv_path: "{{ vault_app_kv_path | default(app_name, true) }}"
+    stack_inventory_vars: "{{ docker_stack_vars | default({}) | combine((docker_app_vars | default({}))[app_name] | default({})) }}"
+  # A secret put in the inventory by mistake must not reach the log
+  no_log: true
+
+# Secrets belong in Vault, so flag names that look like passwords, keys or tokens
+- name: Warn about secret-looking names in the inventory
+  ansible.builtin.debug:
+    msg: "WARNING: '{{ item }}' is set in the inventory but looks like a secret; move it to Vault"
+  loop: "{{ stack_inventory_vars.keys() | select('search', '(PASSWORD|SECRET|TOKEN|_KEY|APPKEY)$') | list }}"
+
+# An app with no secrets has no path, so the document is optional
+- name: Request this app's whole Vault document, which may not exist
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - { path: "{{ stack_app_kv_path }}", var: stack_app_secrets, required: false }
+
+# Loads it through the repo's common lookup task
+- name: Fetch this app's secrets from Vault
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+
+# Later sources win: the shared path, then the inventory, then the app's own path
+- name: Merge every source for the compose file
+  ansible.builtin.set_fact:
+    stack_values: "{{ shared_secrets | combine(stack_inventory_vars, stack_app_secrets) }}"
+    stack_sources: {}
+  no_log: true
+
+# Mirrors the merge order above, highest precedence first
+- name: Record where each compose variable comes from
+  ansible.builtin.set_fact:
+    stack_sources: "{{ stack_sources | combine({item: source}) }}"
+  loop: "{{ compose_vars }}"
+  vars:
+    source: >-
+      {{ stack_app_kv_path if item in stack_app_secrets
+         else 'inventory' if item in stack_inventory_vars
+         else vault_kv_path if item in shared_secrets
+         else 'MISSING' }}
+
+# Only names are shown, never values
+- name: Report where each compose variable comes from
+  ansible.builtin.debug:
+    msg: "{{ stack_sources }}"
+
+# A stale copy in one place would be silently overridden, so point it out
+- name: Warn about compose vars set in both the inventory and Vault
+  ansible.builtin.debug:
+    msg: "WARNING: '{{ item }}' is set in the inventory and in Vault; using '{{ stack_sources[item] }}'. Remove the stale copy."
+  loop: "{{ compose_vars }}"
+  when:
+    - item in stack_inventory_vars
+    - item in shared_secrets or item in stack_app_secrets
+
+# The stack would start with these empty
+- name: Warn about compose vars not found anywhere
+  ansible.builtin.debug:
+    msg: "WARNING: '{{ item }}' is referenced in compose but not set in the inventory, '{{ stack_app_kv_path }}' or '{{ vault_kv_path }}'"
+  loop: "{{ compose_vars }}"
+  when: item not in stack_values
+
+# Portainer takes the env as a list of name and value pairs
+- name: Build Portainer env list
+  ansible.builtin.set_fact:
+    stack_env: >-
+      {%- set env_list = [] -%}
+      {%- for var in compose_vars -%}
+        {%- if var in stack_values -%}
+          {%- set _ = env_list.append({'name': var, 'value': stack_values[var] | string}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ env_list }}
+  no_log: true

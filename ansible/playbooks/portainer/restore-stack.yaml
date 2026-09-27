@@ -1,0 +1,60 @@
+---
+# Restores a stack's volumes from a DVBMv3 backup; destructive and manual, and leaves the stack stopped so the image can be pinned back first
+# Connection settings and Vault fields are listed in tasks/setup.yaml
+# Required: app_name, portainer_endpoint, dvbm_backup_id (from update-stack.yaml's failure notice), dvbm_restore_confirmed=true
+- name: Restore a Portainer stack's volumes from DVBMv3
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  pre_tasks:
+    # Refuse before touching anything unless the backup and the confirmation are both given
+    - name: Require a backup ID and explicit confirmation
+      ansible.builtin.assert:
+        that:
+          - dvbm_backup_id | default('') | string | length > 0
+          - dvbm_restore_confirmed | default(false) | bool
+        fail_msg: >-
+          Restoring overwrites live volume data. Pass dvbm_backup_id and
+          -e dvbm_restore_confirmed=true once you are sure.
+
+  tasks:
+    # The compose file is not needed to restore, only the environment and stack
+    - name: Prepare the stack
+      ansible.builtin.include_tasks: tasks/setup.yaml
+      vars:
+        stack_reads_compose: false
+
+    # Restoring needs a deployed stack to stop
+    - name: Fail if the stack does not exist
+      ansible.builtin.fail:
+        msg: "Stack '{{ stack_name }}' not found on environment '{{ portainer_endpoint }}'."
+      when: existing_stack == {}
+
+    # Restoring underneath running containers corrupts their state; 409 means it was already stopped
+    - name: Stop the stack before restoring
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/stacks/{{ existing_stack.Id }}/stop?endpointId={{ portainer_endpoint_id }}"
+        method: POST
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+        status_code: [200, 204, 409]
+        validate_certs: "{{ portainer_validate_certs }}"
+      register: stop_result
+
+    # Say which backup is being restored
+    - name: Report stack stopped
+      ansible.builtin.debug:
+        msg: "Stack '{{ stack_name }}' stopped, restoring backup ID {{ dvbm_backup_id }}"
+
+    # Checks the record succeeded, then overwrites the live volumes
+    - name: Restore volumes from DVBMv3
+      ansible.builtin.include_tasks: tasks/dvbm_restore_backup.yaml
+
+    # The stack stays stopped so the old image can be pinned before it starts against the restored data
+    - name: Report next steps
+      ansible.builtin.debug:
+        msg: >-
+          Restore of backup ID {{ dvbm_backup_id }} initiated. Stack '{{ stack_name }}' is left STOPPED on purpose.
+          Pin the compose file back to the previous image, commit, then run deploy-stack.yaml so the old version
+          starts against the restored data.

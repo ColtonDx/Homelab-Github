@@ -1,0 +1,188 @@
+---
+# Updates a deployed stack to newer images: backs it up through DVBMv3, redeploys pulling images, then waits for the containers to be healthy
+# Connection settings and Vault fields are listed in tasks/setup.yaml; this playbook only updates, and deploy-stack.yaml creates stacks
+# Required: app_name, portainer_endpoint; optional: repo_ref, repo_auth, stack_prune, skip_backup, health_timeout (300), health_interval (10)
+# On a failed health check it redeploys rollback_ref when given; images already pulled are not rolled back, so data recovery is restore-stack.yaml with the backup ID
+- name: Update a Portainer stack with a backup and health gate
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    health_timeout: 300
+    health_interval: 10
+
+  tasks:
+    # Validates inputs, loads credentials, reads the compose file and finds the environment and stack
+    - name: Prepare the stack
+      ansible.builtin.include_tasks: tasks/setup.yaml
+
+    # Creating stacks is deploy-stack.yaml's job
+    - name: Fail if the stack is not already deployed
+      ansible.builtin.fail:
+        msg: >-
+          Stack '{{ stack_name }}' does not exist on environment '{{ portainer_endpoint }}'.
+          Deploy it first with ansible/playbooks/portainer/deploy-stack.yaml.
+      when: existing_stack == {}
+
+    # The redeploy re-sends the env, so rebuild it from the inventory and Vault
+    - name: Build the stack env from the inventory and Vault
+      ansible.builtin.include_tasks: tasks/stack_env.yaml
+
+    # A failed backup fails the play here, before anything changes
+    - name: Run pre-upgrade DVBMv3 backup
+      ansible.builtin.include_tasks: tasks/dvbm_run_backup.yaml
+      vars:
+        dvbm_backup_name: "{{ stack_backup_label }}"
+      when:
+        - not (skip_backup | default(false) | bool)
+        - stack_backup_label | length > 0
+        - dvbm_url | length > 0
+        - dvbm_password | length > 0
+
+    # Make it obvious in the log when there is nothing to restore from
+    - name: Warn when the update proceeds without a backup
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: proceeding without a pre-upgrade backup
+          ({{ 'skip_backup=true' if skip_backup | default(false) | bool
+              else ('no Backup label in the compose file' if stack_backup_label | length == 0 else 'DVBMv3 not configured') }}).
+      when: dvbm_backup_id is not defined
+
+    # Always pulls images, which is the point of an update; the body carries env values, so it is hidden
+    - name: Redeploy stack from the repository
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/stacks/{{ existing_stack.Id }}/git/redeploy?endpointId={{ portainer_endpoint_id }}"
+        method: PUT
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          repositoryReferenceName: "{{ repo_ref | default('refs/heads/main') }}"
+          repositoryAuthentication: "{{ repo_auth | default(false) | bool }}"
+          repositoryUsername: "{{ repo_username | default('') }}"
+          repositoryPassword: "{{ repo_password | default('') }}"
+          env: "{{ stack_env }}"
+          prune: "{{ stack_prune | default(false) | bool }}"
+          pullImage: true
+        validate_certs: "{{ portainer_validate_certs }}"
+        status_code: [-1, 200, 400, 401, 403, 404, 409, 500]
+      register: update_result
+      no_log: true
+
+    # Report the outcome without the request body
+    - name: Check the stack was redeployed
+      ansible.builtin.assert:
+        that:
+          - update_result.status == 200
+        fail_msg: "Portainer refused to redeploy the stack ({{ update_result.status }}): {{ update_result.json.message | default(update_result.json.details | default(update_result.msg | default('no details'))) }}"
+        success_msg: "Stack '{{ stack_name }}' redeployed with newer images, checking health"
+
+    # A timeout is caught below rather than failing the play, so the failure path can run
+    - name: Wait for stack containers to become healthy
+      block:
+        # Healthy means running and not reporting an unhealthy or still-starting healthcheck
+        - name: Poll container state
+          ansible.builtin.uri:
+            url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/json?all=true"
+            method: GET
+            headers:
+              X-API-Key: "{{ portainer_token }}"
+            status_code: 200
+            validate_certs: "{{ portainer_validate_certs }}"
+          register: container_state
+          retries: "{{ ((health_timeout | int) / (health_interval | int)) | round(0, 'ceil') | int }}"
+          delay: "{{ health_interval | int }}"
+          until: >-
+            stack_containers | length > 0 and
+            (stack_containers | map('regex_replace', '^', '/') | list
+             | difference(
+                 container_state.json
+                 | selectattr('State', 'equalto', 'running')
+                 | rejectattr('Status', 'search', '(unhealthy)')
+                 | rejectattr('Status', 'search', 'health: starting')
+                 | map(attribute='Names') | flatten | list
+               ) | length == 0)
+
+        # Every container with a container_name is up
+        - name: Record a healthy stack
+          ansible.builtin.set_fact:
+            update_healthy: true
+
+      rescue:
+        # The health gate timed out
+        - name: Record an unhealthy stack
+          ansible.builtin.set_fact:
+            update_healthy: false
+
+        # Say how long it waited before giving up
+        - name: Report unhealthy stack
+          ansible.builtin.debug:
+            msg: "Stack '{{ stack_name }}' did not become healthy within {{ health_timeout }}s."
+
+    # Only runs when the health gate did not pass
+    - name: Handle a failed update
+      when: not (update_healthy | default(false) | bool)
+      block:
+        # Only reverts compose changes, so it runs only when a known-good ref is named; its outcome is reported in the notice
+        - name: Redeploy the named rollback ref
+          ansible.builtin.uri:
+            url: "{{ portainer_url }}/api/stacks/{{ existing_stack.Id }}/git/redeploy?endpointId={{ portainer_endpoint_id }}"
+            method: PUT
+            headers:
+              X-API-Key: "{{ portainer_token }}"
+              Content-Type: application/json
+            body_format: json
+            body:
+              repositoryReferenceName: "{{ rollback_ref }}"
+              repositoryAuthentication: "{{ repo_auth | default(false) | bool }}"
+              repositoryUsername: "{{ repo_username | default('') }}"
+              repositoryPassword: "{{ repo_password | default('') }}"
+              env: "{{ stack_env }}"
+              prune: "{{ stack_prune | default(false) | bool }}"
+              pullImage: false
+            validate_certs: "{{ portainer_validate_certs }}"
+            status_code: [-1, 200, 400, 401, 403, 404, 409, 500]
+          register: rollback_result
+          when: rollback_ref | default('') | length > 0
+          no_log: true
+
+        # Say exactly what was and was not rolled back, and how to restore the data
+        - name: Notify the failed update via ntfy
+          ansible.builtin.include_tasks: ../../tasks/ntfy_notify.yaml
+          vars:
+            ntfy_title: "Stack update failed: {{ stack_name }}"
+            ntfy_priority: urgent
+            ntfy_tags: "rotating_light"
+            ntfy_message: >-
+              Stack '{{ stack_name }}' failed its health check after an image update.
+              {% if rollback_ref | default('') | length > 0 %}Redeployed {{ rollback_ref }}
+              ({{ 'ok' if rollback_result.status | default(0) == 200 else 'failed, status ' ~ rollback_result.status | default('none') }}); the newer images stay pulled.
+              {% else %}No rollback_ref was given, so nothing was redeployed.{% endif %}
+              {% if dvbm_backup_id is defined %}To restore the data, pin the previous image in the compose file, then run
+              ansible/playbooks/portainer/restore-stack.yaml -e app_name={{ app_name }} -e portainer_endpoint={{ portainer_endpoint }}
+              -e dvbm_backup_id={{ dvbm_backup_id }} -e dvbm_restore_confirmed=true{% else %}No pre-upgrade backup was taken.{% endif %}
+          when: ntfy_url | length > 0
+
+        # Report the failure to Semaphore after the notice is sent
+        - name: Fail the play after a failed update
+          ansible.builtin.fail:
+            msg: >-
+              Stack '{{ stack_name }}' failed its health check.
+              {{ ('Redeployed ' ~ rollback_ref ~ '.') if rollback_ref | default('') | length > 0 else 'Nothing was rolled back.' }}
+              {{ ('Pre-upgrade backup ID: ' ~ dvbm_backup_id ~ '.') if dvbm_backup_id is defined else '' }}
+
+    # Confirm success, with the backup ID in case a problem shows up later
+    - name: Notify successful update via ntfy
+      ansible.builtin.include_tasks: ../../tasks/ntfy_notify.yaml
+      vars:
+        ntfy_title: "Stack updated: {{ stack_name }}"
+        ntfy_priority: low
+        ntfy_tags: "white_check_mark"
+        ntfy_message: >-
+          Stack '{{ stack_name }}' updated and healthy ({{ stack_containers | join(', ') }}).
+          {{ ('Pre-upgrade backup ID: ' ~ dvbm_backup_id ~ '.') if dvbm_backup_id is defined else '' }}
+      when:
+        - update_healthy | default(false) | bool
+        - ntfy_url | length > 0

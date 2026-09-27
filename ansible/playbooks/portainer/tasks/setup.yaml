@@ -1,0 +1,164 @@
+---
+# Shared by deploy-stack, update-stack and restore-stack: validates inputs, loads credentials, reads the compose file, and finds the environment and stack
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, KV_PATH, PORTAINER_URL; optional NPM_URL, DVBM_URL, NTFY_URL
+# Vault fields at KV_PATH: PORTAINER_TOKEN, plus NPM_USER, NPM_PASSWORD and DVBM3_PASSWORD when those services are used
+# Inputs: app_name and portainer_endpoint; compose_root (default docker); stack_reads_compose (default true); repo_auth with vault_repo_path for a private repo
+
+# Read the connection settings once, so every playbook uses the same names
+- name: Read the connection settings from the environment
+  ansible.builtin.set_fact:
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+    vault_kv_path: "{{ lookup('ansible.builtin.env', 'KV_PATH') }}"
+    portainer_url: "{{ lookup('ansible.builtin.env', 'PORTAINER_URL') | regex_replace('/+$', '') }}"
+    npm_url: "{{ lookup('ansible.builtin.env', 'NPM_URL') | regex_replace('/+$', '') }}"
+    dvbm_url: "{{ lookup('ansible.builtin.env', 'DVBM_URL') | regex_replace('/+$', '') }}"
+    ntfy_url: "{{ lookup('ansible.builtin.env', 'NTFY_URL') }}"
+    portainer_validate_certs: "{{ validate_certs | default(true) }}"
+    stack_name: "{{ app_name | default('') }}"
+    stack_compose_path: "{{ compose_root | default('docker') }}/{{ app_name | default('') }}/docker-compose.yaml"
+  no_log: true
+
+# Stop before calling anything when the connection or the stack is not identified
+- name: Validate the shared inputs
+  ansible.builtin.assert:
+    that:
+      - vault_addr | length > 0
+      - vault_token | length > 0
+      - vault_kv_path | length > 0
+      - portainer_url | length > 0
+      - app_name | default('') | length > 0
+      - portainer_endpoint | default('') | length > 0
+    fail_msg: >-
+      Set VAULT_ADDR, VAULT_TOKEN, KV_PATH and PORTAINER_URL in the environment,
+      and pass app_name and portainer_endpoint.
+
+# Restore does not need the compose file, so it can skip this
+- name: Read the compose file
+  when: stack_reads_compose | default(true) | bool
+  block:
+    # The repository is checked out next to this playbook, so the compose file can be read locally
+    - name: Check the compose file exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../../{{ stack_compose_path }}"
+      register: stack_compose_stat
+
+    # Name the path that was tried, so a typo in app_name is obvious
+    - name: Fail when the compose file is missing
+      ansible.builtin.fail:
+        msg: "No compose file at {{ stack_compose_path }}; check app_name."
+      when: not stack_compose_stat.stat.exists
+
+    # Holds the compose file's text for variable and label discovery
+    - name: Load the compose file
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../../{{ stack_compose_path }}"
+      register: stack_compose_raw
+
+    # Plain ${VAR} references are looked up in the inventory and Vault; ${VAR:-default} ones use their default
+    - name: Find the variables the compose file uses
+      ansible.builtin.set_fact:
+        compose_vars: "{{ compose_text | regex_findall('\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}') | unique | sort }}"
+        stack_containers: "{{ services | dict2items | map(attribute='value') | map(attribute='container_name', default='') | select | list }}"
+        stack_proxy_container: ""
+        stack_proxy_port: ""
+        stack_backup_label: ""
+      vars:
+        compose_text: "{{ stack_compose_raw.content | b64decode }}"
+        services: "{{ (compose_text | from_yaml).services | default({}) }}"
+
+    # AppPort marks the service the reverse proxy points at, and Backup names the DVBM job; the last one found wins
+    - name: Read the AppPort and Backup labels
+      ansible.builtin.set_fact:
+        stack_proxy_container: "{{ (item.value.container_name | default(item.key)) if app_port | length > 0 else stack_proxy_container }}"
+        stack_proxy_port: "{{ app_port if app_port | length > 0 else stack_proxy_port }}"
+        stack_backup_label: "{{ backup | default(stack_backup_label, true) }}"
+      loop: "{{ ((stack_compose_raw.content | b64decode | from_yaml).services | default({})) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        labels: "{{ item.value.labels | default([]) }}"
+        app_port: "{{ labels | select('match', '^AppPort=') | map('regex_replace', '^AppPort=([^/]*).*$', '\\1') | first | default('') }}"
+        backup: "{{ labels | select('match', '^Backup=') | map('regex_replace', '^Backup=', '') | first | default('') }}"
+
+# The whole shared document, so stack_env.yaml can fall back to it for compose variables
+- name: Request the shared Vault document
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - { path: "{{ vault_kv_path }}", var: shared_secrets }
+
+# Loads the shared document through the repo's common lookup task
+- name: Load the shared secrets from Vault
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+
+# Credentials for Portainer, and for NPM and DVBM when those fields exist
+- name: Set the service credentials
+  ansible.builtin.set_fact:
+    portainer_token: "{{ shared_secrets.PORTAINER_TOKEN | default('') }}"
+    npm_user: "{{ shared_secrets.NPM_USER | default('') }}"
+    npm_password: "{{ shared_secrets.NPM_PASSWORD | default('') }}"
+    dvbm_password: "{{ shared_secrets.DVBM3_PASSWORD | default('') }}"
+  no_log: true
+
+# Without the Portainer token nothing else can run
+- name: Require the Portainer API token
+  ansible.builtin.assert:
+    that:
+      - portainer_token | length > 0
+    fail_msg: "PORTAINER_TOKEN is missing from {{ vault_kv_path }} in Vault."
+
+# A private repository needs credentials for Portainer to clone it
+- name: Request the repository credentials from Vault
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - { path: "{{ vault_repo_path | default(vault_kv_path) }}", field: "{{ vault_repo_username_field | default('username') }}", var: repo_username }
+      - { path: "{{ vault_repo_path | default(vault_kv_path) }}", field: "{{ vault_repo_password_field | default('password') }}", var: repo_password }
+  when: repo_auth | default(false) | bool
+
+# Only runs for a private repository
+- name: Load the repository credentials
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+  when: repo_auth | default(false) | bool
+
+# Portainer identifies environments by ID, so look up the one named in portainer_endpoint
+- name: Get the Portainer environments
+  ansible.builtin.uri:
+    url: "{{ portainer_url }}/api/endpoints"
+    method: GET
+    headers:
+      X-API-Key: "{{ portainer_token }}"
+    status_code: 200
+    validate_certs: "{{ portainer_validate_certs }}"
+  register: portainer_endpoints
+
+# Empty when no environment has that name, which the next task reports
+- name: Resolve the environment ID from its name
+  ansible.builtin.set_fact:
+    portainer_endpoint_id: >-
+      {{ portainer_endpoints.json | selectattr('Name', 'equalto', portainer_endpoint)
+         | map(attribute='Id') | first | default('') }}
+
+# List the real names so a typo is easy to fix
+- name: Fail when the environment does not exist
+  ansible.builtin.fail:
+    msg: "Portainer environment '{{ portainer_endpoint }}' not found. Available: {{ portainer_endpoints.json | map(attribute='Name') | list }}"
+  when: portainer_endpoint_id | string | length == 0
+
+# Stacks are matched by name within the chosen environment
+- name: Get the Portainer stacks
+  ansible.builtin.uri:
+    url: "{{ portainer_url }}/api/stacks"
+    method: GET
+    headers:
+      X-API-Key: "{{ portainer_token }}"
+    status_code: 200
+    validate_certs: "{{ portainer_validate_certs }}"
+  register: portainer_stacks
+
+# Empty when the stack has not been deployed to this environment yet
+- name: Find the stack by name and environment
+  ansible.builtin.set_fact:
+    existing_stack: >-
+      {{ portainer_stacks.json | selectattr('Name', 'equalto', stack_name)
+         | selectattr('EndpointId', 'equalto', portainer_endpoint_id | int) | list | first | default({}) }}

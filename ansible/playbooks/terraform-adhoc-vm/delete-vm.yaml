@@ -1,5 +1,6 @@
 ---
-# Destroys the VM recorded in the state for the given VMID; inputs are listed in terraform/proxmox/adhoc-vm/README.md
+# Destroys the VM recorded in the state for the given VMID; needs only vm_id, plus the shared inputs listed in tasks/setup.yaml
+# Fails rather than reporting success when no state exists for that VMID, which usually means a typo or a changed state_key_format
 - name: Delete an ad-hoc Proxmox VM
   hosts: localhost
   connection: local

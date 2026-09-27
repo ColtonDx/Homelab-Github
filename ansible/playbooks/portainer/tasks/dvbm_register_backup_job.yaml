@@ -1,0 +1,77 @@
+---
+# Creates a DVBMv3 backup job for a stack's Backup label, unless a job of that name already exists
+# Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_storage_id, dvbm_schedule_id, dvbm_retention_id, dvbm_validate_certs (default false)
+
+# Log in with the app password to get a bearer token
+- name: Authenticate with DVBMv3
+  ansible.builtin.uri:
+    url: "{{ dvbm_url }}/api/auth/login"
+    method: POST
+    body_format: json
+    body:
+      password: "{{ dvbm_password }}"
+    status_code: 200
+    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+  register: dvbm_auth
+  retries: 5
+  delay: 3
+  until: dvbm_auth is not failed
+  no_log: true
+
+# Kept for the API calls below
+- name: Set DVBMv3 bearer token fact
+  ansible.builtin.set_fact:
+    dvbm_token: "{{ dvbm_auth.json.token }}"
+  no_log: true
+
+# Jobs are matched by name, which is the Backup label value
+- name: Get all existing DVBMv3 backup jobs
+  ansible.builtin.uri:
+    url: "{{ dvbm_url }}/api/jobs"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ dvbm_token }}"
+    status_code: 200
+    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+  register: dvbm_jobs
+
+# Empty when this stack has no job yet
+- name: Find existing job matching Backup label value
+  ansible.builtin.set_fact:
+    dvbm_existing_job: >-
+      {{ dvbm_jobs.json | selectattr('name', 'equalto', dvbm_backup_name) | list | first | default({}) }}
+
+# Say whether a job will be created
+- name: Show backup job status
+  ansible.builtin.debug:
+    msg: >-
+      DVBMv3 backup job '{{ dvbm_backup_name }}':
+      {{ ('already exists (ID: ' ~ dvbm_existing_job.id ~ '), skipping') if dvbm_existing_job else 'does not exist, will create' }}
+
+# The job backs up every volume of containers carrying this Backup label
+- name: Create backup job in DVBMv3
+  ansible.builtin.uri:
+    url: "{{ dvbm_url }}/api/jobs"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ dvbm_token }}"
+      Content-Type: application/json
+    body_format: json
+    body: >-
+      {{
+        {'name': dvbm_backup_name, 'label_key': 'Backup', 'label_value': dvbm_backup_name, 'enabled': true}
+        | combine({'storage_id': dvbm_storage_id} if dvbm_storage_id is defined else {})
+        | combine({'schedule_id': dvbm_schedule_id} if dvbm_schedule_id is defined else {})
+        | combine({'retention_id': dvbm_retention_id} if dvbm_retention_id is defined else {})
+      }}
+    status_code: 201
+    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+  register: dvbm_create_result
+  when: dvbm_existing_job == {}
+  no_log: true
+
+# Report the new job's ID
+- name: Report backup job creation
+  ansible.builtin.debug:
+    msg: "DVBMv3 backup job '{{ dvbm_backup_name }}' created (ID: {{ dvbm_create_result.json.id }})"
+  when: dvbm_existing_job == {}
