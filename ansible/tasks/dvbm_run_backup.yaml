@@ -51,7 +51,7 @@
     dvbm_run_job: >-
       {{ dvbm_run_jobs.json | selectattr('name', 'equalto', dvbm_backup_name) | list | first | default({}) }}
 
-# The deploy playbook registers the job, so it should always exist for a deployed stack
+# deploy-stack.yaml registers the job only when run with DVBM_JOB=true, so it can be missing
 - name: Fail if no matching backup job exists
   ansible.builtin.fail:
     msg: >-
@@ -113,7 +113,7 @@
   ansible.builtin.set_fact:
     dvbm_backup_record: "{{ dvbm_poll.json | first }}"
 
-# A failed backup stops the play, so update-stack.yaml never updates without one
+# A failed backup stops the play, so update-stack.yaml never updates after a failed backup
 - name: Fail if the backup did not succeed
   ansible.builtin.fail:
     msg: >-

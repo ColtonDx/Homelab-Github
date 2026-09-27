@@ -1,4 +1,4 @@
-# The last applied inputs, read back by ansible/tasks/adhoc_vm_build.yaml so blank fields on a re-run keep their current value
+# The last applied inputs, read back by ansible/playbooks/terraform-adhoc-vm/tasks/setup.yaml so blank fields on a re-run keep their current value
 output "vm_name" {
   value = var.vm_name
 }

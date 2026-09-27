@@ -1,4 +1,4 @@
-# Copy to terraform.tfvars (gitignored) and fill in; Proxmox credentials come from TF_VAR_* environment variables instead
+# For a direct Terraform run, copy to terraform.tfvars (gitignored) and fill in; build-project.yaml reads these from the inventory instead; Proxmox credentials come from TF_VAR_* environment variables instead
 target_node   = "pve-node-1"
 template_name = "ubuntu-cloud-template"
 storage_pool  = "local-zfs"

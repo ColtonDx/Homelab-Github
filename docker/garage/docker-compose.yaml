@@ -12,8 +12,7 @@ services:
       - data:/var/lib/garage
       - etc:/etc
     labels:
-      - "Backup=Garage" # Sets the DVBM Backup Job Label
-      - "AppPort=3903" # Sets the Application Port for the Reverse Proxy Job
+      - "Backup=garage" # Sets the DVBM Backup Job Label
 
   webui:
     container_name: garage-webui
@@ -28,7 +27,7 @@ services:
       # TrueNAS path to the etc volume's garage.toml; change for other hosts
       - /mnt/.ix-apps/docker/volumes/garage_etc/_data/garage.toml:/etc/garage.toml:ro
     labels:
-      - "Backup=Garage" # Sets the DVBM Backup Job Label
+      - "Backup=garage" # Sets the DVBM Backup Job Label
       - "AppPort=3909" # Sets the Application Port for the Reverse Proxy Job
 
 

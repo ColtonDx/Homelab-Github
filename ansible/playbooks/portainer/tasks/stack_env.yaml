@@ -2,7 +2,7 @@
 # Builds a stack's Portainer env from the inventory and the app's own Vault path; needs compose_vars, set by setup.yaml
 # Inventory: docker_stack_vars applies to every stack, docker_app_vars.<app_name> to one; secrets belong in Vault, not here
 # Lowest to highest precedence: docker_stack_vars, docker_app_vars.<app_name>, the app's Vault path
-# The Vault path is the app name; docker_app_vault_paths in the inventory can map an app elsewhere
+# The Vault path is the app name; docker_app_vault_paths in the inventory remaps it, and vault_app_kv_path overrides both
 - name: Resolve this app's Vault path and inventory settings
   ansible.builtin.set_fact:
     stack_app_kv_path: >-

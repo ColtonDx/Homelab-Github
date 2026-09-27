@@ -1,7 +1,7 @@
 # Builds the HashiCorp Vault VM on Proxmox from a cloud-init template; ansible/playbooks/tls/vault-tls.yaml issues its certificate afterwards
-# Environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage; TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id, TF_VAR_proxmox_api_token_secret
-# Site values go in terraform.tfvars (gitignored); terraform.tfvars.example lists them
-# Rebuilding while Vault is down: build-project.yaml with tf_backend=local and the Proxmox credentials in tf_vars from a file (-e @file)
+# Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
+# A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
+# Rebuilding while Vault is down: build-project.yaml with tf_backend=local, the Proxmox credentials in tf_vars from a file (-e @file), and ip_address and ip_prefix set so NetBox is not needed
 # Adopting an existing VM instead of building one: terraform import proxmox_vm_qemu.vault <target_node>/qemu/<vm_id>
 
 terraform {

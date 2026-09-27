@@ -3,6 +3,7 @@
 # Each vault_secrets entry needs var (the fact to set) and path (the Vault secret), plus optionally field (omit for the whole document)
 # inventory names an inventory variable used before Vault; an entry with only inventory never reads Vault
 # required defaults to true; default is the value used when an optional entry is missing
+# Needs facts vault_addr and vault_token; vault_kv_mount sets the KV2 mount (default secret)
 
 # Check the caller passed a usable list of entries
 - name: Ensure Vault secret list is provided

@@ -1,6 +1,7 @@
 ---
 # Issues and renews Kasm Workspaces' TLS certificate with acme.sh and installs it into Kasm's nginx; run after deployment/app-kasm.yaml; safe to re-run
 # Inventory: kasm_domain (required); Vault fields at cloudflare: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; vault_cloudflare_path renames the cloudflare path
 # Kasm has no reload, so renewals restart its services, a brief interruption for connected sessions
 - name: Configure Kasm TLS certificate
   hosts: kasm

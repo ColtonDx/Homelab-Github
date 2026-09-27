@@ -1,7 +1,7 @@
 services:
   postgres:
     hostname: postgres
-    container_name: postgres
+    container_name: semaphore-postgres
     restart: unless-stopped
     image: postgres:14
     networks:
@@ -13,7 +13,7 @@ services:
     volumes:
       - postgres:/var/lib/postgresql/data
     labels:
-      - "Backup=Semaphore" # Sets the DVBM Backup Job Label
+      - "Backup=semaphore" # Sets the DVBM Backup Job Label
 
   semaphore:
     container_name: semaphore
@@ -43,13 +43,13 @@ services:
 #      SEMAPHORE_LDAP_HOST: dc01.local.example.com
 #      SEMAPHORE_LDAP_PORT: '636'
 #      SEMAPHORE_LDAP_NEEDTLS: 'yes'
-#      SEMAPHORE_LDAP_DN_BIND: 'uid=bind_user,cn=users,cn=accounts,dc=local,dc=shiftsystems,dc=net'
+#      SEMAPHORE_LDAP_DN_BIND: 'uid=bind_user,cn=users,cn=accounts,dc=local,dc=example,dc=com'
 #      SEMAPHORE_LDAP_PASSWORD: 'ldap_bind_account_password'
 #      SEMAPHORE_LDAP_DN_SEARCH: 'dc=local,dc=example,dc=com'
 #      SEMAPHORE_LDAP_SEARCH_FILTER: "(&(uid=%s)(memberOf=cn=ipausers,cn=groups,cn=accounts,dc=local,dc=example,dc=com))"
       TZ: UTC
     labels:
-      - "Backup=Semaphore" # Sets the DVBM Backup Job Label
+      - "Backup=semaphore" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
 
 volumes:

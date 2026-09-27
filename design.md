@@ -14,7 +14,7 @@ Core services must never depend on the platforms they are responsible for deploy
 The same rule applies to the foundation beneath them:
 
 - **Proxmox** hosts the VMs for GitLab, Vault and the Kubernetes nodes. It is installed directly on the hardware and needs nothing it hosts in order to boot or run, so it can be recovered before anything else.
-- **OPNsense** provides routing, VLANs and DNS for every other service. Ansible manages its configuration, but the firewall runs independently of that automation, so the network stays up even when everything that configures it is down.
+- **OPNsense** provides routing, VLANs and DNS for every other service. Ansible is planned to manage its configuration, but the firewall runs independently of that automation, so the network stays up even when everything that configures it is down.
 - **TrueNAS** provides storage and hosts the Docker services. Those services are deployed from GitLab and Vault, so they sit above the core rather than inside it. TrueNAS itself must never rely on them to operate.
 
 ## Backups
@@ -26,14 +26,16 @@ Every layer is backed up independently, so any application, VM or host can be re
 | Layer | What | How |
 |---|---|---|
 | Application | Docker Apps | Volume-level backups via Docker Volume Backup Manager |
-| Application | VM Apps | Each application's native backup tool, run by Ansible. Where the native tool omits configuration or secrets, Ansible backs those up alongside it. Examples: KASM, Gitlab, Hashicorp Vault |
+| Application | VM Apps | Each application's native backup tool, run by Ansible. Where the native tool omits configuration or secrets, Ansible backs those up alongside it. Built so far: Plex, and GitLab's configuration; planned: GitLab's data, KASM, Hashicorp Vault |
 | Application | Kubernetes Apps | Persistent Volume Claims backed up via Longhorn |
-| Configuration | Appliances: devices whose state is defined by their configuration rather than by an operating system, whether physical or virtual (OPNsense, Brocade switches, TrueNAS) | Each appliance's native configuration export |
+| Configuration | Appliances: devices whose state is defined by their configuration rather than by an operating system, whether physical or virtual (OPNsense, Brocade switches, TrueNAS) | Each appliance's native configuration export (planned) |
 | Hypervisor | Proxmox Virtual Machines | Proxmox VM backups |
 
 ## Replication
 
-| Datasets | TrueNAS Replicates Datasets to a an Offsite instance. |
+| What | How |
+|---|---|
+| Datasets | TrueNAS Replicates Datasets to an Offsite instance. |
 | S3 | Garage Replicates across the cluster (Offsite) |
 | PVC | Persistent Volume Claims are Replicated Across all Talos nodes |
 | etcd | All three control-plane nodes replicate etcd. |
@@ -49,14 +51,14 @@ Every layer is backed up independently, so any application, VM or host can be re
 Backups run daily.
 
 # Terraform
-Terraform will be used to provision resources. Where things are done dynamically, Ansible may call Terraform in order to inject secrets and variables at runtime.
+Terraform is used to provision resources. Where things are done dynamically, Ansible may call Terraform in order to inject secrets and variables at runtime.
 
-Terraform state will be stored in S3, hosted by Garage, which is run as a Cluster, with each Garage container running on a different TrueNAS Scale instance.
+Terraform state is stored in S3, hosted by Garage, which is planned to run as a Cluster, with each Garage container running on a different TrueNAS Scale instance.
 
 # Secrets
 All code in the Repo will use Vars for Non-sensitive PII, that will be read from my Inventory (not in this repo), and then secrets are stored in Hashicorp Vault per-application and read by the task var_lookup.yaml.
 
-Each Application has its own secret store in the Vault.
+Each Application, and each shared service credential such as Proxmox, Garage or Cloudflare, has its own path in the Vault.
 
 # Inventory
 

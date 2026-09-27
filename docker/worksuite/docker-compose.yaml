@@ -14,7 +14,7 @@ services:
       - data:/data
 #      - app:/app/app
     labels:
-      - "Backup=Worksuite" # Sets the DVBM Backup Job Label
+      - "Backup=worksuite" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
 
 volumes:

@@ -3,7 +3,8 @@
 # Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, or apply)
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
-# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL for the s3 backend; NETBOX_URL only when a lookup needs NetBox
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL (or garage_url) for the s3 backend; NETBOX_URL only when a lookup needs NetBox
+# Vault: GARAGE_ACCESS_KEY and GARAGE_SECRET_KEY at garage for the s3 backend (vault_garage_path renames it), NETBOX_TOKEN at netbox when a lookup runs
 - name: Build a Terraform project
   hosts: localhost
   connection: local
@@ -91,7 +92,7 @@
           {{ (lookup('ansible.builtin.vars', tf_sources.inventory, default={}) if tf_sources.inventory is defined else {})
              | dict2items | selectattr('key', 'in', tf_declared) | items2dict }}
 
-    # NetBox is only asked for variables no override or inventory value covers, so GitLab never needs it when its IP is set
+    # NetBox is only asked for variables no override or inventory value covers, so a project whose inventory sets them never needs it
     - name: Start with no NetBox lookups
       ansible.builtin.set_fact:
         netbox_lookups: []

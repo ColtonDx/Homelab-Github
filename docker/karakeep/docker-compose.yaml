@@ -12,7 +12,7 @@ services:
       BROWSER_WEB_URL: http://chrome:9222
       # OPENAI_API_KEY: ...
       # You almost never want to change the value of the DATA_DIR variable.
-      # If you want to mount a custom directory, change the volume mapping above instead.
+      # If you want to mount a custom directory, change the volume mapping below instead.
       DATA_DIR: /data # DON'T CHANGE THIS
       MEILI_ADDR: http://meilisearch:7700
       MEILI_MASTER_KEY: ${KARAKEEP_MELLI_KEY}
@@ -22,11 +22,11 @@ services:
     volumes:
       - data:/data
     labels:
-      - "Backup=Karakeep" # Sets the DVBM Backup Job Label
+      - "Backup=karakeep" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
 
   chrome:
-    container_name: chrome
+    container_name: karakeep-chrome
     restart: unless-stopped
     image: ghcr.io/karakeep-app/karakeep-chrome:release
     init: true
@@ -40,10 +40,10 @@ services:
 #      - --remote-debugging-port=9222
       - --hide-scrollbars
     labels:
-      - "Backup=Karakeep" # Sets the DVBM Backup Job Label
+      - "Backup=karakeep" # Sets the DVBM Backup Job Label
 
   meilisearch:
-    container_name: meilisearch
+    container_name: karakeep-meilisearch
     restart: unless-stopped
     image: getmeili/meilisearch:v1.13.3
     networks:
@@ -58,7 +58,7 @@ services:
     volumes:
       - meilisearch:/meili_data
     labels:
-      - "Backup=Karakeep" # Sets the DVBM Backup Job Label
+      - "Backup=karakeep" # Sets the DVBM Backup Job Label
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

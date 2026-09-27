@@ -3,7 +3,7 @@
 # Connection settings and Vault fields are listed in tasks/setup.yaml; env value sources are listed in tasks/stack_env.yaml
 # Required: app_name, portainer_endpoint, repo_url (the repository Portainer clones)
 # Optional: repo_ref (default refs/heads/main), repo_auth with vault_repo_path, stack_prune (default false), stack_pull_image (default true)
-# Optional: npm_add_proxy with npm_domain to register the AppPort container in NPM; DVBM_JOB=true in the environment to register the Backup label's job
+# Optional: npm_add_proxy with npm_domain to register the AppPort container in NPM (over AppScheme, default http); DVBM_JOB=true in the environment to register the Backup label's job
 - name: Deploy a Docker stack to Portainer
   hosts: localhost
   connection: local
@@ -102,12 +102,13 @@
         success_msg: "Stack '{{ stack_name }}' redeployed (ID: {{ existing_stack.Id }})"
       when: existing_stack != {}
 
-    # Points NPM at the container carrying the AppPort label
+    # Points NPM at the container carrying the AppPort label, over the scheme its AppScheme label sets
     - name: Register proxy host in Nginx Proxy Manager
       ansible.builtin.include_tasks: tasks/npm_add_proxy_host.yaml
       vars:
         npm_forward_host: "{{ stack_proxy_container }}"
         npm_forward_port: "{{ stack_proxy_port }}"
+        npm_forward_scheme: "{{ stack_proxy_scheme }}"
       when:
         - npm_add_proxy | default(false) | bool
         - stack_proxy_container | length > 0

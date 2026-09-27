@@ -9,7 +9,7 @@ services:
       - data:/data
     command: "*.zim"
     labels:
-      - "Backup=Kiwix" # Sets the DVBM Backup Job Label
+      - "Backup=kiwix" # Sets the DVBM Backup Job Label
       - "AppPort=8080" # Sets the Application Port for the Reverse Proxy Job
 
 networks:

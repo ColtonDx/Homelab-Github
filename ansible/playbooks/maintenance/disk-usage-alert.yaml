@@ -32,7 +32,7 @@
         disk_checked: "{{ disk_df is not unreachable and disk_df.stdout_lines | default([]) | length > 1 }}"
         disk_flagged: []
 
-    # Each filesystem at or over its warning threshold, marked critical over its critical one; a mount's own limits beat the host's
+    # Each filesystem at or over its warning threshold, marked critical at or over its critical one; a mount's own limits beat the host's
     - name: Flag filesystems approaching full
       ansible.builtin.set_fact:
         disk_flagged: >-
@@ -76,7 +76,7 @@
           ansible.builtin.set_fact:
             disk_post: "{{ disk_alerts | length > 0 or disk_unchecked | length > 0 or disk_report_ok | default(false) | bool }}"
 
-        # Names only, so the run log shows the outcome even when nothing is posted
+        # Counts only, so the run log shows the outcome even when nothing is posted
         - name: Report the result
           ansible.builtin.debug:
             msg: >-

@@ -2,7 +2,7 @@
 # Looks values up in NetBox into facts; the NetBox counterpart of var_lookup.yaml
 # Each netbox_lookups entry needs var (the fact to set), find (ip or prefix_length) and dns_name (the address to match)
 # ip is the address without its prefix, prefix_length its prefix as a number; netbox_values also holds every result by var
-# Needs NETBOX_URL (or netbox_url) and NETBOX_TOKEN at the netbox Vault path (vault_netbox_path renames it, netbox_token skips Vault)
+# Needs NETBOX_URL (or netbox_url), plus vault_addr and vault_token to read NETBOX_TOKEN from the netbox path (vault_netbox_path renames it, netbox_token skips Vault); validate_certs defaults to true
 
 # Check the caller passed a usable list of entries before anything is fetched
 - name: Ensure the NetBox lookup list is usable

@@ -1,6 +1,6 @@
 services:
   docker-volume-backup-manager:
-    container_name: docker-volume-backup-manager
+    container_name: dvbmv3
     restart: unless-stopped
     image: coltondx/docker-volume-backup-manager-v3:latest
     networks:
@@ -24,8 +24,7 @@ services:
       # ── HTTPS / TLS ───────────────────────────────────────────────────────
       # Enabled by default. A self-signed cert is generated on first start
       # and stored in /data/certs (persisted in the data volume).
-      # Access the UI at https://localhost:8000 and accept the cert warning,
-      # or import /data/certs/cert.pem into your OS/browser trust store.
+      # No ports are published, so reach the UI through the reverse proxy with scheme https to port 8000
       #
       # Disable TLS (plain HTTP):
       # - SSL_ENABLED=false
@@ -38,16 +37,19 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Persistent data (SQLite database + auto-generated TLS certs)
       - data:/data
-      # Temp direct*ory for building archives before upload
+      # Temp directory for building archives before upload
       - temp:/backups
       # Optional: local backup storage directory
       - ./local-backups:/local-backups
       - /mnt/NASPool/Docker/rclone/rclone.conf:/root/.config/rclone/rclone.conf:ro
+    labels:
+      - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+      - "AppScheme=https" # Sets the Reverse Proxy Job to forward over HTTPS
 
 volumes:
   data:
   temp:
 
 networks:
-  reverseproxy-nw:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true

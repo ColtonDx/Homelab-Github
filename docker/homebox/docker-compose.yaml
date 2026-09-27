@@ -14,7 +14,7 @@ services:
     volumes:
       - data:/data/
     labels:
-      - "Backup=Homebox" # Sets the DVBM Backup Job Label
+      - "Backup=homebox" # Sets the DVBM Backup Job Label
       - "AppPort=7745" # Sets the Application Port for the Reverse Proxy Job
 
 networks:

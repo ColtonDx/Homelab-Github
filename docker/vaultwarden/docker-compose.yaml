@@ -8,7 +8,7 @@ services:
       - reverseproxy-nw
     environment:
       ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN}
-      WEBSOCKET_ENABLED: 'true' # Required to use websockets
+      WEBSOCKET_ENABLED: 'true' # Ignored since Vaultwarden 1.29, which serves websockets on the main port
       SIGNUPS_ALLOWED: 'false'   # set to false to disable signups
       LOG_FILE: /data/vaultwarden.log
       LOG_LEVEL: 'warn'
@@ -16,7 +16,7 @@ services:
     volumes:
       - data:/data
     labels:
-      - "Backup=Vaultwarden" # Sets the DVBM Backup Job Label
+      - "Backup=vaultwarden" # Sets the DVBM Backup Job Label
       - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
 
 volumes:

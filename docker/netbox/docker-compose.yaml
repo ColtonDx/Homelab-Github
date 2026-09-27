@@ -23,7 +23,7 @@ services:
     volumes:
       - data:/config
     labels:
-      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+      - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
 
 
@@ -40,7 +40,7 @@ services:
     volumes:
       - db:/var/lib/postgresql/18/docker
     labels:
-      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+      - "Backup=netbox" # Sets the DVBM Backup Job Label
 
   redis:
     container_name: netbox-redis
@@ -51,7 +51,7 @@ services:
     volumes:
       - redis:/data
     labels:
-      - "Backup=Netbox" # Sets the DVBM Backup Job Label
+      - "Backup=netbox" # Sets the DVBM Backup Job Label
 
 volumes:
   data:

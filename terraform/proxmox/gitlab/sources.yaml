@@ -13,7 +13,7 @@ vault:
 # Site values: this dict in the private inventory supplies any variable it names
 inventory: terraform_gitlab
 
-# Fallbacks for anything the inventory does not set; GitLab is a core service, so setting its address in the inventory keeps it independent of NetBox
+# Fallbacks for anything the inventory does not set; set both ip_address and ip_prefix in the inventory to keep GitLab independent of NetBox
 netbox:
   ip_address: { find: ip, dns_name: "gitlab.{{ domain }}" }
   ip_prefix: { find: prefix_length, dns_name: "gitlab.{{ domain }}" }

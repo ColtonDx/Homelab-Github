@@ -5,7 +5,7 @@ variable "proxmox_api_url" {
 
 variable "proxmox_api_token_id" {
   type        = string
-  description = "Proxmox API token ID, e.g. terraform@pve!gitlab"
+  description = "Proxmox API token ID, e.g. terraform@pve!terraform"
 }
 
 variable "proxmox_api_token_secret" {

@@ -1,6 +1,8 @@
 ---
 # Issues and renews GitLab's TLS certificate with acme.sh and switches GitLab to HTTPS; deployment/app-gitlab.yaml runs it, and it can run alone; safe to re-run
 # Inventory: gitlab_domain (required); Vault fields at cloudflare: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; vault_cloudflare_path renames the cloudflare path
+# Inventory: gitlab_rb_path and gitlab_ssl_dir override the default gitlab.rb and certificate locations
 # Renewals run from acme.sh's cron and reload nginx only, so GitLab stays up
 - name: Configure GitLab TLS certificate
   hosts: gitlab

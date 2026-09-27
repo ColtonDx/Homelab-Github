@@ -12,7 +12,7 @@ services:
     networks:
       - reverseproxy-nw
     labels:
-      - "Backup=Aerofoil"
+      - "Backup=aerofoil"
       - "AppPort=8465"
 
 volumes:

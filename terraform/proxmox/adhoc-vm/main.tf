@@ -1,5 +1,5 @@
 terraform {
-  # Endpoint and state key are supplied at init by ansible/tasks/adhoc_vm_setup.yaml, so nothing site-specific lives here
+  # Endpoint and state key are supplied at init by ansible/playbooks/terraform-adhoc-vm/tasks/setup.yaml, so nothing site-specific lives here
   backend "s3" {
     bucket                      = "terraform"
     region                      = "garage"

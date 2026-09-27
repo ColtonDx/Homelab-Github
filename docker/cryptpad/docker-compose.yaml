@@ -21,7 +21,7 @@ services:
         soft: 1000000
         hard: 1000000
     labels:
-      - "Backup=Cryptpad" # Sets the DVBM Backup Job Label
+      - "Backup=cryptpad" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
 
 networks:

@@ -3,7 +3,7 @@
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, PORTAINER_URL; optional NPM_URL, DVBM_URL
 # Vault: PORTAINER_TOKEN at portainer, DVBM3_PASSWORD at dvbmv3, NPM_USER and NPM_PASSWORD at nginx
 # vault_portainer_path, vault_dvbm_path and vault_npm_path rename those paths
-# Inputs: app_name and portainer_endpoint; compose_root (default docker); repo_auth with vault_repo_path for a private repo
+# Inputs: app_name and portainer_endpoint; compose_root (default docker); validate_certs (default true); repo_auth with vault_repo_path (fields username and password) for a private repo
 
 # Read the connection settings once, so every playbook uses the same names
 - name: Read the connection settings from the environment
@@ -60,16 +60,18 @@
         stack_containers: "{{ services | dict2items | map(attribute='value') | map(attribute='container_name', default='') | select | list }}"
         stack_proxy_container: ""
         stack_proxy_port: ""
+        stack_proxy_scheme: http
         stack_backup_label: ""
       vars:
         compose_text: "{{ stack_compose_raw.content | b64decode }}"
         services: "{{ (compose_text | from_yaml).services | default({}) }}"
 
-    # AppPort marks the service the reverse proxy points at, and Backup names the DVBM job; the last one found wins
-    - name: Read the AppPort and Backup labels
+    # AppPort marks the service the reverse proxy points at, AppScheme on that service picks http (default) or https, and Backup names the DVBM job; the last one found wins
+    - name: Read the AppPort, AppScheme and Backup labels
       ansible.builtin.set_fact:
         stack_proxy_container: "{{ (item.value.container_name | default(item.key)) if app_port | length > 0 else stack_proxy_container }}"
         stack_proxy_port: "{{ app_port if app_port | length > 0 else stack_proxy_port }}"
+        stack_proxy_scheme: "{{ (app_scheme | default('http', true)) if app_port | length > 0 else stack_proxy_scheme }}"
         stack_backup_label: "{{ backup | default(stack_backup_label, true) }}"
       loop: "{{ ((stack_compose_raw.content | b64decode | from_yaml).services | default({})) | dict2items }}"
       loop_control:
@@ -78,6 +80,14 @@
         labels: "{{ item.value.labels | default([]) }}"
         app_port: "{{ labels | select('match', '^AppPort=') | map('regex_replace', '^AppPort=([^/]*).*$', '\\1') | first | default('') }}"
         backup: "{{ labels | select('match', '^Backup=') | map('regex_replace', '^Backup=', '') | first | default('') }}"
+        app_scheme: "{{ labels | select('match', '^AppScheme=') | map('regex_replace', '^AppScheme=', '') | map('lower') | first | default('') }}"
+
+    # NPM only forwards over http or https, so a typo in the label stops here rather than creating a broken proxy host
+    - name: Validate the AppScheme label
+      ansible.builtin.assert:
+        that:
+          - stack_proxy_scheme in ['http', 'https']
+        fail_msg: "AppScheme in {{ stack_compose_path }} must be http or https, not '{{ stack_proxy_scheme }}'."
 
 # Portainer is required; DVBM and NPM are optional, so a stack can deploy without either
 - name: Request the service credentials

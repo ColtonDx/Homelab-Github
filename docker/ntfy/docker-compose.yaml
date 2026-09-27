@@ -17,7 +17,7 @@ services:
       - data_var:/var/lib/ntfy
     command: serve
     labels:
-      - "Backup=Ntfy" # Sets the DVBM Backup Job Label
+      - "Backup=ntfy" # Sets the DVBM Backup Job Label
       - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
 
 networks:

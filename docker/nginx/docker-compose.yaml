@@ -14,7 +14,7 @@ services:
     volumes:
       - data:/data
       - data:/etc/letsencrypt
-      # TrueNAS path to the theme-park script (https://docs.theme-park.dev/themes/nginx-proxy-manager/); change for other hosts
+      # TrueNAS path to the theme-park script (https://docs.theme-park.dev/themes/nginx-proxy-manager/), still in the old proxy_data volume; change for other hosts
       - /mnt/.ix-apps/docker/volumes/proxy_data/_data/98-themepark:/etc/cont-init.d/99-themepark
     labels:
       - "Backup=nginx" # Sets the DVBM Backup Job Label

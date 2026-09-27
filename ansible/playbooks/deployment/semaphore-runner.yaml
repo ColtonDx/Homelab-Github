@@ -1,6 +1,6 @@
 ---
 # Builds a Semaphore remote runner on the machine it runs on: Ansible in a venv with this repo's collections, Terraform, and the runner service
-# Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml
+# Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml -e semaphore_url=<url>
 # Bootstrap needs only git and ansible-core from the distribution, since this playbook uses no collections
 # Inventory or extra vars: semaphore_url (required); semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
 # Optional: semaphore_runner_docker=true also installs Docker, for runners that build images
@@ -19,7 +19,7 @@
     runner_python_packages:
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
       - hvac==2.4.0
-    # community.general for the terraform module, community.hashi_vault for tasks/var_lookup.yaml
+    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml
     runner_collection_pins:
       - community.general:==13.4.0
       - community.hashi_vault:==7.1.0

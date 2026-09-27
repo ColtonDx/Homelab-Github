@@ -1,6 +1,6 @@
 services:
   omni-tools:
-    container_name: omni-tools
+    container_name: omnitools
     restart: unless-stopped
     image: iib0011/omni-tools:latest
     networks:

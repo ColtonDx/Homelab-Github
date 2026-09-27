@@ -14,7 +14,7 @@ One name ties an app together. The folder name is used as:
 Other conventions:
 
 - The compose file is always `docker/<app>/docker-compose.yaml`.
-- Extra containers are named `<app>_<role>`, e.g. `bookstack_mariadb`.
+- Extra containers are named `<app>-<role>`, e.g. `netbox-redis`. Hyphens, not underscores, since container names are hostnames and the proxied one is also a subdomain.
 - Variables are upper case, and secrets are prefixed with the app, e.g. `BOOKSTACK_DB_PASSWORD`.
 
 ## Deployment
@@ -28,7 +28,7 @@ Portainer pulls the compose file from this repo, so every change goes through Gi
 
 ## Secrets
 
-Secrets come from HashiCorp Vault, from the app's own path (e.g. `kv/bookstack`). The playbook reads every `${VAR}` in the compose file and looks it up there. Secrets never go in this repo or the inventory.
+Secrets come from HashiCorp Vault, from the app's own path (e.g. `bookstack`) under the `VAULT_KV_MOUNT` mount. The playbook reads every `${VAR}` in the compose file and looks it up there. Secrets never go in this repo or the inventory.
 
 ## Variables
 
@@ -42,8 +42,8 @@ If a name is set in more than one place, Vault wins over `docker_app_vars`, whic
 ## Network and TLS
 
 - Apps that need to be reachable join the external `reverseproxy-nw` network. Only Nginx Proxy Manager publishes ports to the host.
-- Nginx Proxy Manager is the only way in. It handles TLS and forwards plain HTTP to the container on the port in its `AppPort` label.
-- Databases and other internal containers stay on the stack's `default` network only.
+- Nginx Proxy Manager is the only way in. It handles TLS and forwards to the container on the port in its `AppPort` label, over plain HTTP unless `AppScheme=https` is set.
+- Databases and other internal containers stay on the stack's own internal network only.
 
 ## Labels
 
@@ -51,6 +51,7 @@ If a name is set in more than one place, Vault wins over `docker_app_vars`, whic
 |---|---|
 | `Backup=<app>` | The DVBM backup job that covers this container's volumes |
 | `AppPort=<port>` | The port Nginx Proxy Manager forwards to; set it on the one container that serves the app |
+| `AppScheme=https` | Optional, on the same container as `AppPort`: forward over HTTPS instead of the default HTTP, for apps that only serve TLS |
 
 ## Template
 
@@ -85,7 +86,7 @@ For an app with a database, add a second service on `default` only:
 
 ```yaml
   db:
-    container_name: app_db
+    container_name: app-db
     restart: unless-stopped
     image: postgres:16
     networks:

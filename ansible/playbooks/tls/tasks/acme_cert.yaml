@@ -2,7 +2,7 @@
 # Issues and renews an ACME (Let's Encrypt) certificate via Cloudflare DNS-01.
 # This is a reusable task for any service that requires an ACME certificate.
 #
-# Required vars (set by calling playbook via set_fact):
+# Required vars (cloudflare_api_token and acme_email usually from var_lookup.yaml, the rest via set_fact):
 #   cloudflare_api_token  - Cloudflare API token
 #   acme_email            - Email for Let's Encrypt registration
 #   acme_domain           - Domain to issue/renew
@@ -12,8 +12,8 @@
 #   acme_reloadcmd        - Shell command to reload service after cert install
 #
 # Optional vars:
-#   acme_ssl_owner        - Owner of ssl dir/files (default: root)
-#   acme_ssl_group        - Group of ssl dir/files (default: root)
+#   acme_ssl_owner        - Owner of the ssl directory (default: root)
+#   acme_ssl_group        - Group of the ssl directory (default: root)
 
 # Stop early if the calling playbook did not set everything this task needs
 - name: Validate required ACME variables
@@ -101,15 +101,11 @@
     creates: /root/.acme.sh/acme.sh
   when: not acme_sh_stat.stat.exists
 
-# Writes the Cloudflare token to disk, readable only by root
-- name: Write Cloudflare credentials for acme.sh
-  copy:
-    dest: /root/.acme.sh/cloudflare.env
-    mode: "0600"
-    content: |
-      CF_Token="{{ cloudflare_api_token }}"
-      CF_Email="{{ acme_email }}"
-  no_log: true
+# acme.sh takes the token from the environment below and saves it itself, so remove the extra copy older runs wrote
+- name: Remove the unused Cloudflare credentials file
+  file:
+    path: /root/.acme.sh/cloudflare.env
+    state: absent
 
 # acme.sh defaults to ZeroSSL, so point it at Let's Encrypt
 - name: Set default CA to Let's Encrypt
@@ -143,14 +139,13 @@
   args:
     creates: "/root/.acme.sh/{{ acme_domain }}_ecc/{{ acme_domain }}.key"
   register: issue_result
-  changed_when: true
   no_log: true
 
-# Remember that a new certificate was issued
+# A skipped issue still returns rc 0, so only a real run counts as a new certificate
 - name: Mark ACME issue change
   set_fact:
     acme_issue_changed: true
-  when: issue_result is defined and (issue_result.rc | default(1)) == 0
+  when: issue_result is changed
 
 # See whether acme.sh already holds a certificate for this domain
 - name: Check issued key in acme.sh store
