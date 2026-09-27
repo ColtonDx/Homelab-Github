@@ -1,0 +1,26 @@
+services:
+  web:
+    container_name: worksuite
+    restart: unless-stopped
+    # GITLAB_REGISTRY is the GitLab container registry host, e.g. registry.example.com
+    image: ${GITLAB_REGISTRY}/coltondx/worksuite:latest
+    networks:
+      - reverseproxy-nw
+#    ports:
+#      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:////data/printerpricer.db
+    volumes:
+      - data:/data
+#      - app:/app/app
+    labels:
+      - "Backup=Worksuite" # Sets the DVBM Backup Job Label
+      - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+
+volumes:
+  data:
+  app:
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true

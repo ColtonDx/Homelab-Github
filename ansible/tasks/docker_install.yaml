@@ -1,0 +1,195 @@
+---
+# Installs Docker Engine and the Compose and Buildx plugins from Docker's own repositories; safe to re-run
+# Supports Debian, Ubuntu and Fedora (other Red Hat-family hosts use Docker's CentOS repository)
+# Optional: docker_users, a list or single name of accounts to add to the docker group
+
+# The distribution checks below need facts, so gather them if the calling playbook did not
+- name: Gather facts when the play did not
+  ansible.builtin.setup:
+    gather_subset: [min]
+  when: ansible_facts.os_family is not defined
+
+# Stop with a clear message on a distribution this task does not handle
+- name: Validate supported OS family
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family in ["Debian", "RedHat"]
+    fail_msg: "Unsupported OS family for Docker install: {{ ansible_facts.os_family }}"
+
+# Kept under its own name so the caller's docker_users variable is never overwritten
+- name: Normalise docker_users to a list
+  ansible.builtin.set_fact:
+    docker_install_users: >-
+      {{ [] if docker_users is not defined or docker_users is none
+         else ([docker_users] if docker_users is string else docker_users | list) }}
+
+# Debian and Ubuntu install from Docker's apt repository
+- name: Install Docker on Debian/Ubuntu
+  when: ansible_facts.os_family == "Debian"
+  block:
+    # Refreshes a stale or empty package cache so a fresh host can install anything; python3-apt lets Ansible list installed packages
+    - name: Install prerequisites (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: [ca-certificates, python3-apt]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Lists what is installed, so only conflicting packages actually present are removed
+    - name: Gather installed packages (Debian/Ubuntu)
+      ansible.builtin.package_facts:
+        manager: apt
+
+    # The distribution's own Docker packages conflict with Docker's, per Docker's install guide; exact names only, so Docker's containerd.io is never matched
+    - name: Remove conflicting container packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "{{ conflicting | select('in', ansible_facts.packages) | list }}"
+        state: absent
+      vars:
+        conflicting: [docker.io, docker-doc, docker-compose, docker-compose-v2, podman-docker, containerd, runc]
+      when: conflicting | select('in', ansible_facts.packages) | list | length > 0
+
+    # Clears sources and keys left by older ways of adding Docker's repository, which would duplicate it
+    - name: Remove legacy Docker apt source and keyring files (Debian/Ubuntu)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/docker-ce.list
+        - /etc/apt/sources.list.d/download_docker_com_linux_debian.list
+        - /usr/share/keyrings/docker-archive-keyring.gpg
+        - /etc/apt/trusted.gpg.d/docker.gpg
+
+    # Holds the repository signing key referenced by the source entry
+    - name: Ensure /etc/apt/keyrings exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # Derivatives such as Mint record their Ubuntu or Debian base here, which is what Docker's repository needs
+    - name: Read /etc/os-release for the upstream distribution
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: docker_os_release
+
+    # Docker only publishes debian and ubuntu repositories, so use the upstream name and codename
+    - name: Resolve the Docker repository, codename and architecture (Debian/Ubuntu)
+      ansible.builtin.set_fact:
+        docker_apt_distro: "{{ 'ubuntu' if (ansible_facts.distribution == 'Ubuntu' or os_release.UBUNTU_CODENAME is defined) else 'debian' }}"
+        docker_apt_codename: "{{ os_release.UBUNTU_CODENAME | default(os_release.VERSION_CODENAME | default(ansible_facts.distribution_release)) }}"
+        docker_apt_arch: >-
+          {{ {'x86_64': 'amd64', 'aarch64': 'arm64', 'armv7l': 'armhf'}.get(ansible_facts.architecture, ansible_facts.architecture) }}
+      vars:
+        os_release: >-
+          {{ dict(docker_os_release.content | b64decode | split('\n')
+             | select('search', '^[A-Z_]+=') | map('regex_replace', '"', '')
+             | map('split', '=', 1)) }}
+
+    # Downloaded once; force: false keeps re-runs from fetching it again
+    - name: Add Docker official GPG key (Debian/Ubuntu)
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ docker_apt_distro }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+        force: false
+
+    # Refreshes the package cache only when the source entry is added or changes
+    - name: Add Docker apt repository (Debian/Ubuntu)
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ docker_apt_arch }} signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ docker_apt_distro }} {{ docker_apt_codename }} stable
+        filename: docker
+        state: present
+        update_cache: true
+
+    # Installs only what is missing; existing versions are left alone
+    - name: Install Docker Engine packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+        state: present
+
+# Fedora and other Red Hat-family hosts install from Docker's rpm repository
+- name: Install Docker on Fedora/RHEL
+  when: ansible_facts.os_family == "RedHat"
+  block:
+    # Lists what is installed, so only conflicting packages actually present are removed
+    - name: Gather installed packages (Fedora/RHEL)
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    # Fedora's own Docker build and the older docker packages conflict with Docker's, per Docker's install guide; only installed ones are passed, since dnf5 fails on names it cannot remove
+    - name: Remove conflicting container packages (Fedora/RHEL)
+      ansible.builtin.dnf:
+        name: "{{ conflicting | select('in', ansible_facts.packages) | list }}"
+        state: absent
+      vars:
+        conflicting:
+          - podman-docker
+          - moby-engine
+          - moby-engine-nano
+          - moby-engine-rootless-extras
+          - moby-filesystem
+          - docker-cli
+          - docker-buildx
+          - docker-compose
+          - containerd
+          - runc
+          - docker
+          - docker-client
+          - docker-client-latest
+          - docker-common
+          - docker-latest
+          - docker-latest-logrotate
+          - docker-logrotate
+          - docker-selinux
+          - docker-engine-selinux
+          - docker-engine
+      when: conflicting | select('in', ansible_facts.packages) | list | length > 0
+
+    # Downloading the repo file works on both dnf4 and dnf5, unlike dnf config-manager, whose syntax changed in dnf5
+    - name: Add Docker CE repository (Fedora/RHEL)
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ 'fedora' if ansible_facts.distribution == 'Fedora' else 'centos' }}/docker-ce.repo"
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: "0644"
+        force: false
+
+    # Installs only what is missing; existing versions are left alone
+    - name: Install Docker Engine packages (Fedora/RHEL)
+      ansible.builtin.dnf:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+        state: present
+
+# The packages normally create this group, but make sure it exists before adding users
+- name: Ensure docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+# Appends rather than replaces, so users keep their other groups; the change applies at their next login
+- name: Add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_install_users }}"
+
+# Start Docker now and on every boot
+- name: Enable and start Docker service
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+# Fails the run if the daemon does not answer, rather than leaving a broken install unnoticed
+- name: Verify Docker is responding
+  ansible.builtin.command: docker version
+  register: docker_version
+  changed_when: false
+
+# Show the installed client and server versions
+- name: Show Docker version
+  ansible.builtin.debug:
+    var: docker_version.stdout_lines

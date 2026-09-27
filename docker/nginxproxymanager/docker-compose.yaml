@@ -1,0 +1,27 @@
+services:
+  Nginx:
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    image: 'jc21/nginx-proxy-manager:latest'
+    networks:
+      - reverseproxy-nw
+    ports:
+      - '80:80' # Public HTTP Port
+      - '443:443' # Public HTTPS Port
+      - '81:81' # Admin Web Port
+    environment:
+       DISABLE_IPV6: 'true'
+    volumes:
+      - data:/data
+      - data:/etc/letsencrypt
+      # TrueNAS path to the theme-park script (https://docs.theme-park.dev/themes/nginx-proxy-manager/); change for other hosts
+      - /mnt/.ix-apps/docker/volumes/proxy_data/_data/98-themepark:/etc/cont-init.d/99-themepark
+    labels:
+      - "Backup=Proxy" # Sets the DVBM Backup Job Label
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+  data:

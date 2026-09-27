@@ -1,0 +1,11 @@
+services:
+  watchtower:
+    container_name: watchtower
+    restart: unless-stopped
+    image: nickfedor/watchtower
+    environment:
+      - TZ=Etc/UTC # Timezone the update schedule runs in
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *
+    volumes:
+      # Watchtower needs full Docker API access to pull images and recreate containers; :ro would not restrict it
+      - /var/run/docker.sock:/var/run/docker.sock

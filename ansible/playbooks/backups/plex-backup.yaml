@@ -1,0 +1,112 @@
+---
+# Backs up Plex Media Server's data: stops Plex briefly to copy it, restarts Plex, then archives the copy to a backup share
+# Extra vars: target_hosts (default plex)
+# Inventory: plex_data_dir, plex_backup_dest (default /mnt/media/PlexBackups) and plex_service_name (default plexmediaserver) override the defaults
+- name: Back up Plex Media Server
+  hosts: "{{ target_hosts | default('plex') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    data_dir: "{{ plex_data_dir | default('/var/lib/plexmediaserver/Library/Application Support/Plex Media Server') }}"
+    backup_dest: "{{ plex_backup_dest | default('/mnt/media/PlexBackups') }}"
+    service_name: "{{ plex_service_name | default('plexmediaserver') }}"
+    # Includes the time so two runs on the same day never share a temp folder or archive name
+    stamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    temp_dir: "/tmp/plex_backup_{{ stamp }}"
+    temp_archive: "/tmp/plex_backup_{{ stamp }}.tar.gz"
+    final_archive: "{{ backup_dest }}/plex_backup_{{ stamp }}.tar.gz"
+    # Items under the data directory worth keeping; any a given Plex version lacks are skipped
+    include_items:
+      - Codecs
+      - Drivers
+      - Media
+      - Metadata
+      - Plug-ins
+      - Plug-in Support
+      - Preferences.xml
+      - Scanners
+      - Setup Plex.html
+
+  tasks:
+    # Find which items exist on this server so a missing one is skipped rather than failing the run
+    - name: Check which items exist
+      ansible.builtin.stat:
+        path: "{{ data_dir }}/{{ item }}"
+      loop: "{{ include_items }}"
+      register: item_stats
+
+    # Plex is only stopped inside this block, so the rescue and cleanup below always run around it
+    - name: Copy Plex data, archive it and copy it to the backup share
+      block:
+        # Plex must be stopped so its databases are copied in a consistent state
+        - name: Stop Plex Media Server
+          ansible.builtin.service:
+            name: "{{ service_name }}"
+            state: stopped
+
+        # Holds the copy only for as long as it takes to archive it
+        - name: Create the temporary backup directory
+          ansible.builtin.file:
+            path: "{{ temp_dir }}"
+            state: directory
+            mode: "0700"
+
+        # Copy rather than archive in place, so Plex is only down for the copy; copying into the folder keeps folders from nesting inside themselves
+        - name: Copy the existing Plex items to the temporary directory
+          ansible.builtin.copy:
+            src: "{{ data_dir }}/{{ item.item }}"
+            dest: "{{ temp_dir }}/"
+            remote_src: true
+          loop: "{{ item_stats.results | selectattr('stat.exists') | list }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        # Bring Plex back as soon as the copy is done; the rescue path below also restarts it if the copy fails
+        - name: Start Plex Media Server
+          ansible.builtin.service:
+            name: "{{ service_name }}"
+            state: started
+
+        # Preferences.xml holds the Plex account token, so the archive is readable only by root
+        - name: Create the archive from the copied data
+          community.general.archive:
+            path: "{{ temp_dir }}"
+            dest: "{{ temp_archive }}"
+            format: gz
+            mode: "0600"
+
+        # Created on the share if this is the first backup
+        - name: Ensure the backup destination exists
+          ansible.builtin.file:
+            path: "{{ backup_dest }}"
+            state: directory
+            mode: "0750"
+
+        # The copy module fails on SMB shares, so a plain cp is used
+        - name: Copy the archive to the backup share
+          ansible.builtin.command:
+            argv: [cp, "{{ temp_archive }}", "{{ final_archive }}"]
+          changed_when: true
+
+      rescue:
+        # Never leave Plex down because a step after stopping it failed
+        - name: Restart Plex Media Server after a failure
+          ansible.builtin.service:
+            name: "{{ service_name }}"
+            state: started
+
+        # Re-raise so the run still reports the failure
+        - name: Fail the run after restoring Plex
+          ansible.builtin.fail:
+            msg: "Plex backup failed at '{{ ansible_failed_task.name }}'; Plex was restarted and temporary files removed."
+
+      always:
+        # Remove the temporary copy and archive whether the backup worked or not
+        - name: Clean up temporary files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ temp_dir }}"
+            - "{{ temp_archive }}"

@@ -1,0 +1,41 @@
+services:
+  garage:
+    container_name: garage
+    restart: unless-stopped
+    image: dxflrs/garage:v2.2.0
+    networks:
+      - reverseproxy-nw
+    environment:
+      GARAGE_NODE_ID: GarageS3
+      GARAGE_CLUSTER_KEY: ${GARAGE_KEY}
+    volumes:
+      - data:/var/lib/garage
+      - etc:/etc
+    labels:
+      - "Backup=Garage" # Sets the DVBM Backup Job Label
+      - "AppPort=3903" # Sets the Application Port for the Reverse Proxy Job
+
+  webui:
+    container_name: garage-webui
+    restart: unless-stopped
+    image: khairul169/garage-webui:latest
+    networks:
+      - reverseproxy-nw
+    environment:
+      API_BASE_URL: "http://garage:3903"
+      S3_ENDPOINT_URL: "http://garage:3900"
+    volumes:
+      # TrueNAS path to the etc volume's garage.toml; change for other hosts
+      - /mnt/.ix-apps/docker/volumes/garage_etc/_data/garage.toml:/etc/garage.toml:ro
+    labels:
+      - "Backup=Garage" # Sets the DVBM Backup Job Label
+      - "AppPort=3909" # Sets the Application Port for the Reverse Proxy Job
+
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+  data:
+  etc:

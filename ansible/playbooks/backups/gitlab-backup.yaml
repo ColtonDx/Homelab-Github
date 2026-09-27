@@ -1,0 +1,34 @@
+---
+# Archives GitLab's configuration directory, which holds gitlab-secrets.json; pair it with GitLab's own data backup, which leaves those secrets out
+# Extra vars: target_hosts (default gitlab)
+# Inventory: gitlab_config_dir (default /etc/gitlab) and gitlab_backup_dest (default /backups) override the paths
+- name: Back up GitLab configuration
+  hosts: "{{ target_hosts | default('gitlab') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    config_dir: "{{ gitlab_config_dir | default('/etc/gitlab') }}"
+    backup_dest: "{{ gitlab_backup_dest | default('/backups') }}"
+    backup_archive: "{{ backup_dest }}/gitlab_config_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+
+  tasks:
+    # Only root may read the directory, since every archive in it contains secrets
+    - name: Ensure the backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dest }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    # umask keeps the archive readable only by root from the moment it is written
+    - name: Create the configuration archive
+      ansible.builtin.shell:
+        cmd: umask 077 && tar -czf "{{ backup_archive }}" -C "{{ config_dir | dirname }}" "{{ config_dir | basename }}"
+      changed_when: true
+
+    # Show where the archive landed so it can be collected or restored
+    - name: Report where the backup was written
+      ansible.builtin.debug:
+        msg: "GitLab configuration archived to {{ backup_archive }} on {{ inventory_hostname }}."

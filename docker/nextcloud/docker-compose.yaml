@@ -1,0 +1,26 @@
+services:
+  nextcloud:
+    container_name: nextcloud
+    restart: unless-stopped
+    image: lscr.io/linuxserver/nextcloud:latest
+    networks:
+      - reverseproxy-nw
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - data:/config
+      # TrueNAS path to the Nextcloud data folder; change for other hosts
+      - /mnt/NASPool/Docker/Volumes/Nextcloud:/data
+    labels:
+      - "Backup=Nextcloud" # Sets the DVBM Backup Job Label
+      - "AppPort=443" # Sets the Application Port for the Reverse Proxy Job
+
+networks:
+  default:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+    data:
