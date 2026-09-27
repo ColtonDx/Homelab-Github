@@ -1,7 +1,8 @@
 ---
 # Shared by deploy-stack, update-stack and restore-stack: validates inputs, loads credentials, reads the compose file, and finds the environment and stack
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, KV_PATH, PORTAINER_URL; optional NPM_URL, DVBM_URL, NTFY_URL
-# Vault fields at KV_PATH: PORTAINER_TOKEN, plus NPM_USER, NPM_PASSWORD and DVBM3_PASSWORD when those services are used
+# Vault: PORTAINER_TOKEN at kv/portainer, DVBM3_PASSWORD at kv/dvbmv3, NPM_USER and NPM_PASSWORD at kv/nginxproxymanager; each falls back to KV_PATH
+# vault_portainer_path, vault_dvbm_path and vault_npm_path rename those paths
 # Inputs: app_name and portainer_endpoint; compose_root (default docker); stack_reads_compose (default true); repo_auth with vault_repo_path for a private repo
 
 # Read the connection settings once, so every playbook uses the same names
@@ -82,31 +83,43 @@
         app_port: "{{ labels | select('match', '^AppPort=') | map('regex_replace', '^AppPort=([^/]*).*$', '\\1') | first | default('') }}"
         backup: "{{ labels | select('match', '^Backup=') | map('regex_replace', '^Backup=', '') | first | default('') }}"
 
-# The whole shared document, so stack_env.yaml can fall back to it for compose variables
-- name: Request the shared Vault document
+# Each service's own path, plus the whole shared document, which stack_env.yaml still falls back to for compose variables
+- name: Request the service credentials and the shared Vault document
   ansible.builtin.set_fact:
     vault_secrets:
       - { path: "{{ vault_kv_path }}", var: shared_secrets }
+      - { path: "{{ vault_portainer_path | default('portainer') }}", field: PORTAINER_TOKEN, var: own_portainer_token, required: false }
+      - { path: "{{ vault_dvbm_path | default('dvbmv3') }}", field: DVBM3_PASSWORD, var: own_dvbm_password, required: false }
+      - { path: "{{ vault_npm_path | default('nginxproxymanager') }}", field: NPM_USER, var: own_npm_user, required: false }
+      - { path: "{{ vault_npm_path | default('nginxproxymanager') }}", field: NPM_PASSWORD, var: own_npm_password, required: false }
 
-# Loads the shared document through the repo's common lookup task
-- name: Load the shared secrets from Vault
+# Fetches every path above once, through the repo's common lookup task
+- name: Load the service credentials from Vault
   ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
 
-# Credentials for Portainer, and for NPM and DVBM when those fields exist
+# Each service's own path wins; KV_PATH is the fallback until the secrets have moved
 - name: Set the service credentials
   ansible.builtin.set_fact:
-    portainer_token: "{{ shared_secrets.PORTAINER_TOKEN | default('') }}"
-    npm_user: "{{ shared_secrets.NPM_USER | default('') }}"
-    npm_password: "{{ shared_secrets.NPM_PASSWORD | default('') }}"
-    dvbm_password: "{{ shared_secrets.DVBM3_PASSWORD | default('') }}"
+    portainer_token: "{{ own_portainer_token | default(shared_secrets.PORTAINER_TOKEN | default(''), true) }}"
+    dvbm_password: "{{ own_dvbm_password | default(shared_secrets.DVBM3_PASSWORD | default(''), true) }}"
+    npm_user: "{{ own_npm_user | default(shared_secrets.NPM_USER | default(''), true) }}"
+    npm_password: "{{ own_npm_password | default(shared_secrets.NPM_PASSWORD | default(''), true) }}"
   no_log: true
+
+# Names only, so it is clear which credentials still come from the fallback
+- name: Report where each service credential comes from
+  ansible.builtin.debug:
+    msg: >-
+      PORTAINER_TOKEN from {{ vault_portainer_path | default('portainer') if own_portainer_token | length > 0 else vault_kv_path }},
+      DVBM3_PASSWORD from {{ (vault_dvbm_path | default('dvbmv3') if own_dvbm_password | length > 0 else vault_kv_path) if dvbm_password | length > 0 else 'nowhere' }},
+      NPM credentials from {{ (vault_npm_path | default('nginxproxymanager') if own_npm_user | length > 0 else vault_kv_path) if npm_user | length > 0 else 'nowhere' }}
 
 # Without the Portainer token nothing else can run
 - name: Require the Portainer API token
   ansible.builtin.assert:
     that:
       - portainer_token | length > 0
-    fail_msg: "PORTAINER_TOKEN is missing from {{ vault_kv_path }} in Vault."
+    fail_msg: "PORTAINER_TOKEN was found neither at {{ vault_portainer_path | default('portainer') }} nor at {{ vault_kv_path }} in Vault."
 
 # A private repository needs credentials for Portainer to clone it
 - name: Request the repository credentials from Vault

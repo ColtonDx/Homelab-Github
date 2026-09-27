@@ -1,0 +1,61 @@
+services:
+  postgres:
+    hostname: postgres
+    container_name: postgres
+    restart: unless-stopped
+    image: postgres:14
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: semaphore
+      POSTGRES_PASSWORD: ${SEMAPHORE_DB_PASSWORD}
+      POSTGRES_DB: semaphore
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    labels:
+      - "Backup=Semaphore" # Sets the DVBM Backup Job Label
+
+  semaphore:
+    container_name: semaphore
+    restart: unless-stopped
+    image: semaphoreui/semaphore:latest
+    depends_on:
+      - postgres
+    networks:
+      - reverseproxy-nw
+      - default
+    environment:
+      SEMAPHORE_DB_USER: semaphore
+      SEMAPHORE_DB_PASS: ${SEMAPHORE_DB_PASSWORD}
+      SEMAPHORE_DB_HOST: postgres
+      SEMAPHORE_DB_PORT: 5432
+      SEMAPHORE_DB_DIALECT: postgres
+      SEMAPHORE_DB: semaphore
+      SEMAPHORE_PLAYBOOK_PATH: /tmp/semaphore/
+      SEMAPHORE_ADMIN_PASSWORD: ${SEMAPHORE_ADMIN_PASSWORD}
+      SEMAPHORE_ADMIN_NAME: admin
+      SEMAPHORE_ADMIN_EMAIL: admin@localhost
+      SEMAPHORE_ADMIN: admin
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ENCRYPTION_KEY}
+      SEMAPHORE_LDAP_ACTIVATED: 'no' #
+      SEMAPHORE_USE_REMOTE_RUNNER: True
+      SEMAPHORE_RUNNER_REGISTRATION_TOKEN: ${SEMAPHORE_REGISTRATION_TOKEN}
+#      SEMAPHORE_LDAP_HOST: dc01.local.example.com
+#      SEMAPHORE_LDAP_PORT: '636'
+#      SEMAPHORE_LDAP_NEEDTLS: 'yes'
+#      SEMAPHORE_LDAP_DN_BIND: 'uid=bind_user,cn=users,cn=accounts,dc=local,dc=shiftsystems,dc=net'
+#      SEMAPHORE_LDAP_PASSWORD: 'ldap_bind_account_password'
+#      SEMAPHORE_LDAP_DN_SEARCH: 'dc=local,dc=example,dc=com'
+#      SEMAPHORE_LDAP_SEARCH_FILTER: "(&(uid=%s)(memberOf=cn=ipausers,cn=groups,cn=accounts,dc=local,dc=example,dc=com))"
+      TZ: UTC
+    labels:
+      - "Backup=Semaphore" # Sets the DVBM Backup Job Label
+      - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
+
+volumes:
+  postgres:
+
+networks:
+  default:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
