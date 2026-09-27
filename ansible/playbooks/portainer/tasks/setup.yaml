@@ -1,9 +1,9 @@
 ---
-# Shared by deploy-stack, update-stack and restore-stack: validates inputs, loads credentials, reads the compose file, and finds the environment and stack
+# Shared by deploy-stack and update-stack: validates inputs, loads credentials, reads the compose file, and finds the environment and stack
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, PORTAINER_URL; optional NPM_URL, DVBM_URL
 # Vault: PORTAINER_TOKEN at portainer, DVBM3_PASSWORD at dvbm, NPM_USER and NPM_PASSWORD at nginx
 # vault_portainer_path, vault_dvbm_path and vault_npm_path rename those paths
-# Inputs: app_name and portainer_endpoint; compose_root (default docker); stack_reads_compose (default true); repo_auth with vault_repo_path for a private repo
+# Inputs: app_name and portainer_endpoint; compose_root (default docker); repo_auth with vault_repo_path for a private repo
 
 # Read the connection settings once, so every playbook uses the same names
 - name: Read the connection settings from the environment
@@ -32,9 +32,8 @@
       Set VAULT_ADDR, VAULT_TOKEN and PORTAINER_URL in the environment,
       and pass app_name and portainer_endpoint.
 
-# Restore does not need the compose file, so it can skip this
+# Both playbooks need the compose file's variables and labels
 - name: Read the compose file
-  when: stack_reads_compose | default(true) | bool
   block:
     # The repository is checked out next to this playbook, so the compose file can be read locally
     - name: Check the compose file exists

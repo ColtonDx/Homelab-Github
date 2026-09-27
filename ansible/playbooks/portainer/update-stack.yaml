@@ -2,7 +2,7 @@
 # Updates a deployed stack to newer images: backs it up through DVBMv3, redeploys pulling images, then waits for the containers to be healthy
 # Connection settings and Vault fields are listed in tasks/setup.yaml; this playbook only updates, and deploy-stack.yaml creates stacks
 # Required: app_name, portainer_endpoint; optional: repo_ref, repo_auth, stack_prune, skip_backup, health_timeout (300), health_interval (10)
-# On a failed health check it redeploys rollback_ref when given; images already pulled are not rolled back, so data recovery is restore-stack.yaml with the backup ID
+# On a failed health check it redeploys rollback_ref when given; images already pulled are not rolled back, so data recovery is a restore in DVBMv3 from the backup ID
 - name: Update a Portainer stack with a backup and health gate
   hosts: localhost
   connection: local
@@ -156,9 +156,8 @@
               {% if rollback_ref | default('') | length > 0 %}Redeployed {{ rollback_ref }}
               ({{ 'ok' if rollback_result.status | default(0) == 200 else 'failed, status ' ~ rollback_result.status | default('none') }}); the newer images stay pulled.
               {% else %}No rollback_ref was given, so nothing was redeployed.{% endif %}
-              {% if dvbm_backup_id is defined %}To restore the data, pin the previous image in the compose file, then run
-              ansible/playbooks/portainer/restore-stack.yaml -e app_name={{ app_name }} -e portainer_endpoint={{ portainer_endpoint }}
-              -e dvbm_backup_id={{ dvbm_backup_id }} -e dvbm_restore_confirmed=true{% else %}No pre-upgrade backup was taken.{% endif %}
+              {% if dvbm_backup_id is defined %}To restore the data, pin the previous image in the compose file and redeploy it,
+              then restore backup ID {{ dvbm_backup_id }} in DVBMv3, so the new image never starts against the restored data.{% else %}No pre-upgrade backup was taken.{% endif %}
 
     # Confirm success, with the backup ID in case a problem shows up later
     - name: Report a successful update

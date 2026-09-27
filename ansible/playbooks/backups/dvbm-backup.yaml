@@ -43,9 +43,7 @@
       vars:
         dvbm_backup_name: "{{ backup_job }}"
 
-    # The ID is what portainer/restore-stack.yaml needs to restore this backup
-    - name: Report the backup ID for a restore
+    # Restores are done in DVBMv3 itself, where this ID identifies the backup
+    - name: Report the backup ID
       ansible.builtin.debug:
-        msg: >-
-          Backup ID {{ dvbm_backup_id }}. To restore a stack from it, run ansible/playbooks/portainer/restore-stack.yaml
-          -e app_name=<app> -e portainer_endpoint=<environment> -e dvbm_backup_id={{ dvbm_backup_id }} -e dvbm_restore_confirmed=true
+        msg: "Backup ID {{ dvbm_backup_id }}; restore it from DVBMv3 if needed."
