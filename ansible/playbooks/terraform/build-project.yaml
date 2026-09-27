@@ -1,0 +1,257 @@
+---
+# Plans or applies any Terraform project, filling its variables from overrides, the inventory, NetBox and Vault as its sources.yaml describes
+# Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, or apply)
+# Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
+# Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL for the s3 backend; NETBOX_URL only when a lookup needs NetBox
+- name: Build a Terraform project
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    tf_action_resolved: "{{ tf_action | default('plan') }}"
+    tf_backend_resolved: "{{ tf_backend | default('s3') }}"
+    tf_overrides: "{{ tf_vars | default({}) }}"
+
+  tasks:
+    # Stop before anything runs when the project or the action is not usable
+    - name: Validate the inputs
+      ansible.builtin.assert:
+        that:
+          - tf_project | default('') | length > 0
+          - tf_action_resolved in ['plan', 'apply']
+          - tf_backend_resolved in ['s3', 'local']
+          - tf_overrides is mapping
+        fail_msg: "Pass tf_project; tf_action must be plan or apply, tf_backend s3 or local, and tf_vars a dict."
+
+    # A relative project path is taken from the repo root, which sits three levels above this playbook
+    - name: Resolve the project folder
+      ansible.builtin.set_fact:
+        tf_dir: "{{ tf_project if tf_project is abs else (playbook_dir ~ '/../../../' ~ tf_project) | realpath }}"
+
+    # The project needs its Terraform files and the manifest describing its inputs
+    - name: Check the project has a sources.yaml
+      ansible.builtin.stat:
+        path: "{{ tf_dir }}/sources.yaml"
+      register: tf_sources_stat
+
+    # Name the path so a typo in tf_project is obvious
+    - name: Fail when the project or its manifest is missing
+      ansible.builtin.fail:
+        msg: "No sources.yaml in {{ tf_dir }}; check tf_project."
+      when: not tf_sources_stat.stat.exists
+
+    # Loaded as variables, so templates in it such as {{ domain }} resolve from the inventory
+    - name: Load the project's sources.yaml
+      ansible.builtin.include_vars:
+        file: "{{ tf_dir }}/sources.yaml"
+        name: tf_sources
+
+    # Terraform rejects -var for an undeclared variable, so only declared names are ever passed
+    - name: Read the variables the project declares
+      ansible.builtin.set_fact:
+        tf_declared: "{{ (tf_declared | default([]) + (lookup('ansible.builtin.file', item) | regex_findall('variable\\s+\"([^\"]+)\"'))) | unique }}"
+      loop: "{{ query('ansible.builtin.fileglob', tf_dir ~ '/*.tf') }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    # Vault connection for every secret this project needs
+    - name: Read the Vault connection from the environment
+      ansible.builtin.set_fact:
+        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+      no_log: true
+
+    # Secrets an override supplies are not fetched, so a bootstrap run can work without them in Vault
+    - name: List the secrets to fetch
+      ansible.builtin.set_fact:
+        tf_secret_entries: "{{ tf_sources.vault | default([]) | rejectattr('var', 'in', tf_overrides.keys() | list) | list }}"
+        tf_backend_entries: >-
+          {{ [{'path': vault_garage_path | default('garage'), 'field': 'GARAGE_ACCESS_KEY', 'var': 'tf_garage_access_key'},
+              {'path': vault_garage_path | default('garage'), 'field': 'GARAGE_SECRET_KEY', 'var': 'tf_garage_secret_key'}]
+             if tf_backend_resolved == 's3' else [] }}
+
+    # One lookup for the project's secrets and, on the s3 backend, Garage's credentials
+    - name: Request the secrets from Vault
+      ansible.builtin.set_fact:
+        vault_secrets: "{{ tf_secret_entries + tf_backend_entries }}"
+      when: (tf_secret_entries + tf_backend_entries) | length > 0
+
+    # Fails naming every missing path or field at once
+    - name: Load the secrets from Vault
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      when: (tf_secret_entries + tf_backend_entries) | length > 0
+
+    # Site values from the inventory dict the manifest names; keys the project does not declare are ignored
+    - name: Read the inventory values
+      ansible.builtin.set_fact:
+        tf_from_inventory: >-
+          {{ (lookup('ansible.builtin.vars', tf_sources.inventory, default={}) if tf_sources.inventory is defined else {})
+             | dict2items | selectattr('key', 'in', tf_declared) | items2dict }}
+
+    # NetBox is only asked for variables no override or inventory value covers, so GitLab never needs it when its IP is set
+    - name: Start with no NetBox lookups
+      ansible.builtin.set_fact:
+        netbox_lookups: []
+        tf_from_netbox: {}
+
+    # Each manifest entry becomes a netbox_lookups entry named by its variable
+    - name: List the NetBox lookups still needed
+      ansible.builtin.set_fact:
+        netbox_lookups: "{{ netbox_lookups + [item.value | combine({'var': item.key})] }}"
+      loop: >-
+        {{ (tf_sources.netbox | default({})) | dict2items
+           | rejectattr('key', 'in', (tf_overrides.keys() | list) + (tf_from_inventory.keys() | list)) | list }}
+      loop_control:
+        label: "{{ item.key }}"
+
+    # Fails naming every lookup that has no single match
+    - name: Look the remaining values up in NetBox
+      ansible.builtin.include_tasks: ../../tasks/netbox_lookup.yaml
+      when: netbox_lookups | length > 0
+
+    # The shared task returns every result by variable name
+    - name: Keep the NetBox results
+      ansible.builtin.set_fact:
+        tf_from_netbox: "{{ netbox_values }}"
+      when: netbox_lookups | length > 0
+
+    # Lowest to highest precedence: NetBox, inventory, overrides; the project's own defaults cover anything left
+    # Secret variables are kept out of this merge, so even an overridden secret never becomes a logged -var
+    - name: Merge the variable sources
+      ansible.builtin.set_fact:
+        tf_variables: >-
+          {{ tf_from_netbox | combine(tf_from_inventory, tf_overrides)
+             | dict2items | selectattr('key', 'in', tf_declared) | rejectattr('key', 'in', tf_secret_names) | items2dict }}
+      vars:
+        tf_secret_names: "{{ tf_sources.vault | default([]) | map(attribute='var') | list }}"
+
+    # Secrets from Vault, plus any secret an override supplied, all as TF_VAR_* environment variables
+    - name: Collect the secret variables
+      ansible.builtin.set_fact:
+        tf_secret_env: "{{ tf_secret_env | default({}) | combine({'TF_VAR_' ~ item.var: value}) }}"
+      loop: "{{ tf_sources.vault | default([]) }}"
+      loop_control:
+        label: "{{ item.var }}"
+      vars:
+        value: "{{ tf_overrides[item.var] if item.var in tf_overrides else lookup('ansible.builtin.vars', item.var) }}"
+      no_log: true
+
+    # Names and sources only, never values
+    - name: Record where each variable comes from
+      ansible.builtin.set_fact:
+        tf_var_sources: "{{ tf_var_sources | default({}) | combine({item: source}) }}"
+      loop: "{{ (tf_variables.keys() | list) + (tf_sources.vault | default([]) | map(attribute='var') | list) }}"
+      vars:
+        source: >-
+          {{ 'override' if item in tf_overrides else 'inventory' if item in tf_from_inventory
+             else 'netbox' if item in tf_from_netbox else 'vault' }}
+
+    # Shows the source of every value this run passes to Terraform; anything unlisted uses the project's default
+    - name: Report where each variable comes from
+      ansible.builtin.debug:
+        msg: "{{ tf_var_sources | default({}) }}"
+
+    # Garage's endpoint and credentials reach the s3 backend through the standard AWS variables
+    - name: Build the Terraform environment
+      ansible.builtin.set_fact:
+        tf_env: >-
+          {{ tf_secret_env | default({}) | combine({'TF_IN_AUTOMATION': '1'})
+             | combine({'AWS_ACCESS_KEY_ID': tf_garage_access_key, 'AWS_SECRET_ACCESS_KEY': tf_garage_secret_key,
+                        'AWS_ENDPOINT_URL_S3': garage_url | default(lookup('ansible.builtin.env', 'GARAGE_URL'), true)}
+                       if tf_backend_resolved == 's3' else {}) }}
+      no_log: true
+
+    # The s3 backend needs somewhere to find Garage
+    - name: Require the Garage endpoint for the s3 backend
+      ansible.builtin.assert:
+        that:
+          - tf_env.AWS_ENDPOINT_URL_S3 | default('') | length > 0
+        fail_msg: "Set GARAGE_URL (or pass garage_url), or run with tf_backend=local."
+      when: tf_backend_resolved == 's3'
+
+    # A local-state run swaps the backend with an override file; a normal run makes sure no leftover override remains
+    - name: Set the backend override for a local-state run
+      ansible.builtin.copy:
+        dest: "{{ tf_dir }}/backend_override.tf"
+        content: |
+          # Written by build-project.yaml for tf_backend=local; removed on the next s3 run
+          terraform {
+            backend "local" {}
+          }
+        mode: "0644"
+      when: tf_backend_resolved == 'local'
+
+    # Without this, a file left by an earlier local run would keep state out of Garage
+    - name: Remove a leftover backend override
+      ansible.builtin.file:
+        path: "{{ tf_dir }}/backend_override.tf"
+        state: absent
+      when: tf_backend_resolved == 's3'
+
+    # State left by a local bootstrap run must be moved into Garage deliberately, never silently ignored
+    - name: Check for state left by a local run
+      ansible.builtin.stat:
+        path: "{{ tf_dir }}/terraform.tfstate"
+      register: tf_local_state
+      when: tf_backend_resolved == 's3'
+
+    # Ignoring it would lose track of whatever the local run built, so stop and say how to move it
+    - name: Stop when local state is waiting to be migrated
+      ansible.builtin.fail:
+        msg: >-
+          {{ tf_dir }}/terraform.tfstate is left from a tf_backend=local run. Re-run with -e tf_migrate_state=true
+          to copy it into Garage at {{ tf_sources.state_key }}.
+      when:
+        - tf_backend_resolved == 's3'
+        - tf_local_state.stat.exists
+        - not (tf_migrate_state | default(false) | bool)
+
+    # The state key comes from the manifest; reconfigure because the backend may differ from the last run, or migrate when asked
+    - name: Initialise Terraform
+      ansible.builtin.command:
+        argv: >-
+          {{ ['terraform', 'init', '-input=false']
+             + (['-migrate-state', '-force-copy'] if migrating else ['-reconfigure'])
+             + (['-backend-config=key=' ~ tf_sources.state_key] if tf_backend_resolved == 's3' else []) }}
+        chdir: "{{ tf_dir }}"
+      environment: "{{ tf_env }}"
+      changed_when: migrating
+      vars:
+        migrating: "{{ tf_backend_resolved == 's3' and (tf_local_state.stat.exists | default(false)) and (tf_migrate_state | default(false) | bool) }}"
+
+    # The state now lives in Garage, so move the local copy aside where it cannot trigger another migration
+    - name: Set the migrated local state aside
+      ansible.builtin.command:
+        argv: [mv, terraform.tfstate, terraform.tfstate.migrated]
+        chdir: "{{ tf_dir }}"
+        removes: "{{ tf_dir }}/terraform.tfstate"
+      when:
+        - tf_backend_resolved == 's3'
+        - tf_local_state.stat.exists | default(false)
+        - tf_migrate_state | default(false) | bool
+
+    # Plan shows the changes without making them; apply makes them
+    - name: Run Terraform
+      community.general.terraform:
+        project_path: "{{ tf_dir }}"
+        state: "{{ 'planned' if tf_action_resolved == 'plan' else 'present' }}"
+        plan_file: "{{ tf_dir ~ '/tfplan' if tf_action_resolved == 'plan' else omit }}"
+        variables: "{{ tf_variables }}"
+      environment: "{{ tf_env }}"
+      register: tf_result
+
+    # Terraform masks sensitive values in its own output, so the plan is safe to show
+    - name: Show Terraform's output
+      ansible.builtin.debug:
+        msg: "{{ tf_result.stdout_lines | default([]) }}"
+
+    # A reminder that local state has to be moved into Garage once it is running
+    - name: Remind to migrate local state
+      ansible.builtin.debug:
+        msg: >-
+          This run used local state in {{ tf_dir }}. Once Garage is up, re-run without tf_backend and with
+          -e tf_migrate_state=true to move it into Garage at {{ tf_sources.state_key }}.
+      when: tf_backend_resolved == 'local'

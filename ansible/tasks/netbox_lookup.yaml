@@ -1,0 +1,102 @@
+---
+# Looks values up in NetBox into facts; the NetBox counterpart of var_lookup.yaml
+# Each netbox_lookups entry needs var (the fact to set), find (ip or prefix_length) and dns_name (the address to match)
+# ip is the address without its prefix, prefix_length its prefix as a number; netbox_values also holds every result by var
+# Needs NETBOX_URL (or netbox_url) and NETBOX_TOKEN at the netbox Vault path (vault_netbox_path renames it, netbox_token skips Vault)
+
+# Check the caller passed a usable list of entries before anything is fetched
+- name: Ensure the NetBox lookup list is usable
+  ansible.builtin.assert:
+    that:
+      - netbox_lookups is defined
+      - netbox_lookups | length > 0
+      - netbox_lookups | selectattr('var', 'undefined') | list | length == 0
+      - netbox_lookups | rejectattr('find', 'in', ['ip', 'prefix_length']) | list | length == 0
+      - netbox_lookups | selectattr('dns_name', 'undefined') | list | length == 0
+    fail_msg: "netbox_lookups must be a non-empty list of entries, each with a var, a dns_name, and find set to ip or prefix_length."
+
+# Stop with a clear message rather than calling an empty URL
+- name: Require the NetBox URL
+  ansible.builtin.assert:
+    that:
+      - netbox_url | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | length > 0
+    fail_msg: "{{ netbox_lookups | map(attribute='var') | join(', ') }} need NetBox; set NETBOX_URL or netbox_url, or supply the values another way."
+
+# The token is only fetched once per play, the first time a lookup runs
+- name: Load the NetBox token from Vault
+  when: netbox_token is not defined
+  block:
+    # Where the token lives; vault_netbox_path renames it
+    - name: Request the NetBox token
+      ansible.builtin.set_fact:
+        vault_secrets:
+          - { path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: netbox_token }
+
+    # Fails naming the path when the token is missing
+    - name: Load the NetBox token
+      ansible.builtin.include_tasks: var_lookup.yaml
+
+# Clear working facts so a second lookup in the same play starts fresh
+- name: Reset results from any earlier lookup in this play
+  ansible.builtin.set_fact:
+    netbox_values: {}
+    netbox_problems: []
+
+# Addresses are matched on their DNS name; output is hidden because it carries the token, and failures are reported below
+- name: Find the addresses in NetBox
+  ansible.builtin.uri:
+    url: "{{ netbox_url | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | regex_replace('/+$', '') }}/api/ipam/ip-addresses/?dns_name={{ item.dns_name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+      Accept: application/json
+    validate_certs: "{{ validate_certs | default(true) }}"
+  register: netbox_results
+  failed_when: false
+  loop: "{{ netbox_lookups }}"
+  loop_control:
+    label: "{{ item.var }}"
+  delegate_to: localhost
+  check_mode: false
+  no_log: true
+
+# Exactly one match per entry, or the value would be a guess
+- name: Collect every lookup that did not find exactly one address
+  ansible.builtin.set_fact:
+    netbox_problems: >-
+      {{ netbox_problems + [item.item.var ~ ' (' ~ item.item.dns_name ~ ': '
+         ~ ((item.msg | default('no response')) if item.status | default(-1) == -1
+            else ('HTTP ' ~ item.status) if item.status != 200 else (item.json.count ~ ' matches')) ~ ')'] }}
+  loop: "{{ netbox_results.results }}"
+  loop_control:
+    label: "{{ item.item.var }}"
+  when: item.status | default(-1) != 200 or item.json.count | int != 1
+
+# Stop with one message naming everything that could not be looked up
+- name: Fail listing every failed lookup at once
+  ansible.builtin.assert:
+    that:
+      - netbox_problems | length == 0
+    fail_msg: >-
+      {{ netbox_problems | length }} NetBox lookup{{ '' if netbox_problems | length == 1 else 's' }} did not find exactly one address:
+      {{ netbox_problems | join(', ') }}. Fix NetBox or its token, or supply the values another way.
+
+# NetBox stores addresses as address/prefix, so split out the part each entry wants
+- name: Record the looked-up values
+  ansible.builtin.set_fact:
+    netbox_values: >-
+      {{ netbox_values | combine({item.item.var:
+           (address.split('/')[0] if item.item.find == 'ip' else address.split('/')[1] | int)}) }}
+  loop: "{{ netbox_results.results }}"
+  loop_control:
+    label: "{{ item.item.var }}"
+  vars:
+    address: "{{ item.json.results[0].address }}"
+
+# One fact per entry, named by its var, as var_lookup.yaml does
+- name: Set the NetBox facts
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ netbox_values | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"

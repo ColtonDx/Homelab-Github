@@ -1,0 +1,22 @@
+# Terraform working files, state and real variable values; only *.tfvars.example files are committed
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.migrated
+tfplan
+*.tfvars
+*.auto.tfvars.json
+!*.tfvars.example
+# Written by build-project.yaml for tf_backend=local runs
+backend_override.tf
+
+# Talos secret bundle and generated configs
+talos/secrets.yaml
+talos/controlplane.yaml
+talos/worker.yaml
+talos/talosconfig
+talos/_out/
+
+# Local tooling
+.claude/
+id_rsa
