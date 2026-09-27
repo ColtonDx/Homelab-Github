@@ -1,0 +1,154 @@
+---
+# Checks disk usage on Linux hosts and posts one Discord message, sent from the controller, listing every filesystem approaching full, and any host that could not be checked
+# Extra vars: target_hosts (default linux), disk_warn_percent (80), disk_critical_percent (90), disk_report_ok=true to also post when all is well
+# Inventory: disk_warn_percent, disk_critical_percent, disk_ignore_mounts and disk_ignore_fstypes per host or group, to tune or skip filesystems
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: DISCORD_WEBHOOK_URL at discord (vault_discord_path renames it)
+# Each host records its own flagged filesystems; nothing is sent from the hosts themselves
+- name: Check disk usage
+  hosts: "{{ target_hosts | default('linux') }}"
+  gather_facts: false
+
+  vars:
+    disk_pseudo_fstypes: [tmpfs, devtmpfs, overlay, squashfs, efivarfs, ramfs, fuse.snapfuse, fuse.lxcfs]
+
+  tasks:
+    # Bytes rather than -h so free space is exact; the mount point is last because it may contain spaces; a hung network mount times out
+    - name: Read filesystem usage
+      ansible.builtin.command:
+        argv: >-
+          {{ ['df', '-B1', '--output=fstype,size,avail,pcent,target']
+             + ((disk_pseudo_fstypes + disk_ignore_fstypes | default([])) | map('regex_replace', '^', '--exclude-type=') | list) }}
+      register: disk_df
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      ignore_unreachable: true
+      timeout: 60
+
+    # df exits non-zero when one mount is unreadable but still reports the rest, so only no output at all counts as unchecked
+    - name: Record whether this host was checked
+      ansible.builtin.set_fact:
+        disk_checked: "{{ disk_df is not unreachable and disk_df.stdout_lines | default([]) | length > 1 }}"
+        disk_flagged: []
+
+    # Each filesystem at or over this host's warning threshold, marked critical over the critical one
+    - name: Flag filesystems approaching full
+      ansible.builtin.set_fact:
+        disk_flagged: >-
+          {{ disk_flagged + [{'mount': fields[4], 'percent': percent | int, 'avail': fields[2] | int,
+                              'critical': percent | int >= disk_critical_percent | default(90) | int}] }}
+      loop: "{{ disk_df.stdout_lines[1:] if disk_checked else [] }}"
+      loop_control:
+        label: "{{ fields[4] | default(item) }}"
+      vars:
+        fields: "{{ item.split(None, 4) }}"
+        percent: "{{ fields[3] | replace('%', '') }}"
+      when:
+        - fields | length == 5
+        - percent is match('^[0-9]+$')
+        - percent | int >= disk_warn_percent | default(80) | int
+        - fields[4] not in disk_ignore_mounts | default([])
+
+    # Runs once on the controller so one message covers every host; unreachable hosts stay in the play, so this runs even when some are down
+    - name: Send the disk usage alert to Discord
+      run_once: true
+      delegate_to: localhost
+      block:
+        # Start empty so hosts are added in inventory order below
+        - name: Start with no results
+          ansible.builtin.set_fact:
+            disk_alerts: []
+            disk_unchecked: []
+
+        # Each host's flagged filesystems, tagged with the host, plus every host that could not be checked
+        - name: Collect the results from every host
+          ansible.builtin.set_fact:
+            disk_alerts: "{{ disk_alerts + (hostvars[item].disk_flagged | default([]) | map('combine', {'host': item}) | list) }}"
+            disk_unchecked: "{{ disk_unchecked + ([] if hostvars[item].disk_checked | default(false) else [item]) }}"
+          loop: "{{ ansible_play_hosts_all }}"
+
+        # Only post when there is something to act on, unless an all-clear was asked for
+        - name: Decide whether to post
+          ansible.builtin.set_fact:
+            disk_post: "{{ disk_alerts | length > 0 or disk_unchecked | length > 0 or disk_report_ok | default(false) | bool }}"
+
+        # Names only, so the run log shows the outcome even when nothing is posted
+        - name: Report the result
+          ansible.builtin.debug:
+            msg: >-
+              {{ disk_alerts | length }} filesystem{{ '' if disk_alerts | length == 1 else 's' }} approaching full,
+              {{ disk_unchecked | length }} host{{ '' if disk_unchecked | length == 1 else 's' }} not checked{{ '' if disk_post else '; nothing to post' }}.
+
+        # Everything below only runs when there is a message to send
+        - name: Post to Discord
+          when: disk_post | bool
+          block:
+            # Vault connection for the webhook
+            - name: Read the Vault connection from the environment
+              ansible.builtin.set_fact:
+                vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+                vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+                vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+              no_log: true
+
+            # The webhook URL carries its own token, so it is a secret
+            - name: Request the Discord webhook
+              ansible.builtin.set_fact:
+                vault_secrets:
+                  - { path: "{{ vault_discord_path | default('discord') }}", field: DISCORD_WEBHOOK_URL, var: discord_webhook_url }
+
+            # Fails naming the path when the webhook is missing
+            - name: Load the Discord webhook from Vault
+              ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+            # One line per filesystem, fullest first; Discord caps an embed description at 4096 characters
+            - name: Build the message
+              ansible.builtin.set_fact:
+                disk_message: |-
+                  {% for d in disk_alerts | sort(attribute='percent', reverse=true) %}
+                  {{ '🔴' if d.critical else '🟠' }} **{{ d.host }}** `{{ d.mount }}` {{ d.percent }}% used, {{ d.avail | ansible.builtin.human_readable }} free
+                  {% endfor %}
+                  {% if disk_unchecked | length > 0 %}
+                  ⚪ Could not check: {{ disk_unchecked | join(', ') }}
+                  {% endif %}
+                  {% if disk_alerts | length == 0 and disk_unchecked | length == 0 %}
+                  🟢 Every filesystem is under {{ disk_warn_percent | default(80) }}%.
+                  {% endif %}
+                disk_color: >-
+                  {{ 15158332 if disk_alerts | selectattr('critical') | list | length > 0
+                     else 15105570 if disk_alerts | length > 0 or disk_unchecked | length > 0 else 3066993 }}
+
+            # The URL is hidden from the log; the outcome is checked below instead
+            - name: Send the Discord message
+              ansible.builtin.uri:
+                url: "{{ discord_webhook_url }}"
+                method: POST
+                body_format: json
+                body:
+                  username: Homelab
+                  embeds:
+                    - title: >-
+                        {{ ('Disk usage: ' ~ disk_alerts | length ~ ' filesystem' ~ ('' if disk_alerts | length == 1 else 's') ~ ' approaching full')
+                           if disk_alerts | length > 0 else 'Disk usage check' }}
+                      description: "{{ disk_message | truncate(4000) }}"
+                      color: "{{ disk_color | int }}"
+                status_code: [200, 204]
+              register: disk_discord
+              failed_when: false
+              no_log: true
+              when: not ansible_check_mode
+
+            # Say why Discord refused without printing the webhook URL
+            - name: Check Discord accepted the message
+              ansible.builtin.assert:
+                that:
+                  - disk_discord.status | default(-1) in [200, 204]
+                fail_msg: "Discord did not accept the message (status {{ disk_discord.status | default('none') }}); check DISCORD_WEBHOOK_URL."
+                success_msg: "Posted the disk usage alert to Discord."
+              when: not ansible_check_mode
+
+            # A check run shows the message instead of posting it
+            - name: Show the message a real run would post
+              ansible.builtin.debug:
+                msg: "{{ disk_message.split('\n') }}"
+              when: ansible_check_mode
