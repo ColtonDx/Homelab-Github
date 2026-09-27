@@ -1,0 +1,103 @@
+---
+# Installs GitLab from GitLab's apt repository and starts it; run tls/gitlab-tls.yaml afterwards for HTTPS; safe to re-run
+# Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce)
+# A re-run keeps HTTPS once tls/gitlab-tls.yaml has installed a certificate, since the URL block follows the certificate's presence
+# The first install writes a random root password to /etc/gitlab/initial_root_password, which GitLab deletes after 24 hours
+- name: Install GitLab on Debian/Ubuntu
+  hosts: gitlab
+  become: true
+  gather_facts: true
+
+  vars:
+    # A separate name, so gitlab_edition can come from the inventory without recursing
+    gitlab_ed: "{{ gitlab_edition | default('ce') }}"
+    gitlab_pkg_name: "gitlab-{{ gitlab_ed }}"
+    gitlab_keyring_path: /etc/apt/keyrings/gitlab.asc
+    gitlab_repo_filename: "gitlab_{{ gitlab_ed }}"
+    gitlab_wait_host: "127.0.0.1"
+    gitlab_wait_port: 80
+
+  pre_tasks:
+    # The apt repository and package steps below only work on Debian-family hosts
+    - name: Validate supported OS family
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "This playbook supports Debian/Ubuntu hosts only."
+
+    # Stop before installing anything when the inputs are missing or wrong
+    - name: Validate the GitLab inputs
+      ansible.builtin.assert:
+        that:
+          - gitlab_ed in ["ce", "ee"]
+          - gitlab_domain | default('') | length > 0
+        fail_msg: "gitlab_domain must be set, and gitlab_edition must be either 'ce' or 'ee'."
+
+  tasks:
+    # Packages GitLab's installer expects to find
+    - name: Install GitLab prerequisites
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, openssh-server, tzdata, perl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Holds the repository signing key referenced by the source entry
+    - name: Ensure apt keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # Downloaded once; force: false keeps re-runs from fetching it again
+    - name: Add GitLab repository signing key
+      ansible.builtin.get_url:
+        url: "https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_ed }}/gpgkey"
+        dest: "{{ gitlab_keyring_path }}"
+        mode: "0644"
+        force: false
+
+    # Refreshes the package cache only when the source entry is added or changes
+    - name: Add GitLab apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by={{ gitlab_keyring_path }}]
+          https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_ed }}/{{ ansible_facts.distribution | lower }}/
+          {{ ansible_facts.distribution_release }} main
+        filename: "{{ gitlab_repo_filename }}"
+        state: present
+        update_cache: true
+
+    # Installs GitLab if missing; an installed version is left alone, so upgrades stay a deliberate step
+    - name: Install GitLab package
+      ansible.builtin.apt:
+        name: "{{ gitlab_pkg_name }}"
+        state: present
+
+    # Writes the URL block: HTTP on a new host, HTTPS if tls/gitlab-tls.yaml has already installed a certificate
+    - name: Configure GitLab URL
+      ansible.builtin.include_tasks: ../../tasks/gitlab_url.yaml
+
+    # Apply the configuration now so the service checks below see the configured GitLab
+    - name: Flush handlers to apply config before service checks
+      ansible.builtin.meta: flush_handlers
+
+    # GitLab's services all run under runsvdir
+    - name: Ensure GitLab service is enabled and running
+      ansible.builtin.service:
+        name: gitlab-runsvdir
+        enabled: true
+        state: started
+
+    # Reconfigure can take minutes, so wait for the web server before finishing
+    - name: Wait for GitLab local endpoint
+      ansible.builtin.wait_for:
+        host: "{{ gitlab_wait_host }}"
+        port: "{{ gitlab_wait_port }}"
+        timeout: 300
+
+  handlers:
+    # Applies gitlab.rb changes; runs at most once per flush however many tasks changed the file
+    - name: Reconfigure GitLab
+      ansible.builtin.command: gitlab-ctl reconfigure
+      changed_when: true

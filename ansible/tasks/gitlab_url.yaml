@@ -1,0 +1,51 @@
+---
+# The only place GitLab's external_url is written: HTTP until the certificate exists, then HTTPS; used by app-gitlab.yaml and tls/gitlab-tls.yaml
+# Inputs: gitlab_domain (required); gitlab_rb_path and gitlab_ssl_dir override the default locations
+# Notifies the Reconfigure GitLab handler, which each including playbook defines
+
+# Resolve every path once, so the install and TLS playbooks always agree on where things live
+- name: Set GitLab config and certificate paths
+  ansible.builtin.set_fact:
+    gitlab_rb_file: "{{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}"
+    gitlab_ssl_path: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}"
+    gitlab_cert_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.crt"
+    gitlab_key_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.key"
+
+# Whichever playbook runs, the block reflects whether the certificate is actually there
+- name: Check whether the GitLab certificate is installed
+  ansible.builtin.stat:
+    path: "{{ gitlab_cert_file }}"
+  register: gitlab_cert_stat
+
+# Earlier versions of these playbooks wrote TLS settings in a separate block, which the managed block below replaces
+- name: Remove the TLS block written by earlier versions
+  ansible.builtin.blockinfile:
+    path: "{{ gitlab_rb_file }}"
+    marker: "# {mark} ANSIBLE MANAGED SSL CONFIG"
+    state: absent
+  notify: Reconfigure GitLab
+
+# Written at the end of gitlab.rb, so it overrides any external_url set earlier in the file
+- name: Configure GitLab URL and TLS
+  ansible.builtin.blockinfile:
+    path: "{{ gitlab_rb_file }}"
+    marker: "# {mark} ANSIBLE MANAGED URL AND TLS CONFIG"
+    block: |
+      {% if gitlab_cert_stat.stat.exists %}
+      external_url "https://{{ gitlab_domain }}"
+      letsencrypt['enable'] = false
+      nginx['ssl_certificate'] = "{{ gitlab_cert_file }}"
+      nginx['ssl_certificate_key'] = "{{ gitlab_key_file }}"
+      {% else %}
+      external_url "http://{{ gitlab_domain }}"
+      {% endif %}
+  notify: Reconfigure GitLab
+
+# Comment out any other external_url so gitlab.rb has exactly one; the before match keeps the managed block untouched
+- name: Disable external_url lines outside the managed block
+  ansible.builtin.replace:
+    path: "{{ gitlab_rb_file }}"
+    regexp: '^(external_url\s.*)$'
+    replace: '# \1  # superseded by the managed block below'
+    before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+  notify: Reconfigure GitLab

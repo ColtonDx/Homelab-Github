@@ -1,0 +1,61 @@
+---
+# Issues and renews Kasm Workspaces' TLS certificate with acme.sh and installs it into Kasm's nginx; run after deployment/app-kasm.yaml; safe to re-run
+# Inventory: kasm_domain (required); Vault fields at KV_PATH: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Kasm has no reload, so renewals restart its services, a brief interruption for connected sessions
+- name: Configure Kasm TLS certificate
+  hosts: kasm
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+    vault_kv_path: "{{ lookup('env', 'KV_PATH') }}"
+    kasm_certs_dir: /opt/kasm/current/certs
+    vault_secrets:
+      - path: "{{ vault_kv_path }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_kv_path }}"
+        field: CF_EMAIL
+        var: acme_email
+
+  pre_tasks:
+    # Stop before touching the host when the domain is missing
+    - name: Validate the Kasm inputs
+      ansible.builtin.assert:
+        that:
+          - kasm_domain | default('') | length > 0
+        fail_msg: "kasm_domain must be set in the inventory."
+
+    # The certificate goes into Kasm's own folder, which only exists once Kasm is installed
+    - name: Check Kasm is installed
+      ansible.builtin.stat:
+        path: "{{ kasm_certs_dir }}"
+      register: kasm_certs_stat
+
+    # Fail with a clear next step rather than partway through
+    - name: Require app-kasm.yaml to have run
+      ansible.builtin.assert:
+        that:
+          - kasm_certs_stat.stat.exists
+        fail_msg: "{{ kasm_certs_dir }} not found; run deployment/app-kasm.yaml first."
+
+    # Read the Cloudflare credentials acme_cert.yaml needs
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+  tasks:
+    # Kasm's nginx reads these fixed file names; the current path follows Kasm upgrades through its symlink
+    - name: Set ACME vars for Kasm
+      ansible.builtin.set_fact:
+        acme_domain: "{{ kasm_domain }}"
+        acme_ssl_dir: "{{ kasm_certs_dir }}"
+        acme_key_path: "{{ kasm_certs_dir }}/kasm_nginx.key"
+        acme_fullchain_path: "{{ kasm_certs_dir }}/kasm_nginx.crt"
+        acme_reloadcmd: "/opt/kasm/bin/stop && /opt/kasm/bin/start"
+
+    # Issue or renew the certificate over a Cloudflare DNS challenge and install it with the restart command above
+    - name: Issue and install ACME certificate
+      ansible.builtin.include_tasks: tasks/acme_cert.yaml

@@ -1,0 +1,166 @@
+---
+# Installs Kasm Workspaces, or upgrades it when kasm_version is newer than what is installed; run tls/kasm-tls.yaml afterwards for its certificate
+# Extra vars: kasm_version to pick another release, which also needs its sha256 added to kasm_release_checksums
+# A first install shows the generated credentials in the run output, which Semaphore keeps, so change them after first login
+# Logs under /var/log are root-only, and upgrade output is never shown in the run
+- name: Install Kasm Workspaces on Debian
+  hosts: kasm
+  become: true
+  gather_facts: true
+
+  vars:
+    kasm_version: "1.19.0"
+    # A checksum is per release, so each kasm_version needs its sha256 recorded here
+    kasm_release_checksums:
+      "1.19.0": "8caaa12d97fdd0c20b39b10f50ebe2e0da1951b22a427c60a06491a9ed515d6d"
+    # Each version gets its own folder, so files from an older release can never mix into a newer one
+    kasm_work_dir: "/tmp/kasm_{{ kasm_version }}"
+    kasm_logs: [/var/log/kasm-install.log, /var/log/kasm-upgrade.log]
+
+  tasks:
+    # Kasm runs its services in Docker
+    - name: Install Docker Engine
+      ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
+
+    # Refuse to download a release whose checksum is not pinned
+    - name: Require a checksum for the requested Kasm version
+      ansible.builtin.assert:
+        that:
+          - kasm_version in kasm_release_checksums
+        fail_msg: >-
+          No sha256 recorded for Kasm {{ kasm_version }}. Add it to
+          kasm_release_checksums before running.
+
+    # Kasm points /opt/kasm/current at the installed version's folder
+    - name: Resolve the Kasm current symlink
+      ansible.builtin.stat:
+        path: /opt/kasm/current
+      register: kasm_current
+
+    # The version is the last part of the symlink's target; empty when Kasm is not installed
+    - name: Set installed Kasm version
+      ansible.builtin.set_fact:
+        kasm_installed_version: >-
+          {{ kasm_current.stat.lnk_target | default('') | regex_replace('^.*/', '') }}
+
+    # A real folder instead of a symlink means the installed version cannot be worked out safely
+    - name: Fail when Kasm is present but not a versioned symlink
+      ansible.builtin.assert:
+        that:
+          - not (kasm_current.stat.exists and not kasm_current.stat.islnk)
+        fail_msg: >-
+          /opt/kasm/current exists but is not a symlink, so the installed
+          version cannot be determined. Expected a link to /opt/kasm/<version>.
+
+    # Guard the version comparison below against an unexpected symlink target
+    - name: Fail when the installed version is not a version number
+      ansible.builtin.assert:
+        that:
+          - kasm_installed_version is match('^[0-9]+(\\.[0-9]+)*([.-][0-9a-f]+)?$')
+        fail_msg: >-
+          /opt/kasm/current points at '{{ kasm_current.stat.lnk_target | default('') }}',
+          whose version '{{ kasm_installed_version }}' is not a version number.
+        success_msg: "Installed Kasm version {{ kasm_installed_version }}"
+      when: kasm_installed_version | length > 0
+
+    # Install when missing, upgrade when the requested version is newer, otherwise leave it alone
+    - name: Decide whether Kasm needs installing or upgrading
+      ansible.builtin.set_fact:
+        kasm_is_installed: "{{ kasm_installed_version | length > 0 }}"
+        kasm_needs_change: >-
+          {{ kasm_installed_version | length == 0
+             or kasm_version is version(kasm_installed_version, '>', version_type='loose') }}
+
+    # Say what this run is about to do
+    - name: Report Kasm version state
+      ansible.builtin.debug:
+        msg: >-
+          Installed: {{ kasm_installed_version if kasm_is_installed else 'none' }},
+          requested: {{ kasm_version }} -
+          {{ 'no action, installed is same or newer' if not kasm_needs_change
+             else ('installing' if not kasm_is_installed else 'upgrading') }}
+
+    # Logs from earlier runs hold the generated passwords, so find any that exist
+    - name: Find existing Kasm logs
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ kasm_logs }}"
+      register: kasm_log_stats
+
+    # Make sure only root can read them
+    - name: Restrict existing Kasm logs to root
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        mode: "0600"
+      loop: "{{ kasm_log_stats.results | selectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # Everything that downloads, installs or upgrades runs only when a change is needed
+    - name: Converge Kasm to the requested version
+      when: kasm_needs_change
+      block:
+        # Holds the download and the extracted installer for this version only
+        - name: Create the working folder
+          ansible.builtin.file:
+            path: "{{ kasm_work_dir }}"
+            state: directory
+            mode: "0700"
+
+        # The pinned checksum rejects a corrupted or tampered download
+        - name: Download Kasm release
+          ansible.builtin.get_url:
+            url: "https://kasm-static-content.s3.amazonaws.com/kasm_release_{{ kasm_version }}.tar.gz"
+            dest: "{{ kasm_work_dir }}/kasm_release.tar.gz"
+            checksum: "sha256:{{ kasm_release_checksums[kasm_version] }}"
+            mode: "0600"
+
+        # Unpacks to a kasm_release folder inside the working folder
+        - name: Extract Kasm release
+          ansible.builtin.unarchive:
+            src: "{{ kasm_work_dir }}/kasm_release.tar.gz"
+            dest: "{{ kasm_work_dir }}"
+            remote_src: true
+
+        # Answers no to the swap-file prompt; output goes to the root-only log and is kept so the credentials can be shown
+        - name: Run Kasm install script
+          ansible.builtin.shell: |
+            set -o pipefail
+            umask 077
+            printf 'n\n' | bash {{ kasm_work_dir }}/kasm_release/install.sh --accept-eula -e 2>&1 | tee /var/log/kasm-install.log
+          args:
+            executable: /bin/bash
+          register: kasm_install_output
+          when: not kasm_is_installed
+
+        # First install only: show the generated credentials once so they can be saved; upgrades never reach this
+        - name: Show the generated Kasm credentials
+          ansible.builtin.debug:
+            msg: >-
+              {{ kasm_install_output.stdout | regex_search('(?s)[^\n]*Login Credentials.*')
+                 | default('Credentials not found in the installer output; see /var/log/kasm-install.log', true) }}
+          when: not kasm_is_installed
+
+        # Output goes only to the root-only log, never back to Ansible
+        - name: Run Kasm upgrade script
+          ansible.builtin.shell: |
+            set -o pipefail
+            umask 077
+            bash {{ kasm_work_dir }}/kasm_release/upgrade.sh > /var/log/kasm-upgrade.log 2>&1
+          args:
+            executable: /bin/bash
+          when: kasm_is_installed
+
+        # Points to the log, which is where the generated credentials are after a first install
+        - name: Show where Kasm log is saved
+          ansible.builtin.debug:
+            msg: >-
+              Kasm {{ 'install' if not kasm_is_installed else 'upgrade' }}
+              output saved to /var/log/kasm-{{ 'install' if not kasm_is_installed else 'upgrade' }}.log (root only)
+
+      always:
+        # Remove the download and installer whether the install worked or not
+        - name: Remove the working folder
+          ansible.builtin.file:
+            path: "{{ kasm_work_dir }}"
+            state: absent

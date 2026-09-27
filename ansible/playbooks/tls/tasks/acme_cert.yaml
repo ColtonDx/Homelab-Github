@@ -191,7 +191,21 @@
     path: "{{ acme_fullchain_path }}"
   register: acme_fullchain_stat
 
-# Copy the certificate to the service and reload it, only when it changed or is missing; acme.sh remembers this for cron renewals
+# acme.sh saves the reload command at install time and cron renewals reuse it, so check the saved one is still current
+- name: Read acme.sh's saved settings for this domain
+  slurp:
+    src: "/root/.acme.sh/{{ acme_domain }}_ecc/{{ acme_domain }}.conf"
+  register: acme_domain_conf
+  failed_when: false
+
+# acme.sh stores the command base64-encoded between these markers
+- name: Check whether the saved reload command matches
+  set_fact:
+    acme_reloadcmd_saved: >-
+      {{ ('__ACME_BASE64__START_' ~ (acme_reloadcmd | b64encode) ~ '__ACME_BASE64__END_')
+         in (acme_domain_conf.content | default('') | b64decode) }}
+
+# Copy the certificate to the service and reload it when it changed, is missing, or the saved reload command is out of date
 - name: Install certificate into target directory and reload service
   shell: |
     /root/.acme.sh/acme.sh --install-cert -d "{{ acme_domain }}" \
@@ -204,6 +218,7 @@
     or acme_renew_changed
     or (not acme_key_stat.stat.exists)
     or (not acme_fullchain_stat.stat.exists)
+    or (not acme_reloadcmd_saved | bool)
 
 # Report which domain was handled and where its certificate lives
 - name: Show ACME certificate target domain
