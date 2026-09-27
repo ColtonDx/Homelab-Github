@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and fill in; Proxmox credentials come from TF_VAR_* environment variables instead
+target_node   = "pve-node-1"
+template_name = "ubuntu-cloud-template"
+storage_pool  = "local-zfs"
+ip_address    = "192.0.2.40"
+gateway       = "192.0.2.1"
+
+# Only when adopting the existing VM with terraform import, so the plan keeps its current MAC
+# mac_address = "BC:24:11:00:00:00"
