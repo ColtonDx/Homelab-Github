@@ -1,0 +1,51 @@
+---
+# Runs a DVBMv3 backup job on demand and waits for it to finish; fails unless the backup succeeds
+# Extra vars: backup_job (required, the DVBMv3 job name, which for a stack is its Backup label), dvbm_backup_timeout (1800), dvbm_backup_interval (10)
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, DVBM_URL; Vault: DVBM3_PASSWORD at dvbm (vault_dvbm_path renames it)
+- name: Run a DVBMv3 backup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # Read the connection settings and the job once, so the checks below can name what is missing
+    - name: Read the connection settings from the environment
+      ansible.builtin.set_fact:
+        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+        dvbm_url: "{{ lookup('ansible.builtin.env', 'DVBM_URL') | regex_replace('/+$', '') }}"
+      no_log: true
+
+    # Stop before calling anything when the job or a connection is not identified
+    - name: Validate the inputs
+      ansible.builtin.assert:
+        that:
+          - backup_job | default('') | length > 0
+          - vault_addr | length > 0
+          - vault_token | length > 0
+          - dvbm_url | length > 0
+        fail_msg: "Pass backup_job, and set VAULT_ADDR, VAULT_TOKEN and DVBM_URL in the environment."
+
+    # The app password DVBMv3 logs in with
+    - name: Request the DVBMv3 password
+      ansible.builtin.set_fact:
+        vault_secrets:
+          - { path: "{{ vault_dvbm_path | default('dvbm') }}", field: DVBM3_PASSWORD, var: dvbm_password }
+
+    # Fails naming the path when the password is missing
+    - name: Load the DVBMv3 password from Vault
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # Fails the play unless the backup succeeds, and sets dvbm_backup_id
+    - name: Run the backup
+      ansible.builtin.include_tasks: ../../tasks/dvbm_run_backup.yaml
+      vars:
+        dvbm_backup_name: "{{ backup_job }}"
+
+    # The ID is what portainer/restore-stack.yaml needs to restore this backup
+    - name: Report the backup ID for a restore
+      ansible.builtin.debug:
+        msg: >-
+          Backup ID {{ dvbm_backup_id }}. To restore a stack from it, run ansible/playbooks/portainer/restore-stack.yaml
+          -e app_name=<app> -e portainer_endpoint=<environment> -e dvbm_backup_id={{ dvbm_backup_id }} -e dvbm_restore_confirmed=true

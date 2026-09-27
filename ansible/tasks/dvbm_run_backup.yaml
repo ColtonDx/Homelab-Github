@@ -1,5 +1,5 @@
 ---
-# Runs a stack's DVBMv3 backup job on demand and waits for it; fails the play if the backup does not succeed, so a bad backup stops an update
+# Runs a stack's DVBMv3 backup job on demand and waits for it; used by backups/dvbm-backup.yaml and portainer/update-stack.yaml, and fails the play unless the backup succeeds
 # Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_backup_timeout (default 1800), dvbm_backup_interval (default 10), dvbm_validate_certs (default false)
 # Sets: dvbm_backup_id, the backup record to restore from later
 
@@ -56,7 +56,7 @@
   ansible.builtin.fail:
     msg: >-
       No DVBMv3 backup job named '{{ dvbm_backup_name }}'. Deploy the stack with DVBM_JOB=true
-      so the job is registered, or create it manually before running an update.
+      so the job is registered, or create it manually.
   when: dvbm_run_job == {}
 
 # The newest record before triggering, so the new run can be told apart from older ones
@@ -113,13 +113,13 @@
   ansible.builtin.set_fact:
     dvbm_backup_record: "{{ dvbm_poll.json | first }}"
 
-# A failed backup must stop the update before anything changes
+# A failed backup stops the play, so update-stack.yaml never updates without one
 - name: Fail if the backup did not succeed
   ansible.builtin.fail:
     msg: >-
       DVBMv3 backup '{{ dvbm_backup_name }}' finished with status
       '{{ dvbm_backup_record.status }}': {{ dvbm_backup_record.error_message | default('no error message') }}.
-      Aborting before the update.
+      Stopping here.
   when: dvbm_backup_record.status != 'success'
 
 # Remembered so a failed update can point at the exact backup to restore

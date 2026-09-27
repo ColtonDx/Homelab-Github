@@ -31,7 +31,7 @@
 
     # A failed backup fails the play here, before anything changes
     - name: Run pre-upgrade DVBMv3 backup
-      ansible.builtin.include_tasks: tasks/dvbm_run_backup.yaml
+      ansible.builtin.include_tasks: ../../tasks/dvbm_run_backup.yaml
       vars:
         dvbm_backup_name: "{{ stack_backup_label }}"
       when:
