@@ -2,6 +2,7 @@
 # Checks disk usage on Linux hosts and posts one Discord message, sent from the controller, listing every filesystem approaching full, and any host that could not be checked
 # Extra vars: target_hosts (default linux), disk_warn_percent (80), disk_critical_percent (90), disk_report_ok=true to also post when all is well
 # Inventory: disk_warn_percent, disk_critical_percent, disk_ignore_mounts and disk_ignore_fstypes per host or group, to tune or skip filesystems
+# Inventory: disk_mount_thresholds per host gives one mount its own limits, e.g. {"/mnt/media": {warn: 97, critical: 99}}; either key may be left out
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: DISCORD_WEBHOOK_URL at discord (vault_discord_path renames it)
 # Each host records its own flagged filesystems; nothing is sent from the hosts themselves
 - name: Check disk usage
@@ -31,22 +32,25 @@
         disk_checked: "{{ disk_df is not unreachable and disk_df.stdout_lines | default([]) | length > 1 }}"
         disk_flagged: []
 
-    # Each filesystem at or over this host's warning threshold, marked critical over the critical one
+    # Each filesystem at or over its warning threshold, marked critical over its critical one; a mount's own limits beat the host's
     - name: Flag filesystems approaching full
       ansible.builtin.set_fact:
         disk_flagged: >-
           {{ disk_flagged + [{'mount': fields[4], 'percent': percent | int, 'avail': fields[2] | int,
-                              'critical': percent | int >= disk_critical_percent | default(90) | int}] }}
+                              'critical': percent | int >= critical | int}] }}
       loop: "{{ disk_df.stdout_lines[1:] if disk_checked else [] }}"
       loop_control:
         label: "{{ fields[4] | default(item) }}"
       vars:
         fields: "{{ item.split(None, 4) }}"
         percent: "{{ fields[3] | replace('%', '') }}"
+        mount_limits: "{{ (disk_mount_thresholds | default({}))[fields[4]] | default({}) if fields | length == 5 else {} }}"
+        warn: "{{ mount_limits.warn | default(disk_warn_percent | default(80)) }}"
+        critical: "{{ mount_limits.critical | default(disk_critical_percent | default(90)) }}"
       when:
         - fields | length == 5
         - percent is match('^[0-9]+$')
-        - percent | int >= disk_warn_percent | default(80) | int
+        - percent | int >= warn | int
         - fields[4] not in disk_ignore_mounts | default([])
 
     # Runs once on the controller so one message covers every host; unreachable hosts stay in the play, so this runs even when some are down
@@ -112,7 +116,7 @@
                   ⚪ Could not check: {{ disk_unchecked | join(', ') }}
                   {% endif %}
                   {% if disk_alerts | length == 0 and disk_unchecked | length == 0 %}
-                  🟢 Every filesystem is under {{ disk_warn_percent | default(80) }}%.
+                  🟢 Every filesystem is under its warning threshold.
                   {% endif %}
                 disk_color: >-
                   {{ 15158332 if disk_alerts | selectattr('critical') | list | length > 0
