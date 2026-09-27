@@ -1,0 +1,314 @@
+---
+# Builds a Semaphore remote runner on the machine it runs on: Ansible in a venv with this repo's collections, Terraform, and the runner service
+# Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml
+# Bootstrap needs only git and ansible-core from the distribution, since this playbook uses no collections
+# Inventory or extra vars: semaphore_url (required); semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
+# Optional: semaphore_runner_docker=true also installs Docker, for runners that build images
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: SEMAPHORE_REGISTRATION_TOKEN at semaphore (vault_semaphore_path renames it), read only when registering
+- name: Build the Semaphore runner
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+
+  vars:
+    # The runner must match the Semaphore server's version
+    runner_semaphore_version: "2.19.12"
+    runner_terraform_version: "1.16.4"
+    # ansible-core 2.20 and later need Python 3.12, so hosts on Python 3.11 (e.g. Debian 12) get the 2.19 series
+    runner_python_packages:
+      - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
+      - hvac==2.4.0
+    # community.general for the terraform module, community.hashi_vault for tasks/var_lookup.yaml
+    runner_collection_pins:
+      - community.general:==13.4.0
+      - community.hashi_vault:==7.1.0
+    runner_user: semaphore
+    runner_home: /var/lib/semaphore-runner
+    runner_config_dir: /etc/semaphore-runner
+    runner_opt: /opt/semaphore-runner
+    runner_venv: "{{ runner_opt }}/venv"
+    runner_collections: "{{ runner_opt }}/collections"
+    runner_token_file: "{{ runner_home }}/runner-token"
+    runner_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('') }}"
+    runner_packages:
+      Debian: [git, unzip, curl, ca-certificates, python3, python3-venv, python3-setuptools, openssh-client]
+      RedHat: [git, unzip, curl, ca-certificates, python3, python3-setuptools, openssh-clients]
+
+  handlers:
+    # Picks up a new binary, config or unit
+    - name: Restart the runner
+      ansible.builtin.systemd:
+        name: semaphore-runner
+        state: restarted
+        daemon_reload: true
+
+  tasks:
+    # Stop before changing anything when the server is unknown or the platform is not handled
+    - name: Validate the inputs
+      ansible.builtin.assert:
+        that:
+          - semaphore_url | default('') | length > 0
+          - ansible_facts.os_family in runner_packages
+          - runner_arch | length > 0
+        fail_msg: >-
+          Set semaphore_url in the inventory's all group (localhost only sees those) or with -e;
+          the runner supports Debian and Red Hat families on x86_64 or aarch64.
+
+    # Tools the runner's jobs call directly; setuptools is for older ansible-core's pip module, e.g. Debian 12's
+    - name: Install the base packages
+      ansible.builtin.package:
+        name: "{{ runner_packages[ansible_facts.os_family] }}"
+        state: present
+
+    # Jobs run as this account, never as root
+    - name: Create the runner account
+      ansible.builtin.user:
+        name: "{{ runner_user }}"
+        system: true
+        home: "{{ runner_home }}"
+        create_home: true
+        shell: /bin/bash
+
+    # The home holds the runner token and job checkouts, so only the runner can read it
+    - name: Create the runner directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ runner_user }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ runner_home }}", owner: "{{ runner_user }}", mode: "0700" }
+        - { path: "{{ runner_home }}/tmp", owner: "{{ runner_user }}", mode: "0700" }
+        - { path: "{{ runner_config_dir }}", owner: root, mode: "0750" }
+        - { path: "{{ runner_opt }}", owner: root, mode: "0755" }
+      loop_control:
+        label: "{{ item.path }}"
+
+    # Pinned above, so every runner gets the same Ansible whatever the distribution ships
+    - name: Install Ansible and its Python libraries into the venv
+      ansible.builtin.pip:
+        name: "{{ runner_python_packages }}"
+        virtualenv: "{{ runner_venv }}"
+        virtualenv_command: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }} -m venv"
+
+    # Pinned above; --upgrade moves an installed collection to the pinned version in either direction
+    - name: Install the collections
+      ansible.builtin.command:
+        argv: "{{ [runner_venv ~ '/bin/ansible-galaxy', 'collection', 'install', '--upgrade', '-p', runner_collections] + runner_collection_pins }}"
+      register: runner_galaxy
+      changed_when: "'was installed successfully' in runner_galaxy.stdout"
+
+    # Compare before downloading, so a re-run is quick and only a version change replaces the binary
+    - name: Read the installed Terraform version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/terraform, version, -json]
+      register: runner_terraform_current
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Verified against HashiCorp's published checksums
+    - name: Install Terraform
+      when: (runner_terraform_current.stdout | default('{}', true) | from_json).terraform_version | default('') != runner_terraform_version
+      block:
+        # Kept apart from the installed binary until the checksum has passed
+        - name: Download Terraform
+          ansible.builtin.get_url:
+            url: "{{ base }}_linux_{{ runner_arch }}.zip"
+            checksum: "sha256:{{ base }}_SHA256SUMS"
+            dest: "{{ runner_opt }}/terraform.zip"
+            mode: "0644"
+          vars:
+            base: "https://releases.hashicorp.com/terraform/{{ runner_terraform_version }}/terraform_{{ runner_terraform_version }}"
+
+        # Overwrites any older binary in place
+        - name: Unpack Terraform
+          ansible.builtin.unarchive:
+            src: "{{ runner_opt }}/terraform.zip"
+            dest: /usr/local/bin
+            include: [terraform]
+            mode: "0755"
+            remote_src: true
+
+    # Compare before downloading, as with Terraform
+    - name: Read the installed Semaphore version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/semaphore, version]
+      register: runner_semaphore_current
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Verified against the release's published checksums
+    - name: Install Semaphore
+      when: runner_semaphore_current.stdout | default('') is not match(runner_semaphore_version | regex_escape ~ '-')
+      block:
+        # Kept apart from the installed binary until the checksum has passed
+        - name: Download Semaphore
+          ansible.builtin.get_url:
+            url: "{{ base }}/semaphore_{{ runner_semaphore_version }}_linux_{{ runner_arch }}.tar.gz"
+            checksum: "sha256:{{ base }}/semaphore_{{ runner_semaphore_version }}_checksums.txt"
+            dest: "{{ runner_opt }}/semaphore.tar.gz"
+            mode: "0644"
+          vars:
+            base: "https://github.com/semaphoreui/semaphore/releases/download/v{{ runner_semaphore_version }}"
+
+        # Only the binary is needed from the archive
+        - name: Unpack Semaphore
+          ansible.builtin.unarchive:
+            src: "{{ runner_opt }}/semaphore.tar.gz"
+            dest: /usr/local/bin
+            include: [semaphore]
+            mode: "0755"
+            remote_src: true
+          notify: Restart the runner
+
+    # Semaphore passes jobs only PATH and env_vars, so the collections path goes here; the token lives in its own file
+    - name: Write the runner config
+      ansible.builtin.copy:
+        dest: "{{ runner_config_dir }}/config.json"
+        owner: root
+        group: "{{ runner_user }}"
+        mode: "0640"
+        content: >-
+          {{ {'web_host': semaphore_url | regex_replace('/+$', ''),
+              'tmp_path': runner_home ~ '/tmp',
+              'env_vars': {'ANSIBLE_COLLECTIONS_PATH': runner_collections},
+              'runner': {'token_file': runner_token_file,
+                         'name': semaphore_runner_name | default(ansible_facts.hostname),
+                         'tags': semaphore_runner_tags | default([]),
+                         'max_parallel_tasks': semaphore_runner_max_parallel_tasks | default(4) | int,
+                         'enabled': true}} | to_nice_json }}
+      notify: Restart the runner
+
+    # The venv comes first on PATH, so jobs use the pinned ansible-playbook
+    - name: Install the runner service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/semaphore-runner.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Semaphore runner
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User={{ runner_user }}
+          Group={{ runner_user }}
+          WorkingDirectory={{ runner_home }}
+          Environment=PATH={{ runner_venv }}/bin:/usr/local/bin:/usr/bin:/bin
+          ExecStart=/usr/local/bin/semaphore runner start --config {{ runner_config_dir }}/config.json
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart the runner
+
+    # A token file means this runner is already registered, so the registration token is not needed again
+    - name: Check whether the runner is registered
+      ansible.builtin.stat:
+        path: "{{ runner_token_file }}"
+      register: runner_token_stat
+
+    # Only a new runner needs the registration token; a check run registers nothing
+    - name: Register the runner with Semaphore
+      when:
+        - not runner_token_stat.stat.exists
+        - not ansible_check_mode
+      block:
+        # Read over Vault's HTTP API, since var_lookup.yaml needs a collection this playbook is still installing
+        - name: Read the registration token from Vault
+          ansible.builtin.uri:
+            url: >-
+              {{ lookup('ansible.builtin.env', 'VAULT_ADDR') | regex_replace('/+$', '') }}/v1/{{
+                 lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}/data/{{ vault_semaphore_path | default('semaphore') }}
+            headers:
+              X-Vault-Token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+            status_code: [-1, 200, 403, 404]
+          register: runner_vault
+          no_log: true
+
+        # Name what is wrong without showing the token
+        - name: Require the registration token
+          ansible.builtin.assert:
+            that:
+              - runner_vault.status == 200
+              - runner_vault.json.data.data.SEMAPHORE_REGISTRATION_TOKEN | default('') | length > 0
+            fail_msg: >-
+              Could not read SEMAPHORE_REGISTRATION_TOKEN at {{ vault_semaphore_path | default('semaphore') }} in Vault
+              (status {{ runner_vault.status }}); check VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT.
+
+        # The token goes in on stdin so it never appears in a process list; the server hands back this runner's own token
+        - name: Register the runner
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/semaphore
+              - runner
+              - register
+              - --config
+              - "{{ runner_config_dir }}/config.json"
+              - --stdin-registration-token
+            stdin: "{{ runner_vault.json.data.data.SEMAPHORE_REGISTRATION_TOKEN }}"
+            creates: "{{ runner_token_file }}"
+          become_user: "{{ runner_user }}"
+          register: runner_register
+          failed_when: false
+          no_log: true
+          notify: Restart the runner
+
+        # Semaphore's own output carries no token, so it is safe to show on failure
+        - name: Check the registration succeeded
+          ansible.builtin.assert:
+            that:
+              - runner_register.rc == 0
+            fail_msg: "Registration failed: {{ (runner_register.stderr | default('') ~ ' ' ~ runner_register.stdout | default('')) | trim | truncate(600) }}"
+
+    # Semaphore writes the token world-readable, so tighten it
+    - name: Protect the runner token
+      ansible.builtin.file:
+        path: "{{ runner_token_file }}"
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        mode: "0600"
+      when: not ansible_check_mode
+
+    # Only for runners that build images; the runner account joins the docker group
+    - name: Install Docker
+      ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
+      vars:
+        docker_users: ["{{ runner_user }}"]
+      when: semaphore_runner_docker | default(false) | bool
+
+    # Starts on boot and now; a check run has not written the unit, so it skips this and the checks below
+    - name: Enable and start the runner
+      ansible.builtin.systemd:
+        name: semaphore-runner
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    # Apply any restart now so the checks below see the final state
+    - name: Apply pending restarts
+      ansible.builtin.meta: flush_handlers
+
+    # A runner that cannot reach the server exits and restarts, which shows as not active
+    - name: Check the runner stays up
+      ansible.builtin.command:
+        argv: [systemctl, is-active, semaphore-runner]
+      register: runner_active
+      retries: 3
+      delay: 5
+      until: runner_active.stdout == 'active'
+      changed_when: false
+      when: not ansible_check_mode
+
+    # Versions and name, so the Runners page in Semaphore can be matched to this host
+    - name: Report the runner
+      ansible.builtin.debug:
+        msg: >-
+          Runner '{{ semaphore_runner_name | default(ansible_facts.hostname) }}' is running Semaphore {{ runner_semaphore_version }}
+          against {{ semaphore_url }}, with {{ runner_venv }}/bin/ansible-playbook and Terraform {{ runner_terraform_version }}.
