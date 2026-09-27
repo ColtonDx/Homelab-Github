@@ -1,7 +1,7 @@
 ---
 # Runs a DVBMv3 backup job on demand and waits for it to finish; fails unless the backup succeeds
 # Extra vars: backup_job (required, the DVBMv3 job name, which for a stack is its Backup label), dvbm_backup_timeout (1800), dvbm_backup_interval (10)
-# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, DVBM_URL; Vault: DVBM3_PASSWORD at dvbm (vault_dvbm_path renames it)
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, DVBM_URL; Vault: DVBM3_PASSWORD at dvbmv3 (vault_dvbm_path renames it)
 - name: Run a DVBMv3 backup
   hosts: localhost
   connection: local
@@ -31,7 +31,7 @@
     - name: Request the DVBMv3 password
       ansible.builtin.set_fact:
         vault_secrets:
-          - { path: "{{ vault_dvbm_path | default('dvbm') }}", field: DVBM3_PASSWORD, var: dvbm_password }
+          - { path: "{{ vault_dvbm_path | default('dvbmv3') }}", field: DVBM3_PASSWORD, var: dvbm_password }
 
     # Fails naming the path when the password is missing
     - name: Load the DVBMv3 password from Vault

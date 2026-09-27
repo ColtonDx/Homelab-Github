@@ -1,7 +1,7 @@
 ---
 # Shared by deploy-stack and update-stack: validates inputs, loads credentials, reads the compose file, and finds the environment and stack
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, PORTAINER_URL; optional NPM_URL, DVBM_URL
-# Vault: PORTAINER_TOKEN at portainer, DVBM3_PASSWORD at dvbm, NPM_USER and NPM_PASSWORD at nginx
+# Vault: PORTAINER_TOKEN at portainer, DVBM3_PASSWORD at dvbmv3, NPM_USER and NPM_PASSWORD at nginx
 # vault_portainer_path, vault_dvbm_path and vault_npm_path rename those paths
 # Inputs: app_name and portainer_endpoint; compose_root (default docker); repo_auth with vault_repo_path for a private repo
 
@@ -84,7 +84,7 @@
   ansible.builtin.set_fact:
     vault_secrets:
       - { path: "{{ vault_portainer_path | default('portainer') }}", field: PORTAINER_TOKEN, var: portainer_token }
-      - { path: "{{ vault_dvbm_path | default('dvbm') }}", field: DVBM3_PASSWORD, var: dvbm_password, required: false }
+      - { path: "{{ vault_dvbm_path | default('dvbmv3') }}", field: DVBM3_PASSWORD, var: dvbm_password, required: false }
       - { path: "{{ vault_npm_path | default('nginx') }}", field: NPM_USER, var: npm_user, required: false }
       - { path: "{{ vault_npm_path | default('nginx') }}", field: NPM_PASSWORD, var: npm_password, required: false }
 
@@ -96,7 +96,7 @@
 - name: Report which optional services are configured
   ansible.builtin.debug:
     msg: >-
-      DVBMv3 credentials {{ 'found' if dvbm_password | length > 0 else 'not found' }} at {{ vault_dvbm_path | default('dvbm') }},
+      DVBMv3 credentials {{ 'found' if dvbm_password | length > 0 else 'not found' }} at {{ vault_dvbm_path | default('dvbmv3') }},
       NPM credentials {{ 'found' if npm_user | length > 0 and npm_password | length > 0 else 'not found' }} at {{ vault_npm_path | default('nginx') }}
 
 # A private repository needs credentials for Portainer to clone it

@@ -1,6 +1,6 @@
 services:
-  Nginx:
-    container_name: nginx-proxy-manager
+  nginx:
+    container_name: nginx
     restart: unless-stopped
     image: 'jc21/nginx-proxy-manager:latest'
     networks:
@@ -17,7 +17,7 @@ services:
       # TrueNAS path to the theme-park script (https://docs.theme-park.dev/themes/nginx-proxy-manager/); change for other hosts
       - /mnt/.ix-apps/docker/volumes/proxy_data/_data/98-themepark:/etc/cont-init.d/99-themepark
     labels:
-      - "Backup=Proxy" # Sets the DVBM Backup Job Label
+      - "Backup=nginx" # Sets the DVBM Backup Job Label
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network
