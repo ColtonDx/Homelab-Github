@@ -1,6 +1,6 @@
 ---
-# Issues and renews GitLab's TLS certificate with acme.sh and switches GitLab to HTTPS; run after deployment/app-gitlab.yaml; safe to re-run
-# Inventory: gitlab_domain (required); Vault fields at KV_PATH: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Issues and renews GitLab's TLS certificate with acme.sh and switches GitLab to HTTPS; deployment/app-gitlab.yaml runs it, and it can run alone; safe to re-run
+# Inventory: gitlab_domain (required); Vault fields at cloudflare: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
 # Renewals run from acme.sh's cron and reload nginx only, so GitLab stays up
 - name: Configure GitLab TLS certificate
   hosts: gitlab
@@ -11,12 +11,11 @@
     vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
     vault_kv_mount: "{{ lookup('env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-    vault_kv_path: "{{ lookup('env', 'KV_PATH') }}"
     vault_secrets:
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_API
         var: cloudflare_api_token
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_EMAIL
         var: acme_email
 
@@ -46,9 +45,13 @@
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
 
   tasks:
-    # Sets the shared config and certificate paths; the block itself is unchanged here on an installed host
-    - name: Resolve GitLab's paths and current URL config
-      ansible.builtin.include_tasks: ../../tasks/gitlab_url.yaml
+    # One place for every path, so the certificate lands where the URL block points
+    - name: Set GitLab config and certificate paths
+      ansible.builtin.set_fact:
+        gitlab_rb_file: "{{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}"
+        gitlab_ssl_path: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}"
+        gitlab_cert_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.crt"
+        gitlab_key_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.key"
 
     # acme_cert.yaml installs the certificate at the paths the URL block expects and reloads nginx on every renewal
     - name: Set ACME vars for GitLab
@@ -63,9 +66,34 @@
     - name: Issue and install ACME certificate
       ansible.builtin.include_tasks: tasks/acme_cert.yaml
 
-    # The certificate now exists, so this writes the HTTPS version of the URL block; unchanged on later runs
+    # Earlier versions wrote TLS settings in a separate block, which the managed block below replaces
+    - name: Remove the TLS block written by earlier versions
+      ansible.builtin.blockinfile:
+        path: "{{ gitlab_rb_file }}"
+        marker: "# {mark} ANSIBLE MANAGED SSL CONFIG"
+        state: absent
+      notify: Reconfigure GitLab
+
+    # This playbook owns the URL once it has run; written at the end of gitlab.rb so it overrides any earlier external_url
     - name: Switch GitLab to HTTPS
-      ansible.builtin.include_tasks: ../../tasks/gitlab_url.yaml
+      ansible.builtin.blockinfile:
+        path: "{{ gitlab_rb_file }}"
+        marker: "# {mark} ANSIBLE MANAGED URL AND TLS CONFIG"
+        block: |
+          external_url "https://{{ gitlab_domain }}"
+          letsencrypt['enable'] = false
+          nginx['ssl_certificate'] = "{{ gitlab_cert_file }}"
+          nginx['ssl_certificate_key'] = "{{ gitlab_key_file }}"
+      notify: Reconfigure GitLab
+
+    # Comment out any other external_url so gitlab.rb has exactly one; the before match keeps the managed block untouched
+    - name: Disable external_url lines outside the managed block
+      ansible.builtin.replace:
+        path: "{{ gitlab_rb_file }}"
+        regexp: '^(external_url\s.*)$'
+        replace: '# \1  # superseded by the managed block below'
+        before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+      notify: Reconfigure GitLab
 
   handlers:
     # Applies gitlab.rb changes; runs once at the end of the play if anything changed

@@ -1,6 +1,6 @@
 ---
 # Loads secrets from Vault KV2 and settings from the inventory into facts, fetching each Vault path once
-# Each vault_secrets entry needs var (the fact to set), plus any of: path (default vault_kv_path), field (omit for the whole document)
+# Each vault_secrets entry needs var (the fact to set) and path (the Vault secret), plus optionally field (omit for the whole document)
 # inventory names an inventory variable used before Vault; an entry with only inventory never reads Vault
 # required defaults to true; default is the value used when an optional entry is missing
 
@@ -11,7 +11,8 @@
       - vault_secrets is defined
       - vault_secrets | length > 0
       - vault_secrets | selectattr('var', 'undefined') | list | length == 0
-    fail_msg: "vault_secrets must be a non-empty list of entries, each with at least a var."
+      - vault_secrets | rejectattr('path', 'defined') | rejectattr('inventory', 'defined') | list | length == 0
+    fail_msg: "vault_secrets must be a non-empty list of entries, each with a var and either a path or an inventory variable."
 
 # Clear working facts so a second lookup in the same play starts fresh
 - name: Reset results from any earlier lookup in this play
@@ -33,7 +34,7 @@
   when: inventory_value | string | length > 0
   no_log: true
 
-# An entry with only inventory has no Vault location to fall back to
+# Only entries that name a Vault path can be fetched from Vault
 - name: List the entries that still need Vault
   set_fact:
     vault_needed: "{{ vault_needed + [item] }}"
@@ -42,12 +43,12 @@
     label: "{{ item.var }}"
   when:
     - item.var not in vault_from_inventory
-    - item.inventory is not defined or item.field is defined or item.path is defined
+    - item.path is defined
 
 # Work out which Vault paths to read, each only once
 - name: List the distinct Vault paths to fetch
   set_fact:
-    vault_paths: "{{ vault_needed | map(attribute='path', default=vault_kv_path) | unique | list }}"
+    vault_paths: "{{ vault_needed | map(attribute='path') | unique | list }}"
 
 # A missing path is tolerated here and reported below only if a required entry needs it; other failures still retry and fail
 - name: Fetch secrets from HashiCorp Vault
@@ -88,7 +89,7 @@
   loop_control:
     label: "{{ item.var }}"
   vars:
-    entry_path: "{{ item.path | default(vault_kv_path) }}"
+    entry_path: "{{ item.path | default('') }}"
     inventory_only: "{{ item.inventory is defined and item.field is not defined and item.path is not defined }}"
   when:
     - item.required | default(true) | bool
@@ -120,6 +121,6 @@
   loop_control:
     label: "{{ item.var }}"
   vars:
-    entry_path: "{{ item.path | default(vault_kv_path) }}"
+    entry_path: "{{ item.path | default('') }}"
     inventory_only: "{{ item.inventory is defined and item.field is not defined and item.path is not defined }}"
   no_log: true

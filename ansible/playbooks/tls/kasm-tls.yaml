@@ -1,6 +1,6 @@
 ---
 # Issues and renews Kasm Workspaces' TLS certificate with acme.sh and installs it into Kasm's nginx; run after deployment/app-kasm.yaml; safe to re-run
-# Inventory: kasm_domain (required); Vault fields at KV_PATH: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Inventory: kasm_domain (required); Vault fields at cloudflare: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
 # Kasm has no reload, so renewals restart its services, a brief interruption for connected sessions
 - name: Configure Kasm TLS certificate
   hosts: kasm
@@ -11,13 +11,12 @@
     vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
     vault_kv_mount: "{{ lookup('env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-    vault_kv_path: "{{ lookup('env', 'KV_PATH') }}"
     kasm_certs_dir: /opt/kasm/current/certs
     vault_secrets:
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_API
         var: cloudflare_api_token
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_EMAIL
         var: acme_email
 

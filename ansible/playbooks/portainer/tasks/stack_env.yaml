@@ -1,10 +1,13 @@
 ---
-# Builds a stack's Portainer env from the inventory and Vault; needs shared_secrets and compose_vars, both set by setup.yaml
+# Builds a stack's Portainer env from the inventory and the app's own Vault path; needs compose_vars, set by setup.yaml
 # Inventory: docker_stack_vars applies to every stack, docker_app_vars.<app_name> to one; secrets belong in Vault, not here
-# Lowest to highest precedence: shared KV_PATH, docker_stack_vars, docker_app_vars.<app_name>, kv/<app_name>
+# Lowest to highest precedence: docker_stack_vars, docker_app_vars.<app_name>, the app's Vault path
+# The Vault path is the app name, except where docker_app_vault_paths maps it; dvbmv3 and nginxproxymanager map to dvbm and nginx by default
 - name: Resolve this app's Vault path and inventory settings
   ansible.builtin.set_fact:
-    stack_app_kv_path: "{{ vault_app_kv_path | default(app_name, true) }}"
+    stack_app_kv_path: >-
+      {{ vault_app_kv_path | default(({'dvbmv3': 'dvbm', 'nginxproxymanager': 'nginx'}
+         | combine(docker_app_vault_paths | default({}))).get(app_name, app_name), true) }}
     stack_inventory_vars: "{{ docker_stack_vars | default({}) | combine((docker_app_vars | default({}))[app_name] | default({})) }}"
   # A secret put in the inventory by mistake must not reach the log
   no_log: true
@@ -25,10 +28,10 @@
 - name: Fetch this app's secrets from Vault
   ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
 
-# Later sources win: the shared path, then the inventory, then the app's own path
+# Later sources win: the inventory, then the app's own Vault path
 - name: Merge every source for the compose file
   ansible.builtin.set_fact:
-    stack_values: "{{ shared_secrets | combine(stack_inventory_vars, stack_app_secrets) }}"
+    stack_values: "{{ stack_inventory_vars | combine(stack_app_secrets) }}"
     stack_sources: {}
   no_log: true
 
@@ -41,7 +44,6 @@
     source: >-
       {{ stack_app_kv_path if item in stack_app_secrets
          else 'inventory' if item in stack_inventory_vars
-         else vault_kv_path if item in shared_secrets
          else 'MISSING' }}
 
 # Only names are shown, never values
@@ -56,12 +58,12 @@
   loop: "{{ compose_vars }}"
   when:
     - item in stack_inventory_vars
-    - item in shared_secrets or item in stack_app_secrets
+    - item in stack_app_secrets
 
 # The stack would start with these empty
 - name: Warn about compose vars not found anywhere
   ansible.builtin.debug:
-    msg: "WARNING: '{{ item }}' is referenced in compose but not set in the inventory, '{{ stack_app_kv_path }}' or '{{ vault_kv_path }}'"
+    msg: "WARNING: '{{ item }}' is referenced in compose but not set in the inventory or at '{{ stack_app_kv_path }}' in Vault"
   loop: "{{ compose_vars }}"
   when: item not in stack_values
 

@@ -1,6 +1,6 @@
 ---
 # Issues and renews HashiCorp Vault's TLS certificate with acme.sh, reloading Vault on renewal so it is never restarted and sealed
-# Inventory: vault_domain (required); Vault fields at KV_PATH: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
+# Inventory: vault_domain (required); Vault fields at cloudflare: CF_API and CF_EMAIL, used by acme_cert.yaml for the DNS challenge
 # Bootstrap: the Cloudflare token is read from this same Vault, so it must be running and unsealed; cron renewals do not need it
 - name: Configure HashiCorp Vault TLS certificate
   hosts: vault
@@ -11,13 +11,12 @@
     vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
     vault_kv_mount: "{{ lookup('env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-    vault_kv_path: "{{ lookup('env', 'KV_PATH') }}"
     vault_tls_dir: /opt/vault/tls
     vault_secrets:
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_API
         var: cloudflare_api_token
-      - path: "{{ vault_kv_path }}"
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_EMAIL
         var: acme_email
 

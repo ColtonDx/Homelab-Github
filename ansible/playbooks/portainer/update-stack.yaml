@@ -149,13 +149,9 @@
           no_log: true
 
         # Say exactly what was and was not rolled back, and how to restore the data
-        - name: Notify the failed update via ntfy
-          ansible.builtin.include_tasks: ../../tasks/ntfy_notify.yaml
-          vars:
-            ntfy_title: "Stack update failed: {{ stack_name }}"
-            ntfy_priority: urgent
-            ntfy_tags: "rotating_light"
-            ntfy_message: >-
+        - name: Fail the play after a failed update
+          ansible.builtin.fail:
+            msg: >-
               Stack '{{ stack_name }}' failed its health check after an image update.
               {% if rollback_ref | default('') | length > 0 %}Redeployed {{ rollback_ref }}
               ({{ 'ok' if rollback_result.status | default(0) == 200 else 'failed, status ' ~ rollback_result.status | default('none') }}); the newer images stay pulled.
@@ -163,26 +159,10 @@
               {% if dvbm_backup_id is defined %}To restore the data, pin the previous image in the compose file, then run
               ansible/playbooks/portainer/restore-stack.yaml -e app_name={{ app_name }} -e portainer_endpoint={{ portainer_endpoint }}
               -e dvbm_backup_id={{ dvbm_backup_id }} -e dvbm_restore_confirmed=true{% else %}No pre-upgrade backup was taken.{% endif %}
-          when: ntfy_url | length > 0
-
-        # Report the failure to Semaphore after the notice is sent
-        - name: Fail the play after a failed update
-          ansible.builtin.fail:
-            msg: >-
-              Stack '{{ stack_name }}' failed its health check.
-              {{ ('Redeployed ' ~ rollback_ref ~ '.') if rollback_ref | default('') | length > 0 else 'Nothing was rolled back.' }}
-              {{ ('Pre-upgrade backup ID: ' ~ dvbm_backup_id ~ '.') if dvbm_backup_id is defined else '' }}
 
     # Confirm success, with the backup ID in case a problem shows up later
-    - name: Notify successful update via ntfy
-      ansible.builtin.include_tasks: ../../tasks/ntfy_notify.yaml
-      vars:
-        ntfy_title: "Stack updated: {{ stack_name }}"
-        ntfy_priority: low
-        ntfy_tags: "white_check_mark"
-        ntfy_message: >-
+    - name: Report a successful update
+      ansible.builtin.debug:
+        msg: >-
           Stack '{{ stack_name }}' updated and healthy ({{ stack_containers | join(', ') }}).
           {{ ('Pre-upgrade backup ID: ' ~ dvbm_backup_id ~ '.') if dvbm_backup_id is defined else '' }}
-      when:
-        - update_healthy | default(false) | bool
-        - ntfy_url | length > 0

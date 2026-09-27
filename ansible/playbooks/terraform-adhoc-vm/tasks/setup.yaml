@@ -1,7 +1,7 @@
 ---
 # Shared by build-vm.yaml and delete-vm.yaml: loads secrets, validates the VMID and Garage endpoint, and initialises the VM's state file
-# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, KV_PATH, plus GARAGE_URL unless garage_url is passed
-# Vault fields at KV_PATH: GARAGE_ACCESS_KEY, GARAGE_SECRET_KEY, PROXMOX_API_URL, PROXMOX_API_TOKEN_ID, PROXMOX_API_TOKEN_SECRET
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT, plus GARAGE_URL unless garage_url is passed
+# Vault: GARAGE_ACCESS_KEY and GARAGE_SECRET_KEY at garage; PROXMOX_API_URL, PROXMOX_API_TOKEN_ID and PROXMOX_API_TOKEN_SECRET at proxmox
 # State file: vm-{vm_id}.tfstate by default; state_key_format (or STATE_KEY_FORMAT) changes it and must contain {vm_id}
 
 - name: Set the Vault connection
@@ -9,17 +9,16 @@
     vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
     vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-    vault_kv_path: "{{ lookup('ansible.builtin.env', 'KV_PATH') }}"
   no_log: true
 
 - name: List the secrets this flow needs
   ansible.builtin.set_fact:
     vault_secrets:
-      - { path: "{{ vault_kv_path }}", field: GARAGE_ACCESS_KEY, var: garage_access_key }
-      - { path: "{{ vault_kv_path }}", field: GARAGE_SECRET_KEY, var: garage_secret_key }
-      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_URL, var: proxmox_api_url }
-      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
-      - { path: "{{ vault_kv_path }}", field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
+      - { path: "{{ vault_garage_path | default('garage') }}", field: GARAGE_ACCESS_KEY, var: garage_access_key }
+      - { path: "{{ vault_garage_path | default('garage') }}", field: GARAGE_SECRET_KEY, var: garage_secret_key }
+      - { path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_URL, var: proxmox_api_url }
+      - { path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
+      - { path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
 - name: Load secrets from Vault
   ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
