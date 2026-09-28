@@ -1,0 +1,20 @@
+# Rendered by ansible/playbooks/talos/init-cluster.yaml for one node: install disk, hostname, static address, and the VIP on controlplane nodes
+---
+machine:
+  install:
+    # The OS disk; the Longhorn disk is found by size instead, so a device rename cannot point that at this one
+    disk: {{ talos_node.install_disk }}
+    wipe: false
+  network:
+    hostname: {{ talos_node.name }}
+    interfaces:
+      - interface: {{ talos_node.interface }}
+        addresses:
+          - {{ talos_node.address }}/{{ talos_node.prefix }}
+        routes:
+          - network: 0.0.0.0/0
+            gateway: {{ talos_node.gateway }}
+{% if talos_node.role == 'controlplane' %}
+        vip:
+          ip: {{ talos_cluster.vip }}
+{% endif %}

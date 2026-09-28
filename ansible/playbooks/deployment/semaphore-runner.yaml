@@ -1,5 +1,5 @@
 ---
-# Builds a Semaphore remote runner on the machine it runs on: Ansible in a venv with this repo's collections, Terraform, and the runner service
+# Builds a Semaphore remote runner on the machine it runs on: Ansible in a venv with this repo's collections, Terraform, talosctl, kubectl, and the runner service
 # Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml -e semaphore_url=<url>
 # Bootstrap needs only git and ansible-core from the distribution, since this playbook uses no collections
 # Inventory or extra vars: semaphore_url (required); semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
@@ -15,6 +15,9 @@
     # The runner must match the Semaphore server's version
     runner_semaphore_version: "2.19.12"
     runner_terraform_version: "1.16.4"
+    # talosctl should be within one minor release of the cluster, and kubectl within one of Kubernetes
+    runner_talosctl_version: "1.14.1"
+    runner_kubectl_version: "1.37.1"
     # ansible-core 2.20 and later need Python 3.12, so hosts on Python 3.11 (e.g. Debian 12) get the 2.19 series
     runner_python_packages:
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
@@ -131,6 +134,48 @@
             include: [terraform]
             mode: "0755"
             remote_src: true
+
+    # The Talos playbooks drive the cluster through talosctl, since Talos has no SSH
+    - name: Read the installed talosctl version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/talosctl, version, --client]
+      register: runner_talosctl_current
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # A single binary, verified against the release's published checksums
+    - name: Install talosctl
+      ansible.builtin.get_url:
+        url: "{{ base }}/talosctl-linux-{{ runner_arch }}"
+        checksum: "sha256:{{ base }}/sha256sum.txt"
+        dest: /usr/local/bin/talosctl
+        mode: "0755"
+        force: true
+      vars:
+        base: "https://github.com/siderolabs/talos/releases/download/v{{ runner_talosctl_version }}"
+      when: ('v' ~ runner_talosctl_version) not in runner_talosctl_current.stdout | default('')
+
+    # bootstrap-secrets.yaml creates Secrets and installs Flux with kubectl
+    - name: Read the installed kubectl version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, version, --client, -o, json]
+      register: runner_kubectl_current
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # A single binary, verified against the checksum published beside it
+    - name: Install kubectl
+      ansible.builtin.get_url:
+        url: "{{ base }}/kubectl"
+        checksum: "sha256:{{ base }}/kubectl.sha256"
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+        force: true
+      vars:
+        base: "https://dl.k8s.io/release/v{{ runner_kubectl_version }}/bin/linux/{{ runner_arch }}"
+      when: (runner_kubectl_current.stdout | default('{}', true) | from_json).clientVersion.gitVersion | default('') != 'v' ~ runner_kubectl_version
 
     # Compare before downloading, as with Terraform
     - name: Read the installed Semaphore version
@@ -311,4 +356,4 @@
       ansible.builtin.debug:
         msg: >-
           Runner '{{ semaphore_runner_name | default(ansible_facts.hostname) }}' is running Semaphore {{ runner_semaphore_version }}
-          against {{ semaphore_url }}, with {{ runner_venv }}/bin/ansible-playbook and Terraform {{ runner_terraform_version }}.
+          against {{ semaphore_url }}, with {{ runner_venv }}/bin/ansible-playbook, Terraform {{ runner_terraform_version }}, talosctl {{ runner_talosctl_version }} and kubectl {{ runner_kubectl_version }}.

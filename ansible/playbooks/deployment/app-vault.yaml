@@ -1,0 +1,211 @@
+---
+# Installs HashiCorp Vault from HashiCorp's apt repository, or updates it to vault_version, then runs tls/vault-tls.yaml once Vault is unsealed; safe to re-run
+# Inventory: vault_domain (required); vault_version (e.g. 2.1.1) to install or move to that release, otherwise an installed version is left alone
+# A restart seals Vault, so a new binary or config only takes effect when run with -e vault_restart=true; unseal it by hand afterwards
+# Never initialises or unseals Vault: a new Vault is left for vault operator init, since its unseal keys must not pass through Ansible
+# vault_config_overwrite=true replaces a vault.hcl that differs from the one below; without it the run stops so a hand-made config is never lost
+- name: Install HashiCorp Vault on Debian/Ubuntu
+  hosts: vault
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_keyring_path: /etc/apt/keyrings/hashicorp.asc
+    vault_config_path: /etc/vault.d/vault.hcl
+    # Talk to the local server; the certificate is issued for vault_domain, not 127.0.0.1
+    vault_local_env:
+      VAULT_ADDR: https://127.0.0.1:8200
+      VAULT_SKIP_VERIFY: "true"
+    # The package's own layout, which tls/vault-tls.yaml installs certificates into
+    vault_config: |
+      # Managed by ansible/playbooks/deployment/app-vault.yaml
+      ui = true
+      api_addr = "https://{{ vault_domain }}:8200"
+
+      storage "file" {
+        path = "/opt/vault/data"
+      }
+
+      listener "tcp" {
+        address       = "0.0.0.0:8200"
+        tls_cert_file = "/opt/vault/tls/tls.crt"
+        tls_key_file  = "/opt/vault/tls/tls.key"
+      }
+
+  pre_tasks:
+    # The apt repository and package steps below only work on Debian-family hosts
+    - name: Validate supported OS family
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == "Debian"
+        fail_msg: "This playbook supports Debian/Ubuntu hosts only."
+
+    # Stop before installing anything when the domain is missing
+    - name: Validate the Vault inputs
+      ansible.builtin.assert:
+        that:
+          - vault_domain | default('') | length > 0
+        fail_msg: "vault_domain must be set in the inventory."
+
+  tasks:
+    # Packages the repository setup needs
+    - name: Install Vault prerequisites
+      ansible.builtin.apt:
+        name: [ca-certificates, curl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Holds the repository signing key referenced by the source entry
+    - name: Ensure apt keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # Downloaded once; force: false keeps re-runs from fetching it again
+    - name: Add HashiCorp repository signing key
+      ansible.builtin.get_url:
+        url: https://apt.releases.hashicorp.com/gpg
+        dest: "{{ vault_keyring_path }}"
+        mode: "0644"
+        force: false
+
+    # Refreshes the package cache only when the source entry is added or changes
+    - name: Add HashiCorp apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by={{ vault_keyring_path }}] https://apt.releases.hashicorp.com {{ ansible_facts.distribution_release }} main"
+        filename: hashicorp
+        state: present
+        update_cache: true
+
+    # Tells a brand-new host, whose packaged config can be replaced freely, from one that already ran Vault
+    - name: Check whether Vault was already installed
+      ansible.builtin.stat:
+        path: /usr/bin/vault
+      register: vault_preinstalled
+
+    # A pinned version installs or upgrades to exactly that release; without one an installed Vault is left alone
+    - name: Install the Vault package
+      ansible.builtin.apt:
+        name: "{{ 'vault=' ~ vault_version ~ '-1' if vault_version | default('') | length > 0 else 'vault' }}"
+        state: present
+        update_cache: "{{ vault_version | default('') | length > 0 }}"
+
+    # Read the current config so a hand-made one is never overwritten silently
+    - name: Read the current Vault config
+      ansible.builtin.slurp:
+        src: "{{ vault_config_path }}"
+      register: vault_config_current
+      failed_when: false
+
+    # Only a host this run installed Vault on can have its config replaced without asking
+    - name: Stop before replacing a different config
+      ansible.builtin.assert:
+        that:
+          - vault_config_current.content is not defined
+            or (vault_config_current.content | b64decode) == vault_config
+            or not vault_preinstalled.stat.exists
+            or vault_config_overwrite | default(false) | bool
+        fail_msg: >-
+          {{ vault_config_path }} differs from the config this playbook manages. Compare them with --check --diff,
+          then re-run with -e vault_config_overwrite=true to replace it, or update the config in this playbook to match.
+
+    # Keeps a dated copy of whatever it replaces
+    - name: Write the Vault config
+      ansible.builtin.copy:
+        dest: "{{ vault_config_path }}"
+        content: "{{ vault_config }}"
+        owner: vault
+        group: vault
+        mode: "0640"
+        backup: true
+      register: vault_config_result
+
+    # Starting a stopped Vault loses nothing, since it was sealed already
+    - name: Enable and start Vault
+      ansible.builtin.systemd:
+        name: vault
+        enabled: true
+        state: started
+      register: vault_started
+
+    # Exit code 0 is unsealed and 2 is sealed; anything else means the server is not answering yet
+    - name: Read Vault's status
+      ansible.builtin.command:
+        argv: [vault, status, -format=json]
+      environment: "{{ vault_local_env }}"
+      register: vault_status
+      retries: 10
+      delay: 3
+      until: vault_status.rc in [0, 2]
+      failed_when: vault_status.rc not in [0, 2]
+      changed_when: false
+      check_mode: false
+
+    # The installed binary, compared with the running server below
+    - name: Read the installed Vault version
+      ansible.builtin.command:
+        argv: [vault, version]
+      register: vault_binary
+      changed_when: false
+      check_mode: false
+
+    # A just-started server already runs the new binary and config; otherwise either change needs a restart
+    - name: Work out whether a restart is needed
+      ansible.builtin.set_fact:
+        vault_restart_needed: >-
+          {{ not (vault_started is changed)
+             and ((vault_config_result is changed)
+                  or ((vault_binary.stdout | regex_search('v([0-9.]+)', '\\1') | first)
+                      != (vault_status.stdout | from_json).version | regex_replace('\\+.*$', ''))) }}
+
+    # Only on request, since it seals Vault and every playbook that reads secrets stops working until it is unsealed
+    - name: Restart Vault
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+      when:
+        - vault_restart_needed | bool
+        - vault_restart | default(false) | bool
+
+    # The restart above sealed it, so read the state again
+    - name: Read Vault's status after the restart
+      ansible.builtin.command:
+        argv: [vault, status, -format=json]
+      environment: "{{ vault_local_env }}"
+      register: vault_status_after
+      retries: 10
+      delay: 3
+      until: vault_status_after.rc in [0, 2]
+      failed_when: vault_status_after.rc not in [0, 2]
+      changed_when: false
+      check_mode: false
+      when:
+        - vault_restart_needed | bool
+        - vault_restart | default(false) | bool
+
+    # TLS below needs secrets from this Vault, so it only runs once Vault is initialised and unsealed
+    - name: Record whether Vault is ready
+      ansible.builtin.set_fact:
+        vault_ready: "{{ vault_state.initialized and not vault_state.sealed }}"
+        vault_state_now: "{{ vault_state }}"
+      vars:
+        vault_state: "{{ ((vault_status_after.stdout | default('', true)) or vault_status.stdout) | from_json }}"
+
+    # Says exactly what, if anything, is left to do by hand
+    - name: Report Vault's state
+      ansible.builtin.debug:
+        msg: >-
+          Vault {{ vault_binary.stdout | regex_search('v[0-9.]+') }}:
+          {{ 'not initialised; run vault operator init on the host, store the unseal keys and root token safely, unseal it, then re-run for TLS'
+             if not vault_state_now.initialized
+             else 'sealed; unseal it with vault operator unseal, then re-run for TLS' if vault_state_now.sealed
+             else 'initialised and unsealed' }}{{
+          '. A new binary or config is waiting for a restart; re-run with -e vault_restart=true when you can unseal it straight after'
+             if (vault_restart_needed | bool) and not (vault_restart | default(false) | bool) else '' }}
+
+# Issues or renews the certificate; skipped until Vault is unsealed, since the Cloudflare token lives in Vault
+- name: Configure Vault's TLS certificate
+  ansible.builtin.import_playbook: ../tls/vault-tls.yaml
+  when: vault_ready | default(false) | bool

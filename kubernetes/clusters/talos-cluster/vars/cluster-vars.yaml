@@ -1,0 +1,18 @@
+---
+# Every field at this cluster's flux-talos Vault path becomes a key in cluster-vars, e.g. DOMAIN and CLUSTER_SUBDOMAIN, which apps use as ${DOMAIN}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cluster-vars
+  namespace: flux-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault
+  target:
+    name: cluster-vars
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: flux-talos

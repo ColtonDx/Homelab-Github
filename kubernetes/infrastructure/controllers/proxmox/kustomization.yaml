@@ -1,0 +1,6 @@
+---
+# Controllers for clusters on Proxmox; storage (Longhorn) and a load balancer are added here when they move over
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base

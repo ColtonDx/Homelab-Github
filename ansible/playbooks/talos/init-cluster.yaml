@@ -1,0 +1,220 @@
+---
+# Configures the Talos cluster described by talos_cluster: nodes in maintenance mode get their config, a new cluster is bootstrapped once, and running nodes are updated one at a time
+# Normally run by terraform/build-project.yaml after the talos project applies, and it runs bootstrap-secrets.yaml at the end; it can also be run on its own
+# Inventory: talos_cluster (name, vip, talos_version, kubernetes_version, node_cidr, nodes, and optionally extensions or install_image, interface, prefix, gateway)
+# config_version on talos_cluster sets the config format apart from the installed version; the patches use the pre-1.14 format, so keep it at v1.13 until they move to 1.14's documents
+# Environment and Vault: as tasks/talos_access.yaml; talos_generate_secrets=true for a brand-new cluster; talos_bootstrap_secrets=false skips the last step
+- name: Configure the Talos cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # The work folder holds the secrets bundle, so it is removed however the run ends
+    - name: Configure the nodes
+      block:
+        # Loads the bundle, resolves the install image and writes a talosconfig
+        - name: Prepare access to the cluster
+          ansible.builtin.include_tasks: tasks/talos_access.yaml
+          vars:
+            talos_access_image: true
+
+        # The patches are in the pre-1.14 format, which Talos 1.14 only accepts in configs generated for an older version
+        - name: Require a config format the patches support
+          ansible.builtin.assert:
+            that:
+              - (talos_cluster.config_version | default(talos_cluster.talos_version) | regex_replace('^v', '')) is version('1.14', '<')
+            fail_msg: >-
+              The patches use the pre-1.14 config format. Set talos_cluster.config_version to v1.13
+              (Talos {{ talos_cluster.talos_version }} still installs and runs), or move the templates to 1.14's documents.
+
+        # Patches shared by every node, and by every controlplane node
+        - name: Render the shared patches
+          ansible.builtin.template:
+            src: "templates/{{ item }}.yaml.j2"
+            dest: "{{ talos_work }}/{{ item }}.yaml"
+            mode: "0600"
+          loop: [all, controlplane]
+
+        # One patch per node for its hostname, address and install disk
+        - name: Render each node's patch
+          ansible.builtin.template:
+            src: templates/node.yaml.j2
+            dest: "{{ talos_work }}/node-{{ talos_node.name }}.yaml"
+            mode: "0600"
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            loop_var: talos_node
+            label: "{{ talos_node.name }}"
+
+        # Every certificate and token comes from the bundle, so the same bundle always gives the same cluster
+        - name: Generate each node's machine config
+          ansible.builtin.command:
+            argv:
+              - talosctl
+              - gen
+              - config
+              - "{{ talos_cluster.name }}"
+              - "https://{{ talos_cluster.vip }}:6443"
+              - --with-secrets
+              - "{{ talos_work }}/secrets.yaml"
+              - --talos-version
+              - "{{ talos_cluster.config_version | default(talos_cluster.talos_version) }}"
+              - --kubernetes-version
+              - "{{ talos_cluster.kubernetes_version | regex_replace('^v', '') }}"
+              - --install-image
+              - "{{ talos_install_image }}"
+              - --config-patch
+              - "@{{ talos_work }}/all.yaml"
+              - --config-patch-control-plane
+              - "@{{ talos_work }}/controlplane.yaml"
+              - --config-patch
+              - "@{{ talos_work }}/node-{{ item.name }}.yaml"
+              - --output-types
+              - "{{ item.role }}"
+              - --output
+              - "{{ talos_work }}/{{ item.name }}-generated.yaml"
+              - --force
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        # Read back to strip the document below
+        - name: Read the generated configs
+          ansible.builtin.slurp:
+            src: "{{ talos_work }}/{{ item.name }}-generated.yaml"
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: talos_generated
+          no_log: true
+
+        # The generated HostnameConfig sets auto: stable, which overrides the static hostname and cannot be patched away, so it is dropped
+        - name: Write the final configs without the HostnameConfig document
+          ansible.builtin.copy:
+            dest: "{{ talos_work }}/{{ item.item.name }}.yaml"
+            content: "{{ (item.content | b64decode).split('\n---\n') | reject('search', 'kind: HostnameConfig') | join('\n---\n') }}"
+            mode: "0600"
+          loop: "{{ talos_generated.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          no_log: true
+
+        # Catches a bad patch before any node sees it
+        - name: Validate the configs
+          ansible.builtin.command:
+            argv: [talosctl, validate, --config, "{{ talos_work }}/{{ item.name }}.yaml", --mode, metal]
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: false
+
+        # A node answering without credentials is in maintenance mode, waiting for its first config
+        - name: Check which nodes are in maintenance mode
+          ansible.builtin.command:
+            argv: [talosctl, --nodes, "{{ item.address }}", --endpoints, "{{ item.address }}", get, disks, --insecure]
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: talos_maintenance
+          failed_when: false
+          changed_when: false
+
+        # A node answering with the cluster's credentials is already configured
+        - name: Check which nodes are already configured
+          ansible.builtin.command:
+            argv: [talosctl, --talosconfig, "{{ talos_work }}/talosconfig", --nodes, "{{ item.address }}", --endpoints, "{{ item.address }}", version, --short]
+          loop: "{{ talos_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: talos_configured
+          failed_when: false
+          changed_when: false
+
+        # Sorted into the two groups the steps below handle
+        - name: Group the nodes by state
+          ansible.builtin.set_fact:
+            talos_new_nodes: "{{ talos_maintenance.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+            talos_running_nodes: "{{ talos_configured.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+
+        # A node in neither state cannot be configured, so say which and why before anything changes
+        - name: Stop when a node cannot be reached
+          ansible.builtin.assert:
+            that:
+              - talos_unreachable | length == 0
+            fail_msg: >-
+              {{ talos_unreachable | join(', ') }} answered neither in maintenance mode nor with this cluster's credentials;
+              check the VM is running and booted the Talos ISO, and that the secrets bundle belongs to this cluster.
+          vars:
+            talos_unreachable: "{{ talos_nodes | map(attribute='name') | reject('in', (talos_new_nodes + talos_running_nodes) | map(attribute='name') | list) | list }}"
+
+        # Health checks name every node, so they know what a complete cluster looks like
+        - name: Build the health check arguments
+          ansible.builtin.set_fact:
+            talos_health_args: >-
+              {{ ['--control-plane-nodes', talos_controlplane_nodes | map(attribute='address') | join(',')]
+                 + (['--worker-nodes', talos_worker_nodes | map(attribute='address') | join(',')] if talos_worker_nodes | length > 0 else []) }}
+
+        # Nodes in maintenance mode take their config without credentials, then install Talos to disk and reboot
+        - name: Apply the config to new nodes
+          ansible.builtin.command:
+            argv: [talosctl, --nodes, "{{ item.address }}", --endpoints, "{{ item.address }}", apply-config, --insecure, --file, "{{ talos_work }}/{{ item.name }}.yaml"]
+          loop: "{{ talos_new_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        # Only a cluster with no configured node at all is new; a replaced node joins the existing etcd instead
+        - name: Bootstrap a new cluster
+          when: talos_running_nodes | length == 0
+          block:
+            # The install and reboot take a few minutes before the node answers with credentials
+            - name: Wait for the first controlplane node
+              ansible.builtin.command:
+                argv: [talosctl, --talosconfig, "{{ talos_work }}/talosconfig", --nodes, "{{ talos_first_address }}", --endpoints, "{{ talos_first_address }}", version, --short]
+              register: talos_first_up
+              retries: 60
+              delay: 10
+              until: talos_first_up.rc == 0
+              changed_when: false
+
+            # Starts etcd on exactly one node; running it again on a bootstrapped cluster would split etcd, which is why it is gated above
+            - name: Bootstrap etcd
+              ansible.builtin.command:
+                argv: [talosctl, --talosconfig, "{{ talos_work }}/talosconfig", --nodes, "{{ talos_first_address }}", --endpoints, "{{ talos_first_address }}", bootstrap]
+
+        # New nodes are only done once the whole cluster reports healthy
+        - name: Wait for the cluster to be healthy
+          ansible.builtin.command:
+            argv: "{{ ['talosctl', '--talosconfig', talos_work ~ '/talosconfig', '--nodes', talos_first_address, 'health', '--wait-timeout', '20m'] + talos_health_args }}"
+          when: talos_new_nodes | length > 0
+          changed_when: false
+
+        # Running nodes change one at a time, each waiting for the cluster, so an update never takes out more than one node
+        - name: Update running nodes
+          ansible.builtin.include_tasks: tasks/update_node.yaml
+          loop: "{{ talos_running_nodes }}"
+          loop_control:
+            loop_var: talos_update_node
+            label: "{{ talos_update_node.name }}"
+
+        # Names only, so it is clear what this run did
+        - name: Report the cluster
+          ansible.builtin.debug:
+            msg: >-
+              Cluster {{ talos_cluster.name }} is healthy on {{ talos_install_image }}.
+              New nodes: {{ talos_new_nodes | map(attribute='name') | join(', ') or 'none' }};
+              running nodes checked for updates: {{ talos_running_nodes | map(attribute='name') | join(', ') or 'none' }}.
+
+      always:
+        # The secrets bundle and configs never outlive the run
+        - name: Remove the work folder
+          ansible.builtin.file:
+            path: "{{ talos_work }}"
+            state: absent
+          when: talos_work is defined
+
+# Sets up Vault access for External Secrets, the cluster-bootstrap Secret and Flux
+- name: Bootstrap the cluster's secrets and Flux
+  ansible.builtin.import_playbook: bootstrap-secrets.yaml
+  when: talos_bootstrap_secrets | default(true) | bool

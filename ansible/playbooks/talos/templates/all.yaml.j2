@@ -1,0 +1,32 @@
+# Rendered by ansible/playbooks/talos/init-cluster.yaml and applied to every node; edit here, never in a generated config
+---
+machine:
+  features:
+    diskQuotaSupport: true
+    kubePrism:
+      enabled: true
+      port: 7445
+    hostDNS:
+      enabled: true
+      forwardKubeDNSToHost: true
+  kubelet:
+    defaultRuntimeSeccompProfileEnabled: true
+    disableManifestsDirectory: true
+    # Longhorn's pods need the data volume visible with shared propagation
+    extraMounts:
+      - destination: /var/mnt/longhorn
+        type: bind
+        source: /var/mnt/longhorn
+        options:
+          - bind
+          - rshared
+          - rw
+---
+# The Longhorn data disk, mounted at /var/mnt/longhorn; picked as the non-system disk above the size threshold
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: longhorn
+provisioning:
+  diskSelector:
+    match: '!system_disk && disk.size >= {{ talos_cluster.longhorn_disk_min_gib | default(64) }}u * GiB'
+  minSize: {{ talos_cluster.longhorn_volume_min_size | default('90GiB') }}

@@ -1,4 +1,4 @@
-# Builds the Kasm VM on Proxmox from a cloud-init template; ansible/playbooks/deployment/app-kasm.yaml installs Kasm Workspaces on it afterwards
+# Builds the Kasm VM on Proxmox from a cloud-init template; ansible/playbooks/terraform/build-project.yaml applies this and then installs Kasm Workspaces with app-kasm.yaml
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
 # Adopting an existing VM instead of building one: terraform import proxmox_vm_qemu.kasm <target_node>/qemu/<vm_id>

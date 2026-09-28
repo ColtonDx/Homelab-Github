@@ -1,0 +1,26 @@
+---
+# The repository Flux watches; it is public, so no credentials are needed
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m
+  ref:
+    branch: main
+  url: https://github.com/ColtonDx/Homelab-Github.git
+---
+# Applies this cluster's folder, which in turn applies Flux itself, the infrastructure and the apps
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/clusters/talos-cluster
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

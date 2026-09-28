@@ -1,0 +1,6 @@
+---
+# The apps this cluster runs; each entry is a folder in ../base, written once and shared by every cluster that lists it
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base/it-tools

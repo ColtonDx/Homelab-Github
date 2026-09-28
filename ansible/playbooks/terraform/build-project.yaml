@@ -3,6 +3,7 @@
 # Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, or apply)
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
+# After an apply it waits for the VM and runs the install playbook named by sources.yaml's install entry, which then runs its own TLS; tf_install=false skips that
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL (or garage_url) for the s3 backend; NETBOX_URL only when a lookup needs NetBox
 # Vault: GARAGE_ACCESS_KEY and GARAGE_SECRET_KEY at garage for the s3 backend (vault_garage_path renames it), NETBOX_TOKEN at netbox when a lookup runs
 - name: Build a Terraform project
@@ -48,6 +49,17 @@
       ansible.builtin.include_vars:
         file: "{{ tf_dir }}/sources.yaml"
         name: tf_sources
+
+    # A wrong install entry would only show up after the apply, so check it now
+    - name: Validate the install entry
+      ansible.builtin.assert:
+        that:
+          - tf_sources.install.hosts | default('') | length > 0
+          - (install_path if install_path is abs else playbook_dir ~ '/../../../' ~ install_path) is file
+        fail_msg: "sources.yaml's install entry needs hosts and a playbook path (relative to the repo root, or absolute) that exists."
+      vars:
+        install_path: "{{ tf_sources.install.playbook | default('') }}"
+      when: tf_sources.install is defined
 
     # Terraform rejects -var for an undeclared variable, so only declared names are ever passed
     - name: Read the variables the project declares
@@ -241,6 +253,8 @@
         state: "{{ 'planned' if tf_action_resolved == 'plan' else 'present' }}"
         plan_file: "{{ tf_dir ~ '/tfplan' if tf_action_resolved == 'plan' else omit }}"
         variables: "{{ tf_variables }}"
+        # Lists and maps, such as a node list, need HCL formatting; plain values are unaffected
+        complex_vars: true
       environment: "{{ tf_env }}"
       register: tf_result
 
@@ -256,3 +270,30 @@
           This run used local state in {{ tf_dir }}. Once Garage is up, re-run without tf_backend and with
           -e tf_migrate_state=true to move it into Garage at {{ tf_sources.state_key }}.
       when: tf_backend_resolved == 'local'
+
+    # Only a successful apply leads on to the install; a plan, or tf_install=false, stops here
+    - name: Hand the install over to the plays below
+      ansible.builtin.set_fact:
+        tf_install_hosts: >-
+          {{ tf_sources.install.hosts if tf_action_resolved == 'apply' and tf_sources.install is defined
+             and tf_install | default(true) | bool else '' }}
+
+# A new VM needs time to boot and run cloud-init before SSH answers; matches no hosts unless an install follows
+- name: Wait for the built VM
+  hosts: "{{ hostvars['localhost'].tf_install_hosts | default('', true) or 'localhost:!localhost' }}"
+  gather_facts: false
+
+  tasks:
+    # Ten minutes covers a full clone and first boot; an existing VM answers at once
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+
+# Imports have to be known before the run starts, so the playbook is read from sources.yaml here; skipped, facts included, unless the apply led on to it
+- name: Install or update what runs on the VM
+  ansible.builtin.import_playbook: >-
+    {% set root = playbook_dir ~ '/../../../' %}{% set project = tf_project | default('') %}{%
+       set install = ((lookup('ansible.builtin.file', (project if project is abs else root ~ project) ~ '/sources.yaml', errors='ignore')
+                       | default('', true) | from_yaml or {}).install.playbook | default('ansible/playbooks/terraform/no-install.yaml')) %}{{
+       install if install is abs else root ~ install }}
+  when: hostvars['localhost'].tf_install_hosts | default('') | length > 0

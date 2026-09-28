@@ -1,6 +1,7 @@
 ---
-# Installs GitLab from GitLab's apt repository, starts it, then runs tls/gitlab-tls.yaml to switch it to HTTPS; safe to re-run
-# Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce)
+# Installs GitLab from GitLab's apt repository, or updates it to gitlab_version, starts it, then runs tls/gitlab-tls.yaml to switch it to HTTPS; safe to re-run
+# Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce), gitlab_version (e.g. 18.4.1) to install or move to that release
+# Without gitlab_version an installed GitLab is left alone; upgrades must follow GitLab's upgrade path, so step through its required stops
 # Also needs what tls/gitlab-tls.yaml needs: the Vault connection and the Cloudflare fields; gitlab_rb_path and gitlab_ssl_dir override the default locations
 # The first install writes a random root password to /etc/gitlab/initial_root_password, which GitLab deletes after 24 hours
 - name: Install GitLab on Debian/Ubuntu
@@ -68,10 +69,10 @@
         state: present
         update_cache: true
 
-    # Installs GitLab if missing; an installed version is left alone, so upgrades stay a deliberate step
+    # A pinned version installs or upgrades to exactly that release, and GitLab backs up its database first; without one an installed version is left alone
     - name: Install GitLab package
       ansible.builtin.apt:
-        name: "{{ gitlab_pkg_name }}"
+        name: "{{ gitlab_pkg_name ~ '=' ~ gitlab_version ~ '-' ~ gitlab_ed ~ '.0' if gitlab_version | default('') | length > 0 else gitlab_pkg_name }}"
         state: present
 
     # A fresh host needs a URL before GitLab can start; once gitlab-tls.yaml has run, it owns the URL

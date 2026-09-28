@@ -1,0 +1,7 @@
+---
+# Flux manages itself from these files once bootstrap-secrets.yaml has applied them the first time
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gotk-components.yaml
+  - gotk-sync.yaml

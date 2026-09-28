@@ -1,0 +1,45 @@
+---
+# Applies a new machine config to one running node and waits for the cluster to be healthy again; included once per node by init-cluster.yaml
+# Needs: talos_update_node (a talos_nodes entry), talos_work, talos_first_address, talos_health_args
+
+# A dry run shows whether anything would change, so an unchanged node is never touched
+- name: "Check {{ talos_update_node.name }} for changes"
+  ansible.builtin.command:
+    argv:
+      - talosctl
+      - --talosconfig
+      - "{{ talos_work }}/talosconfig"
+      - --nodes
+      - "{{ talos_update_node.address }}"
+      - apply-config
+      - --file
+      - "{{ talos_work }}/{{ talos_update_node.name }}.yaml"
+      - --mode
+      - auto
+      - --dry-run
+  register: talos_dry_run
+  changed_when: false
+
+# auto lets Talos decide between applying live and rebooting, depending on what changed
+- name: "Apply the new config to {{ talos_update_node.name }}"
+  ansible.builtin.command:
+    argv:
+      - talosctl
+      - --talosconfig
+      - "{{ talos_work }}/talosconfig"
+      - --nodes
+      - "{{ talos_update_node.address }}"
+      - apply-config
+      - --file
+      - "{{ talos_work }}/{{ talos_update_node.name }}.yaml"
+      - --mode
+      - auto
+  when: "'No changes' not in talos_dry_run.stdout ~ talos_dry_run.stderr"
+  register: talos_update_apply
+
+# The next node is only touched once this one is back, so the cluster never loses more than one node at a time
+- name: "Wait for the cluster after updating {{ talos_update_node.name }}"
+  ansible.builtin.command:
+    argv: "{{ ['talosctl', '--talosconfig', talos_work ~ '/talosconfig', '--nodes', talos_first_address, 'health', '--wait-timeout', '15m'] + talos_health_args }}"
+  when: talos_update_apply is changed
+  changed_when: false

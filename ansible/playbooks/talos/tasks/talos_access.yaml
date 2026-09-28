@@ -1,0 +1,210 @@
+---
+# Shared by init-cluster.yaml and bootstrap-secrets.yaml: validates talos_cluster, loads the secrets bundle, and writes a talosconfig into a private work folder
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: SECRETS_YAML at talos (vault_talos_path renames it), the one piece of Talos state kept anywhere
+# talos_generate_secrets=true creates the bundle when Vault has none, which means a brand-new cluster identity; without it a missing bundle stops the run
+# talos_access_image=true also resolves the install image: talos_cluster.install_image if set, otherwise an Image Factory ID for talos_cluster.extensions
+# Sets: talos_work (removed by the caller), talos_nodes with defaults filled in, talos_controlplane_nodes, talos_worker_nodes, talos_first_address, talos_install_image when asked
+
+# Stop before touching anything when the cluster description is incomplete
+- name: Validate talos_cluster
+  ansible.builtin.assert:
+    that:
+      - talos_cluster is mapping
+      - talos_cluster.name | default('') | length > 0
+      - talos_cluster.vip | default('') | length > 0
+      - talos_cluster.talos_version | default('') is match('^v[0-9]')
+      - talos_cluster.kubernetes_version | default('') is match('^v?[0-9]')
+      - talos_cluster.node_cidr | default('') is search('/')
+      - talos_cluster.nodes | default([]) | length > 0
+      - talos_cluster.nodes | selectattr('name', 'undefined') | list | length == 0
+      - talos_cluster.nodes | selectattr('address', 'undefined') | list | length == 0
+      - talos_cluster.nodes | rejectattr('role', 'undefined') | rejectattr('role', 'in', ['controlplane', 'worker']) | list | length == 0
+    fail_msg: >-
+      talos_cluster needs name, vip, talos_version, kubernetes_version, node_cidr and nodes;
+      each node needs name and address, and role must be controlplane (default) or worker.
+
+# Start empty, since init-cluster.yaml and bootstrap-secrets.yaml both run this in one play run
+- name: Reset the node list
+  ansible.builtin.set_fact:
+    talos_nodes: []
+
+# Each node's settings with the cluster-wide values filled in, in inventory order, so later tasks never repeat the fallbacks
+- name: Fill in each node's defaults
+  ansible.builtin.set_fact:
+    talos_nodes: >-
+      {{ talos_nodes + [{'role': 'controlplane', 'install_disk': talos_cluster.install_disk | default('/dev/sda')}
+                                      | combine(talos_cluster | dict2items | selectattr('key', 'in', ['interface', 'prefix', 'gateway']) | items2dict)
+                                      | combine(item)] }}
+  loop: "{{ talos_cluster.nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Every node needs an interface, prefix and gateway, from its own settings or the cluster's
+- name: Require each node's network settings
+  ansible.builtin.assert:
+    that:
+      - talos_nodes | selectattr('interface', 'undefined') | list | length == 0
+      - talos_nodes | selectattr('prefix', 'undefined') | list | length == 0
+      - talos_nodes | selectattr('gateway', 'undefined') | list | length == 0
+    fail_msg: "Every node needs interface, prefix and gateway, set on the node or once on talos_cluster."
+
+# Bootstrap runs on the first controlplane node, and every talosctl call goes through it
+- name: Work out the controlplane nodes
+  ansible.builtin.set_fact:
+    talos_controlplane_nodes: "{{ talos_nodes | selectattr('role', 'equalto', 'controlplane') | list }}"
+    talos_worker_nodes: "{{ talos_nodes | selectattr('role', 'equalto', 'worker') | list }}"
+
+# A cluster cannot form without one
+- name: Require a controlplane node
+  ansible.builtin.assert:
+    that:
+      - talos_controlplane_nodes | length > 0
+    fail_msg: "talos_cluster.nodes needs at least one controlplane node."
+
+# Kept in inventory order so the first node is always the same one
+- name: Record the first controlplane address
+  ansible.builtin.set_fact:
+    talos_first_address: "{{ talos_controlplane_nodes[0].address }}"
+
+# Holds the secrets bundle and generated configs for this run only; the caller removes it
+- name: Create a private work folder
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: talos-
+  register: talos_work_dir
+
+# The folder's path, for the tasks below and the caller
+- name: Record the work folder
+  ansible.builtin.set_fact:
+    talos_work: "{{ talos_work_dir.path }}"
+
+# Vault connection for the secrets bundle
+- name: Read the Vault connection from the environment
+  ansible.builtin.set_fact:
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+  no_log: true
+
+# Optional here, so a missing bundle can be reported or generated below rather than failing inside the lookup
+- name: Request the secrets bundle
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - { path: "{{ vault_talos_path | default('talos') }}", field: SECRETS_YAML, var: talos_secrets_yaml, required: false }
+
+# Reads the bundle through the repo's common lookup task
+- name: Load the secrets bundle from Vault
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+
+# A new bundle is a new cluster identity, so it is only ever made on request
+- name: Stop when there is no secrets bundle
+  ansible.builtin.assert:
+    that:
+      - talos_secrets_yaml | length > 0 or talos_generate_secrets | default(false) | bool
+    fail_msg: >-
+      No SECRETS_YAML at {{ vault_talos_path | default('talos') }} in Vault. For an existing cluster, store its bundle there
+      (talosctl gen secrets --from-controlplane-config <config> -o secrets.yaml); for a new one, re-run with -e talos_generate_secrets=true.
+
+# Only on request and only when Vault has none, then stored before anything uses it
+- name: Create and store a new secrets bundle
+  when: talos_secrets_yaml | length == 0
+  block:
+    # A fresh PKI and set of tokens for a new cluster
+    - name: Generate the secrets bundle
+      ansible.builtin.command:
+        argv: [talosctl, gen, secrets, -o, "{{ talos_work }}/secrets.yaml"]
+        creates: "{{ talos_work }}/secrets.yaml"
+
+    # Read back so it can be stored
+    - name: Read the new bundle
+      ansible.builtin.slurp:
+        src: "{{ talos_work }}/secrets.yaml"
+      register: talos_new_secrets
+      no_log: true
+
+    # Whether the path already holds other fields decides between creating it and patching one field in
+    - name: Check whether the Vault path exists
+      ansible.builtin.uri:
+        url: "{{ vault_addr | regex_replace('/+$', '') }}/v1/{{ vault_kv_mount }}/data/{{ vault_talos_path | default('talos') }}"
+        headers:
+          X-Vault-Token: "{{ vault_token }}"
+        status_code: [200, 404]
+      register: talos_vault_path
+      no_log: true
+
+    # cas 0 creates the path only if it does not exist; a patch adds the field without touching any others
+    - name: Store the bundle in Vault
+      ansible.builtin.uri:
+        url: "{{ vault_addr | regex_replace('/+$', '') }}/v1/{{ vault_kv_mount }}/data/{{ vault_talos_path | default('talos') }}"
+        method: "{{ 'POST' if talos_vault_path.status == 404 else 'PATCH' }}"
+        headers:
+          X-Vault-Token: "{{ vault_token }}"
+          Content-Type: "{{ 'application/json' if talos_vault_path.status == 404 else 'application/merge-patch+json' }}"
+        body_format: json
+        body: >-
+          {{ ({'options': {'cas': 0}} if talos_vault_path.status == 404 else {})
+             | combine({'data': {'SECRETS_YAML': talos_new_secrets.content | b64decode}}) }}
+        status_code: [200, 204]
+      no_log: true
+
+    # Used by the rest of this run
+    - name: Use the new bundle
+      ansible.builtin.set_fact:
+        talos_secrets_yaml: "{{ talos_new_secrets.content | b64decode }}"
+      no_log: true
+
+# Written for talosctl, readable only by the account running the play
+- name: Write the secrets bundle to the work folder
+  ansible.builtin.copy:
+    dest: "{{ talos_work }}/secrets.yaml"
+    content: "{{ talos_secrets_yaml }}"
+    mode: "0600"
+  no_log: true
+
+# Image Factory returns the same ID for the same extension list, so this is stable across runs
+- name: Resolve the install image
+  when: talos_access_image | default(false) | bool
+  block:
+    # Longhorn needs iscsi-tools and util-linux-tools, which only an install image can carry
+    - name: Get the Image Factory ID for the extensions
+      ansible.builtin.uri:
+        url: https://factory.talos.dev/schematics
+        method: POST
+        body_format: raw
+        headers:
+          Content-Type: application/yaml
+        body: "{{ {'customization': {'systemExtensions': {'officialExtensions': talos_cluster.extensions | default(['siderolabs/iscsi-tools', 'siderolabs/util-linux-tools'])}}} | to_nice_yaml }}"
+        status_code: [200, 201]
+      register: talos_schematic
+      when: talos_cluster.install_image | default('') | length == 0
+
+    # A fixed image in the inventory wins, so a run can avoid Image Factory entirely
+    - name: Record the install image
+      ansible.builtin.set_fact:
+        talos_install_image: >-
+          {{ talos_cluster.install_image if talos_cluster.install_image | default('') | length > 0
+             else 'factory.talos.dev/installer/' ~ talos_schematic.json.id ~ ':' ~ talos_cluster.talos_version }}
+
+# Admin client credentials, derived from the bundle's CA, so nothing but the bundle ever needs storing
+- name: Generate a talosconfig
+  ansible.builtin.command:
+    argv:
+      - talosctl
+      - gen
+      - config
+      - "{{ talos_cluster.name }}"
+      - "https://{{ talos_cluster.vip }}:6443"
+      - --with-secrets
+      - "{{ talos_work }}/secrets.yaml"
+      - --output-types
+      - talosconfig
+      - --output
+      - "{{ talos_work }}/talosconfig"
+      - --force
+  changed_when: false
+
+# Talk to the controlplane nodes directly, since the VIP only answers once the cluster is up
+- name: Point the talosconfig at the controlplane nodes
+  ansible.builtin.command:
+    argv: "{{ ['talosctl', '--talosconfig', talos_work ~ '/talosconfig', 'config', 'endpoint'] + (talos_controlplane_nodes | map(attribute='address') | list) }}"
+  changed_when: false

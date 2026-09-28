@@ -17,3 +17,8 @@ inventory: terraform_kasm
 netbox:
   ip_address: { find: ip, dns_name: "kasm.{{ domain }}" }
   ip_prefix: { find: prefix_length, dns_name: "kasm.{{ domain }}" }
+
+# Run after an apply to install or update what runs on the VM; that playbook then runs its TLS playbook
+install:
+  playbook: ansible/playbooks/deployment/app-kasm.yaml
+  hosts: kasm

@@ -1,0 +1,9 @@
+# For a direct Terraform run, copy to terraform.tfvars (gitignored) and fill in; build-project.yaml reads these from talos_cluster in the inventory instead
+talos_iso    = "local:iso/talos-amd64.iso"
+storage_pool = "local-zfs"
+
+nodes = [
+  { name = "talos-1", vmid = 1064, proxmox_node = "pve-a" },
+  { name = "talos-2", vmid = 1065, proxmox_node = "pve-b" },
+  { name = "talos-3", vmid = 1066, proxmox_node = "pve-c" },
+]

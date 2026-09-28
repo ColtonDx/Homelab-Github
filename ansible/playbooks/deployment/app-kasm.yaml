@@ -1,5 +1,6 @@
 ---
-# Installs Kasm Workspaces, or upgrades it when kasm_version is newer than what is installed; run tls/kasm-tls.yaml afterwards for its certificate
+# Installs Kasm Workspaces, or upgrades it when kasm_version is newer than what is installed, then runs tls/kasm-tls.yaml for its certificate
+# Also needs what tls/kasm-tls.yaml needs: kasm_domain, the Vault connection and the Cloudflare fields
 # Extra vars: kasm_version to pick another release, which also needs its sha256 added to kasm_release_checksums
 # A first install shows the generated credentials in the run output, which Semaphore keeps, so change them after first login
 # Logs under /var/log are root-only, and upgrade output is never shown in the run
@@ -164,3 +165,7 @@
           ansible.builtin.file:
             path: "{{ kasm_work_dir }}"
             state: absent
+
+# Finish with the certificate; kasm-tls.yaml can also be run on its own
+- name: Configure Kasm's TLS certificate
+  ansible.builtin.import_playbook: ../tls/kasm-tls.yaml

@@ -1,0 +1,19 @@
+---
+# Tells ansible/playbooks/terraform/build-project.yaml where this project's inputs come from; locations only, never values
+
+# State file in Garage; the same key the earlier Talos project used, so existing nodes carry over
+state_key: talos-nodes.tfstate
+
+# Secrets, passed to Terraform as TF_VAR_* environment variables and never logged
+vault:
+  - { path: proxmox, field: PROXMOX_API_URL, var: proxmox_api_url }
+  - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
+  - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
+
+# Site values: talos_cluster supplies nodes, talos_iso, storage_pool and anything else declared; the playbooks read the rest of it
+inventory: talos_cluster
+
+# Configures the nodes, bootstraps the cluster, then sets up Vault access and Flux; runs on the controller, since Talos has no SSH
+install:
+  playbook: ansible/playbooks/talos/init-cluster.yaml
+  hosts: localhost

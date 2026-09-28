@@ -1,0 +1,7 @@
+---
+# Imported by build-project.yaml in place of an install playbook when the project's sources.yaml names none; does nothing
+- name: No install playbook for this project
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks: []
