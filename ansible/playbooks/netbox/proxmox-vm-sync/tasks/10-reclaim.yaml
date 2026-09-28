@@ -1,0 +1,172 @@
+---
+# Deletes the Dynamic-tagged objects this playbook created that Proxmox no longer reports; the only place this playbook deletes
+# Records made by hand carry no tag and are never reached, and a guest's children are only reclaimed when its config was read
+
+# A run that found no guests at all never deletes, since that means the API or token failed, not an empty cluster
+- name: Work out which VMs this run could actually see
+  ansible.builtin.set_fact:
+    config_read_vm_ids: >-
+      {{ proxmox_guest_configs.results | selectattr('json', 'defined')
+         | map(attribute='item.name')
+         | select('in', nbi_vm_id_by_name.keys() | list)
+         | map('extract', nbi_vm_id_by_name) | map('int') | list }}
+    reclaim_safe: "{{ (proxmox_all_guest_names | default([]) | length) > 0 }}"
+
+# The NICs, MACs, addresses and disks each readable VM should still have
+- name: Work out what those VMs should still have
+  ansible.builtin.set_fact:
+    config_read_iface_ids: >-
+      {{ nbi_all_ifaces.json.results | default([])
+         | selectattr('virtual_machine.id', 'in', config_read_vm_ids)
+         | map(attribute='id') | list }}
+    expected_iface_keys: >-
+      {{ nic_vm_ids | zip(nic_records | map(attribute='key') | map('regex_replace', '^net', 'eth') | list)
+         | map('join', '/') | list }}
+    expected_disk_keys: >-
+      {{ disk_vm_ids | zip(disk_records | map(attribute='key') | list)
+         | map('join', '/') | list }}
+    expected_macs: >-
+      {{ vm_nic_records | default([]) | map(attribute='value')
+         | map('regex_search', '([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})')
+         | select('string') | map('upper') | list }}
+    expected_ip_keys: >-
+      {{ vm_ip_targets | default([]) | map(attribute='iface_id') | map('string') | list
+         | zip(vm_ip_targets | default([]) | map(attribute='cidr')
+               | map('regex_replace', '/.*$', '') | list)
+         | map('join', '/') | list }}
+  vars:
+    nic_records: "{{ vm_nic_records | default([]) | selectattr('_vm', 'in', nbi_vm_id_by_name.keys() | list) | list }}"
+    nic_vm_ids: "{{ nic_records | map(attribute='_vm') | map('extract', nbi_vm_id_by_name) | map('string') | list }}"
+    disk_records: >-
+      {{ vm_disk_records | default([]) | selectattr('_vm', 'in', nbi_vm_id_by_name.keys() | list)
+         | list }}
+    disk_vm_ids: "{{ disk_records | map(attribute='_vm') | map('extract', nbi_vm_id_by_name) | map('string') | list }}"
+
+# Only Dynamic-tagged records are deletion candidates
+- name: Read the Dynamic-tagged IP addresses
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?limit=0&tag=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbr_ips
+  no_log: true
+
+# Only Dynamic-tagged records are deletion candidates
+- name: Read the Dynamic-tagged MAC addresses
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/dcim/mac-addresses/?limit=0&tag=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbr_macs
+  no_log: true
+
+# Only Dynamic-tagged records are deletion candidates
+- name: Read the Dynamic-tagged virtual disks
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-disks/?limit=0&tag=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbr_disks
+  no_log: true
+
+# Only Dynamic-tagged records are deletion candidates
+- name: Read the Dynamic-tagged interfaces
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/?limit=0&tag=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbr_ifaces
+  no_log: true
+
+# Only Dynamic-tagged records are deletion candidates
+- name: Read the Dynamic-tagged virtual machines
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?limit=0&tag=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbr_vms
+  no_log: true
+
+# Children first and parents last, so an address is never orphaned by deleting its interface first
+- name: Delete Dynamic addresses no longer configured on their interface
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ nbr_ips.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when:
+    - reclaim_safe | bool
+    - (item.assigned_object_id | default(0, true) | int) in config_read_iface_ids
+    - ((item.assigned_object_id | string) ~ '/' ~ (item.address | regex_replace('/.*$', ''))) not in expected_ip_keys
+  register: nbr_deleted_ips
+
+# MACs no longer on their NIC
+- name: Delete Dynamic MAC addresses no longer present on their NIC
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/dcim/mac-addresses/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ nbr_macs.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.mac_address }}"
+  when:
+    - reclaim_safe | bool
+    - (item.assigned_object_id | default(0, true) | int) in config_read_iface_ids
+    - (item.mac_address | upper) not in expected_macs
+  register: nbr_deleted_macs
+
+# Disks no longer attached to a readable VM
+- name: Delete Dynamic virtual disks no longer attached
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-disks/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ nbr_disks.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.virtual_machine.name }} {{ item.name }}"
+  when:
+    - reclaim_safe | bool
+    - (item.virtual_machine.id | int) in config_read_vm_ids
+    - ((item.virtual_machine.id | string) ~ '/' ~ item.name) not in expected_disk_keys
+  register: nbr_deleted_disks
+
+# Interfaces whose NIC is gone from a readable VM
+- name: Delete Dynamic interfaces whose NIC is gone
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ nbr_ifaces.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.virtual_machine.name }} {{ item.name }}"
+  when:
+    - reclaim_safe | bool
+    - (item.virtual_machine.id | int) in config_read_vm_ids
+    - ((item.virtual_machine.id | string) ~ '/' ~ item.name) not in expected_iface_keys
+  register: nbr_deleted_ifaces
+
+# Compared case-insensitively against every guest found before filtering, so a guest on an offline node is kept
+- name: Delete Dynamic virtual machines Proxmox no longer reports
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ nbr_vms.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - reclaim_safe | bool
+    - (item.name | lower) not in proxmox_all_guest_names
+  register: nbr_deleted_vms

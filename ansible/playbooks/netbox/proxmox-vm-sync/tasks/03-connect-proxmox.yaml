@@ -1,0 +1,22 @@
+---
+# Checks which Proxmox nodes are online before trusting any guest data
+
+# failed_when false, so an unreachable API does not stop a run that would sync every other guest
+- name: Ask Proxmox which nodes are online
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_base }}/nodes"
+    method: GET
+    headers: "{{ proxmox_headers }}"
+    validate_certs: "{{ validate_certs | default(true) }}"
+    status_code: 200
+  register: proxmox_node_status
+  failed_when: false
+  no_log: true
+
+# Guests on these nodes are skipped, and never treated as deleted
+- name: Identify nodes that are not online
+  ansible.builtin.set_fact:
+    proxmox_offline_nodes: >-
+      {{ proxmox_node_status.json.data | default([])
+         | rejectattr('status', 'equalto', 'online')
+         | map(attribute='node') | list }}

@@ -1,0 +1,129 @@
+---
+# Records the static addresses cloud-init assigns, then marks eth0's as the VM's primary
+# DHCP addresses are not recorded: ip=dhcp says an address is leased, not which one, and the OPNsense DHCP sync owns those
+
+# Every address, not only those on VM interfaces, since NetBox allows duplicates and an unassigned copy would otherwise be doubled
+- name: Read every IP address NetBox holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbi_existing_ips
+  no_log: true
+
+# Keyed on the address without its mask, so the same address with a different prefix still matches
+- name: Index existing addresses by host address
+  ansible.builtin.set_fact:
+    nbi_ip_by_host: >-
+      {{ dict(nbi_existing_ips.json.results | default([])
+              | map(attribute='address') | map('regex_replace', '/.*$', '') | list
+              | zip(nbi_existing_ips.json.results | default([]) | list)) }}
+
+# One target per NIC with a static address: create, update, or conflict when the address belongs to something else
+- name: Work out the address each NIC should carry
+  ansible.builtin.set_fact:
+    vm_ip_targets: >-
+      {{ (vm_ip_targets | default([]))
+         + [{'iface_id': nbi_iface_id_by_key[iface_key] | int,
+             'cidr': cidr,
+             'description': item._vm ~ ' ' ~ iface_name,
+             'existing_id': existing.id | default(0) | int,
+             'disposition': disposition}] }}
+  vars:
+    idx: "{{ item.key | regex_replace('^net', '') }}"
+    iface_name: "eth{{ idx }}"
+    iface_key: "{{ (nbi_vm_id_by_name[item._vm] | string) ~ '/' ~ iface_name }}"
+    ipcfg: "{{ item._cfg['ipconfig' ~ idx] | default('') }}"
+    cidr: "{{ (ipcfg | regex_search('ip=([^,]+)', '\\1') | default([], true) | first | default('')) }}"
+    existing: "{{ nbi_ip_by_host.get(cidr | regex_replace('/.*$', ''), {}) }}"
+    # assigned_object_id is null on an unassigned record, and default() only replaces null when told to
+    existing_assigned: "{{ existing.assigned_object_id | default(0, true) }}"
+    # An address assigned to something else is never adopted, since that would break a real relationship
+    disposition: >-
+      {{ 'create' if (existing.id | default(0) | int) == 0
+         else ('update' if (existing_assigned | int) in [0, (nbi_iface_id_by_key[iface_key] | int)]
+               else 'conflict') }}
+  loop: "{{ vm_nic_records | default([]) }}"
+  loop_control:
+    label: "{{ item._vm }} eth{{ item.key | regex_replace('^net', '') }}"
+  when:
+    - item._vm in nbi_vm_id_by_name
+    - iface_key in nbi_iface_id_by_key
+    - cidr | length > 0
+    - cidr != 'dhcp'
+    - "'/' in cidr"
+
+# Addresses NetBox does not hold at all, tagged Dynamic
+- name: Create addresses NetBox does not hold at all
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      address: "{{ item.cidr }}"
+      status: active
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ item.iface_id | int }}"
+      tags: ["{{ netbox_dynamic_tag_id | int }}"]
+      description: "{{ item.description }}"
+    status_code: [201]
+  loop: "{{ vm_ip_targets | default([]) | selectattr('disposition', 'equalto', 'create') | list }}"
+  loop_control:
+    label: "{{ item.description }} -> {{ item.cidr }}"
+  register: nbi_created_ips
+  failed_when: false
+
+# Adopts the existing record instead of adding a second, without the Dynamic tag, so curated data never becomes deletable
+- name: Adopt and update addresses NetBox already holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.existing_id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      address: "{{ item.cidr }}"
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ item.iface_id | int }}"
+      description: "{{ item.description }}"
+    status_code: [200]
+  loop: "{{ vm_ip_targets | default([]) | selectattr('disposition', 'equalto', 'update') | list }}"
+  loop_control:
+    label: "{{ item.description }} -> {{ item.cidr }}"
+  register: nbi_updated_ips
+  failed_when: false
+
+# Re-read so addresses that already existed are covered too
+- name: Re-read interface addresses to include newly created ones
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?limit=0&assigned_object_type=virtualization.vminterface"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbi_all_ips
+  no_log: true
+
+# eth0's address becomes the primary, as the NIC cloud-init configures first
+- name: Work out which address should be primary for each VM
+  ansible.builtin.set_fact:
+    nbi_primary_targets: >-
+      {{ nbi_all_ips.json.results | default([])
+         | selectattr('assigned_object', 'defined')
+         | selectattr('assigned_object.name', 'equalto', 'eth0')
+         | list }}
+
+# primary_ip4 is separate from interface addresses, and it is what NetBox's VM list and inventory plugins read
+- name: Set each VM's primary IPv4 address
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.assigned_object.virtual_machine.id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      primary_ip4: "{{ item.id | int }}"
+    status_code: [200]
+  loop: "{{ nbi_primary_targets | default([]) }}"
+  loop_control:
+    label: "{{ item.assigned_object.virtual_machine.name }} -> {{ item.address }}"
+  register: nbi_primary_set

@@ -1,0 +1,42 @@
+---
+# Creates MAC address objects and links each as its interface's primary
+
+# Since NetBox 4.2 MACs are objects and an interface's mac_address is read-only, so each is created and assigned here, then linked below
+- name: Create MAC address objects
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/dcim/mac-addresses/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      mac_address: "{{ item.value | regex_search('([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})') | upper }}"
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ nbi_iface_id_by_key[iface_key] | int }}"
+      tags: ["{{ netbox_dynamic_tag_id | int }}"]
+      description: "From Proxmox {{ item.key }} on {{ item._vm }}"
+    status_code: [201]
+  vars:
+    iface_key: "{{ (nbi_vm_id_by_name[item._vm] | string) ~ '/eth' ~ (item.key | regex_replace('^net', '')) }}"
+  loop: "{{ vm_nic_records | default([]) }}"
+  loop_control:
+    label: "{{ item._vm }} eth{{ item.key | regex_replace('^net', '') }}"
+  when:
+    - item._vm in nbi_vm_id_by_name
+    - iface_key in nbi_iface_id_by_key
+    - item.value is search('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+    - nbi_iface_id_by_key[iface_key] not in nbi_iface_has_mac
+  register: nbi_created_macs
+
+# Only linking makes it show as the interface's MAC
+- name: Link each MAC as its interface's primary
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/{{ item.invocation.module_args.body.assigned_object_id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      primary_mac_address: "{{ item.json.id | int }}"
+    status_code: [200]
+  loop: "{{ nbi_created_macs.results | default([]) | selectattr('json', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.json.mac_address | default('?') }}"

@@ -1,0 +1,464 @@
+---
+# Syncs OPNsense's DHCP leases into NetBox IPAM: creates and updates lease addresses, deletes DHCP records whose lease is gone, and binds leases to the VM holding them
+# Targets the firewalls group with a local connection, so the firewall's address is its ansible_host and nothing runs on the firewall itself
+# Inventory or environment: netbox_url (or NETBOX_URL); Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; optional validate_certs (default true)
+# Vault: FIREWALL_KEY and FIREWALL_SECRET at opnsense, NETBOX_TOKEN at netbox; vault_opnsense_path and vault_netbox_path rename them
+# Status rules: an address that is some host's ansible_host, or a DHCP reservation, is active; any other lease is dhcp; reserved and deprecated are never overwritten
+- name: Sync OPNsense DHCP leases to NetBox IPAM
+  hosts: firewalls
+  connection: local
+  gather_facts: false
+
+  vars:
+    firewall_host: "{{ ansible_host }}"
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+    vault_secrets:
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_KEY, var: firewall_key }
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_SECRET, var: firewall_secret }
+      - { path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: netbox_token }
+
+  pre_tasks:
+    # Read through hostvars, since a bare netbox_url here would refer to itself; the inventory wins over the environment
+    - name: Resolve the NetBox URL
+      ansible.builtin.set_fact:
+        netbox_url: >-
+          {{ (hostvars[inventory_hostname]['netbox_url'] if 'netbox_url' in hostvars[inventory_hostname] else '')
+             | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | regex_replace('/+$', '') }}
+
+    # Separate from the check below, since each failure has a different fix
+    - name: Validate the Vault connection is configured
+      ansible.builtin.assert:
+        that:
+          - vault_addr | length > 0
+          - vault_token | length > 0
+        fail_msg: "Set VAULT_ADDR and VAULT_TOKEN in the environment."
+      no_log: true
+
+    # The firewall's address and NetBox's URL are site facts, not secrets
+    - name: Validate the NetBox URL and firewall address
+      ansible.builtin.assert:
+        that:
+          - netbox_url | length > 0
+          - firewall_host | length > 0
+        fail_msg: "Set netbox_url in the inventory (or NETBOX_URL in the environment), and ansible_host on the firewall host."
+
+    # Fails naming every missing path or field at once
+    - name: Load secrets from Vault
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+  tasks:
+    # The Dnsmasq endpoint, since DHCP on this firewall is served by Dnsmasq rather than ISC dhcpd
+    - name: Fetch DHCP leases from OPNsense
+      ansible.builtin.uri:
+        url: "https://{{ firewall_host }}/api/dnsmasq/leases/search"
+        method: GET
+        url_username: "{{ firewall_key }}"
+        url_password: "{{ firewall_secret }}"
+        force_basic_auth: true
+        validate_certs: "{{ validate_certs | default(true) }}"
+        return_content: true
+        status_code: 200
+      register: dhcp_response
+      retries: 5
+      delay: 3
+      until: dhcp_response is not failed
+      no_log: true
+
+    # Dnsmasq names the MAC hwaddr, where dhcpd used mac; it only returns current leases, so there is no expired filter
+    - name: Filter to leases with a valid IP and MAC
+      ansible.builtin.set_fact:
+        active_leases: >-
+          {{
+            dhcp_response.json.rows | default([])
+            | selectattr('address', 'defined')
+            | selectattr('address', 'ne', '')
+            | selectattr('hwaddr', 'defined')
+            | selectattr('hwaddr', 'ne', '')
+            | list
+          }}
+
+    # How many leases this run is working with
+    - name: Show lease count
+      ansible.builtin.debug:
+        msg: "Found {{ active_leases | length }} DHCP leases to sync."
+
+    # One lookup per lease address, to split them into create and update
+    - name: Query NetBox for each lease IP
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ item.address }}/32"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Accept: application/json
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      register: netbox_check
+      loop: "{{ active_leases }}"
+      loop_control:
+        label: "{{ item.address }}"
+      retries: 5
+      delay: 3
+      until: netbox_check is not failed
+      no_log: true
+
+    # Addresses NetBox already holds
+    - name: Build list of IPs already registered in NetBox
+      ansible.builtin.set_fact:
+        existing_ip_addresses: >-
+          {{
+            netbox_check.results
+            | selectattr('json.count', '>', 0)
+            | map(attribute='item.address')
+            | list
+          }}
+
+    # Record IDs for the update tasks
+    - name: Build map of existing IP addresses to NetBox record IDs
+      ansible.builtin.set_fact:
+        netbox_id_map: >-
+          {{
+            dict(
+              netbox_check.results
+              | selectattr('json.count', '>', 0)
+              | map(attribute='item.address')
+              | zip(
+                  netbox_check.results
+                  | selectattr('json.count', '>', 0)
+                  | map(attribute='json.results')
+                  | map('first')
+                  | map(attribute='id')
+                )
+            )
+          }}
+
+    # An address that is some host's ansible_host is inventory-backed, which makes its lease active rather than dhcp
+    - name: Collect ansible_host values from every inventory host
+      ansible.builtin.set_fact:
+        inventory_ansible_hosts: >-
+          {{
+            groups['all'] | default([])
+            | map('extract', hostvars, 'ansible_host')
+            | select('defined') | map('string') | list
+          }}
+
+    # Literal addresses compare directly; names need resolving first
+    - name: Split those into literal addresses and names needing resolution
+      ansible.builtin.set_fact:
+        inventory_literal_ips: >-
+          {{ inventory_ansible_hosts | select('match', '^\d+\.\d+\.\d+\.\d+$') | list }}
+        inventory_names: >-
+          {{ inventory_ansible_hosts | reject('match', '^\d+\.\d+\.\d+\.\d+$') | list }}
+
+    # A name that does not resolve is simply not matched, so its lease falls through to the other rules rather than failing
+    - name: Resolve inventory hostnames to addresses
+      ansible.builtin.command: "getent hosts {{ item }}"
+      loop: "{{ inventory_names }}"
+      register: inventory_name_lookup
+      changed_when: false
+      failed_when: false
+      delegate_to: localhost
+
+    # Every address the inventory accounts for
+    - name: Build the full set of inventory-backed addresses
+      ansible.builtin.set_fact:
+        inventory_addresses: >-
+          {{
+            (inventory_literal_ips
+             + (inventory_name_lookup.results | default([])
+                | selectattr('rc', 'equalto', 0)
+                | map(attribute='stdout')
+                | map('regex_search', '^\S+')
+                | select('string') | list))
+            | unique | list
+          }}
+
+    # Current status per address, so a deliberate reserved or deprecated marking is never downgraded
+    - name: Build map of existing IP addresses to their current NetBox status
+      ansible.builtin.set_fact:
+        netbox_status_map: >-
+          {{
+            dict(
+              netbox_check.results
+              | selectattr('json.count', '>', 0)
+              | map(attribute='item.address')
+              | zip(
+                  netbox_check.results
+                  | selectattr('json.count', '>', 0)
+                  | map(attribute='json.results')
+                  | map('first')
+                  | map(attribute='status.value')
+                )
+            )
+          }}
+
+    # A lease on an address set aside as unprovisioned is a real conflict, so it is reported and left for a person
+    - name: Report addresses whose reserved/deprecated status blocks an update
+      ansible.builtin.debug:
+        msg: >-
+          CONFLICT: {{ item }} is marked
+          '{{ netbox_status_map[item] }}' in NetBox but has an active DHCP
+          lease. An address set aside as unprovisioned is in use. Status left
+          unchanged - resolve deliberately.
+      loop: "{{ active_leases | map(attribute='address') | list }}"
+      when:
+        - item in netbox_status_map
+        - netbox_status_map[item] in ['reserved', 'deprecated']
+
+    # New lease addresses, active when inventory-backed or reserved, otherwise dhcp
+    - name: Create new IP address entries in NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          address: "{{ item.address }}/32"
+          status: >-
+            {{ 'active'
+               if (item.address in inventory_addresses
+                   or (item.is_reserved | default([]) | length > 0))
+               else 'dhcp' }}
+          dns_name: "{{ item.hostname | default('') }}"
+          description: "DHCP lease — MAC: {{ item.hwaddr }}"
+          comments: "Auto-synced from OPNsense DHCP leases"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 201
+      loop: "{{ active_leases }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when: item.address not in existing_ip_addresses
+      register: create_results
+      no_log: true
+
+    # Existing records get the same status rules, unless someone marked them reserved or deprecated
+    - name: Update existing IP address entries in NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ netbox_id_map[item.address] }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          status: >-
+            {{ 'active'
+               if (item.address in inventory_addresses
+                   or (item.is_reserved | default([]) | length > 0))
+               else 'dhcp' }}
+          dns_name: "{{ item.hostname | default('') }}"
+          description: "DHCP lease — MAC: {{ item.hwaddr }}"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      loop: "{{ active_leases }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when:
+        - item.address in existing_ip_addresses
+        - netbox_status_map[item.address] | default('') not in ['reserved', 'deprecated']
+      register: update_results
+      no_log: true
+
+    # The same update without status, so a reserved or deprecated record still gets a fresh name and description
+    - name: Update existing entries while preserving a reserved/deprecated status
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ netbox_id_map[item.address] }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          dns_name: "{{ item.hostname | default('') }}"
+          description: "DHCP lease — MAC: {{ item.hwaddr }}"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      loop: "{{ active_leases }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when:
+        - item.address in existing_ip_addresses
+        - netbox_status_map[item.address] | default('') in ['reserved', 'deprecated']
+      register: update_protected_results
+      no_log: true
+
+    # Re-read after the writes above; only dhcp-status records are ever deleted or rebound, never active, reserved or deprecated ones
+    - name: Read every DHCP-status address NetBox holds
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/?limit=0&status=dhcp"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Accept: application/json
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      register: netbox_dhcp_ips
+      retries: 5
+      delay: 3
+      until: netbox_dhcp_ips is not failed
+      no_log: true
+
+    # An empty lease list means OPNsense failed, not that every lease expired at once, so it never triggers deletes
+    - name: Decide whether expired-lease cleanup is safe to run
+      ansible.builtin.set_fact:
+        lease_cleanup_safe: "{{ (active_leases | length) > 0 }}"
+        leased_addresses: "{{ active_leases | map(attribute='address') | list }}"
+
+    # dhcp-status records whose lease has gone
+    - name: Delete DHCP-status addresses whose lease is gone
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.id }}/"
+        method: DELETE
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: [204]
+      loop: "{{ netbox_dhcp_ips.json.results | default([]) }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when:
+        - lease_cleanup_safe | bool
+        - (item.address | regex_replace('/.*$', '')) not in leased_addresses
+      register: lease_delete_results
+
+    # Says so loudly when the safety check above held back
+    - name: Report that expired-lease cleanup was skipped
+      ansible.builtin.debug:
+        msg: >-
+          EXPIRED-LEASE CLEANUP SKIPPED - OPNsense returned no leases, so
+          nothing was deleted. Deleting on an empty result would remove every
+          DHCP-status address in NetBox.
+      when: not (lease_cleanup_safe | bool)
+
+    # proxmox-vm-sync records each VM NIC's MAC, so a lease's MAC leads to an interface and its VM; bare metal and appliances stay unbound
+    - name: Read NetBox MAC addresses, VM interfaces and VMs
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/{{ item }}?limit=0"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Accept: application/json
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      register: netbox_binding_lookups
+      loop:
+        - dcim/mac-addresses/
+        - virtualization/interfaces/
+        - virtualization/virtual-machines/
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+
+    # MAC to interface, interface to VM, VM to its current primary address, and address to its DHCP record
+    - name: Index the MAC, interface and VM relationships
+      ansible.builtin.set_fact:
+        mac_to_iface: >-
+          {{ dict(vm_macs | map(attribute='mac_address') | map('upper') | list
+                  | zip(vm_macs | map(attribute='assigned_object_id') | list)) }}
+        iface_to_vm: >-
+          {{ dict(ifaces | map(attribute='id') | map('string') | list
+                  | zip(ifaces | map(attribute='virtual_machine.id') | list)) }}
+        vm_primary_ip: >-
+          {{ dict(vms | map(attribute='id') | map('string') | list
+                  | zip(vms | map(attribute='primary_ip4.id', default=0) | list)) }}
+        dhcp_ip_by_host: >-
+          {{ dict(dhcp_ips | map(attribute='address') | map('regex_replace', '/.*$', '') | list
+                  | zip(dhcp_ips | list)) }}
+      vars:
+        vm_macs: >-
+          {{ netbox_binding_lookups.results[0].json.results | default([])
+             | selectattr('assigned_object_type', 'equalto', 'virtualization.vminterface')
+             | selectattr('assigned_object_id') | list }}
+        ifaces: "{{ netbox_binding_lookups.results[1].json.results | default([]) }}"
+        vms: "{{ netbox_binding_lookups.results[2].json.results | default([]) }}"
+        dhcp_ips: "{{ netbox_dhcp_ips.json.results | default([]) }}"
+
+    # One record per lease that resolves to a VM, with both writes decided here so the tasks below stay plain filters
+    - name: Work out which leases belong to a VM
+      ansible.builtin.set_fact:
+        lease_bindings: >-
+          {{ (lease_bindings | default([]))
+             + [{'address': item.address,
+                 'ip_id': ip_record.id,
+                 'iface_id': iface_id | int,
+                 'vm_id': vm_id | int,
+                 'needs_assign': (ip_record.assigned_object_id | default(0, true) | int) != (iface_id | int),
+                 'needs_primary': (vm_primary_ip[vm_id | string] | default(0, true) | int) != (ip_record.id | int)}] }}
+      vars:
+        iface_id: "{{ mac_to_iface[item.hwaddr | upper] }}"
+        vm_id: "{{ iface_to_vm[iface_id | string] }}"
+        ip_record: "{{ dhcp_ip_by_host[item.address] }}"
+      loop: "{{ active_leases }}"
+      loop_control:
+        label: "{{ item.address }} ({{ item.hwaddr }})"
+      when:
+        - (item.hwaddr | upper) in mac_to_iface
+        - (mac_to_iface[item.hwaddr | upper] | string) in iface_to_vm
+        - item.address in dhcp_ip_by_host
+
+    # Ties the address to the interface holding it, so NetBox knows which VM it belongs to
+    - name: Attach leased addresses to the VM interface holding them
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.ip_id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          assigned_object_type: virtualization.vminterface
+          assigned_object_id: "{{ item.iface_id | int }}"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      loop: "{{ lease_bindings | default([]) | selectattr('needs_assign') | list }}"
+      loop_control:
+        label: "{{ item.address }} -> interface {{ item.iface_id }}"
+      register: lease_assign_results
+
+    # Only where it differs, so a stable lease is not rewritten every run and the count means changed rather than seen
+    - name: Update primary IPv4 where the lease no longer matches it
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.vm_id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          primary_ip4: "{{ item.ip_id | int }}"
+        validate_certs: "{{ validate_certs | default(true) }}"
+        status_code: 200
+      loop: "{{ lease_bindings | default([]) | selectattr('needs_primary') | list }}"
+      loop_control:
+        label: "VM {{ item.vm_id }} -> {{ item.address }}"
+      register: lease_primary_results
+
+    # One summary of everything the run changed
+    - name: Report sync results
+      ansible.builtin.debug:
+        msg: >-
+          Sync complete.
+          Created:
+          {{ create_results.results | default([]) | selectattr('status', 'defined')
+             | selectattr('status', 'equalto', 201) | list | length }},
+          Updated:
+          {{ update_results.results | default([]) | selectattr('status', 'defined')
+             | selectattr('status', 'equalto', 200) | list | length }},
+          Status-preserved (reserved/deprecated):
+          {{ update_protected_results.results | default([]) | selectattr('status', 'defined')
+             | selectattr('status', 'equalto', 200) | list | length }}.
+          Leases seen: {{ active_leases | length }}
+          (inventory-backed:
+          {{ active_leases | map(attribute='address') | select('in', inventory_addresses)
+             | list | length }},
+          reservations: {{ active_leases | selectattr('is_reserved') | list | length }}).
+          Expired DHCP records deleted:
+          {{ lease_delete_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }}.
+          Leases resolved to a VM: {{ lease_bindings | default([]) | length }}
+          (attached to an interface:
+          {{ lease_assign_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }},
+          primary IPv4 changed:
+          {{ lease_primary_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }}).

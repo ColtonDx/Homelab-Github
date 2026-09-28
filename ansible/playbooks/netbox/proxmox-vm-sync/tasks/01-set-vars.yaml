@@ -1,0 +1,67 @@
+---
+# Resolves the connection settings and loads the Proxmox and NetBox credentials from Vault; fails fast when anything is missing
+
+# Read through hostvars, since a bare netbox_url here would refer to itself; an unset env lookup is '', so default(x, true) falls through it
+- name: Resolve NetBox settings from survey, environment or inventory
+  ansible.builtin.set_fact:
+    netbox_url: "{{ nb_url_env | default(nb_url_inv, true) }}"
+    netbox_cluster_name: >-
+      {{ nb_cluster_env | default(nb_cluster_inv, true)
+         | default('PVE-Cluster', true) }}
+  vars:
+    nb_url_env: "{{ lookup('ansible.builtin.env', 'NETBOX_URL') }}"
+    nb_cluster_env: "{{ lookup('ansible.builtin.env', 'NETBOX_CLUSTER_NAME') }}"
+    nb_url_inv: >-
+      {{ hostvars[inventory_hostname]['netbox_url']
+         if 'netbox_url' in hostvars[inventory_hostname] else '' }}
+    nb_cluster_inv: >-
+      {{ hostvars[inventory_hostname]['netbox_cluster_name']
+         if 'netbox_cluster_name' in hostvars[inventory_hostname] else '' }}
+
+# Vault connection for the credentials below
+- name: Set Vault connection vars
+  ansible.builtin.set_fact:
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+  no_log: true
+
+# Proxmox's API token from the proxmox path and NetBox's token from the netbox path; vault_proxmox_path and vault_netbox_path rename them
+- name: Set the secrets to pull from Vault
+  ansible.builtin.set_fact:
+    vault_secrets:
+      - {path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_URL, var: proxmox_api_url}
+      - {path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id}
+      - {path: "{{ vault_proxmox_path | default('proxmox') }}", field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret}
+      - {path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: netbox_token}
+
+# Fails naming every missing path or field at once
+- name: Load Vault secrets
+  ansible.builtin.include_tasks: ../../../../tasks/var_lookup.yaml
+
+# Stop before calling either API when a setting is missing
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - netbox_url | length > 0
+      - netbox_cluster_name | length > 0
+      - proxmox_api_url | length > 0
+      - proxmox_api_token_id | length > 0
+      - proxmox_api_token_secret | length > 0
+      - netbox_token | length > 0
+    fail_msg: >-
+      Missing connection details. netbox_url resolved to '{{ netbox_url }}': set NETBOX_URL in the environment,
+      or netbox_url in the inventory or as an extra var. The Proxmox fields belong at
+      {{ vault_proxmox_path | default('proxmox') }} and NETBOX_TOKEN at {{ vault_netbox_path | default('netbox') }}.
+
+# Built once as facts, so every task file can reuse them
+- name: Build reusable headers and base URLs
+  ansible.builtin.set_fact:
+    netbox_headers:
+      Authorization: "Token {{ netbox_token }}"
+      Accept: application/json
+    proxmox_headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+      Accept: application/json
+    proxmox_api_base: "{{ proxmox_api_url | regex_replace('/+$', '') }}"
+  no_log: true

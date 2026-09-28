@@ -1,0 +1,83 @@
+---
+# Reads every guest from Proxmox, filters it down to what should be synced, then reads each guest's config
+
+# One call lists every VM and LXC in the cluster
+- name: Query Proxmox for every guest in the cluster
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_base }}/cluster/resources?type=vm"
+    method: GET
+    headers: "{{ proxmox_headers }}"
+    validate_certs: "{{ validate_certs | default(true) }}"
+    status_code: 200
+  register: proxmox_resources
+  retries: 5
+  delay: 3
+  until: proxmox_resources is not failed
+  no_log: true
+
+# Templates are not guests, so they are left out
+- name: Select the guests that should exist in NetBox
+  ansible.builtin.set_fact:
+    proxmox_guests: >-
+      {{ proxmox_resources.json.data | default([])
+         | rejectattr('template', 'defined') | list
+         + (proxmox_resources.json.data | default([])
+            | selectattr('template', 'defined')
+            | rejectattr('template', 'in', [1, '1', true])
+            | list) }}
+
+# Taken before the filters below, so a guest on a rebooting node still counts as existing and is never reclaimed
+- name: Remember every guest that exists, before further filtering
+  ansible.builtin.set_fact:
+    proxmox_all_guest_names: >-
+      {{ proxmox_guests | selectattr('name', 'defined')
+         | map(attribute='name') | map('lower') | list }}
+
+# The cluster list still shows guests on a down node, from stale state
+- name: Drop guests belonging to offline nodes
+  ansible.builtin.set_fact:
+    proxmox_guests_on_offline: "{{ proxmox_guests | selectattr('node', 'in', proxmox_offline_nodes) | list }}"
+    proxmox_guests: "{{ proxmox_guests | rejectattr('node', 'in', proxmox_offline_nodes) | list }}"
+  when: proxmox_offline_nodes | length > 0
+
+# include_lxc=false syncs VMs only
+- name: Drop LXC containers when they are not wanted
+  ansible.builtin.set_fact:
+    proxmox_guests: "{{ proxmox_guests | rejectattr('type', 'equalto', 'lxc') | list }}"
+  when: not (include_lxc | bool)
+
+# NetBox identifies VMs by name, so a guest without one is set aside and reported
+- name: Separate guests that have no usable name
+  ansible.builtin.set_fact:
+    proxmox_unnamed: >-
+      {{ proxmox_guests | rejectattr('name', 'defined') | list
+         + (proxmox_guests | selectattr('name', 'defined')
+            | selectattr('name', 'equalto', '') | list) }}
+    proxmox_guests: >-
+      {{ proxmox_guests | selectattr('name', 'defined')
+         | rejectattr('name', 'equalto', '') | list }}
+
+# Boot order, NICs and disks are only in each guest's config; failed_when false, so one dead node cannot stop the sync
+- name: Read each guest's configuration
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_base }}/nodes/{{ item.node }}/{{ item.type | default('qemu') }}/{{ item.vmid }}/config"
+    method: GET
+    headers: "{{ proxmox_headers }}"
+    validate_certs: "{{ validate_certs | default(true) }}"
+    status_code: 200
+  loop: "{{ proxmox_guests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: proxmox_guest_configs
+  failed_when: false
+  no_log: true
+
+# Only guests whose config was read; Proxmox reports onboot as 0 or 1, and NetBox takes on or off
+- name: Map each VMID to its start-on-boot setting
+  ansible.builtin.set_fact:
+    onboot_by_vmid: >-
+      {{ dict(proxmox_guest_configs.results | selectattr('json', 'defined')
+              | map(attribute='item.vmid') | map('string') | list
+              | zip(proxmox_guest_configs.results | selectattr('json', 'defined')
+                    | map(attribute='json.data.onboot', default=0)
+                    | map('int') | map('ternary', 'on', 'off') | list)) }}

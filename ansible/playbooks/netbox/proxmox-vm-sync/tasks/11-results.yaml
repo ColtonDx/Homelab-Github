@@ -1,0 +1,59 @@
+---
+# Reports what changed, and anything a person should check
+
+# Counts for each kind of change
+- name: Summarize what changed
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox guests considered: {{ proxmox_guests | length }}"
+      - "VMs created: {{ guests_to_create | map(attribute='name') | list }}"
+      - "VMs updated: {{ guests_to_update | length }}"
+      - >-
+        Interfaces created:
+        {{ nbi_created_ifaces.results | default([]) | selectattr('json', 'defined')
+           | list | length }}
+      - "MACs created: {{ nbi_created_macs.results | default([]) | selectattr('json', 'defined') | list | length }}"
+      - >-
+        IPs created: {{ nbi_created_ips.results | default([]) | selectattr('json', 'defined') | list | length }},
+        adopted: {{ nbi_updated_ips.results | default([]) | selectattr('json', 'defined') | list | length }}
+      - "Disks created: {{ nbd_created.results | default([]) | selectattr('json', 'defined') | list | length }}"
+      - >-
+        Reclaimed - VMs: {{ nbr_deleted_vms.results | default([]) | selectattr('json', 'defined') | list | length }},
+        interfaces: {{ nbr_deleted_ifaces.results | default([]) | selectattr('json', 'defined') | list | length }},
+        MACs: {{ nbr_deleted_macs.results | default([]) | selectattr('json', 'defined') | list | length }},
+        IPs: {{ nbr_deleted_ips.results | default([]) | selectattr('json', 'defined') | list | length }},
+        disks: {{ nbr_deleted_disks.results | default([]) | selectattr('json', 'defined') | list | length }}
+
+# Each entry mirrors a safety decision made earlier in the run
+- name: Collect anything that needs a human look
+  ansible.builtin.set_fact:
+    sync_warnings: >-
+      {{ ([]
+         + (['Offline node(s) ' ~ (proxmox_offline_nodes | join(', ')) ~ ': '
+             ~ (proxmox_guests_on_offline | default([]) | length) ~ ' guest(s) skipped, NetBox left untouched.']
+            if proxmox_offline_nodes | length > 0 else [])
+         + (['Unnamed guest(s) skipped, VMID(s) '
+             ~ (proxmox_unnamed | map(attribute='vmid', default='?') | list | join(', ')) ~ '.']
+            if proxmox_unnamed | length > 0 else [])
+         + (['Could not read config for: ' ~ (config_unreadable | map(attribute='item.name') | list | join(', '))
+             ~ '. start_on_boot left unset.']
+            if config_unreadable | length > 0 else [])
+         + (['Name mismatch (case only), skipped: '
+             ~ (guests_name_mismatch | map(attribute='name') | list | join(', '))]
+            if guests_name_mismatch | length > 0 else [])
+         + (['NetBox VM(s) with no matching Proxmox guest, not deleted: ' ~ (netbox_orphans | join(', '))]
+            if netbox_orphans | length > 0 else [])
+         + (['IP(s) already assigned elsewhere, left alone: '
+             ~ (ip_conflicts | map(attribute='description') | list | join(', '))]
+            if ip_conflicts | length > 0 else [])
+         + (['RECLAIM SKIPPED - Proxmox reported no guests at all, nothing was deleted.']
+            if not (reclaim_safe | bool) else [])
+      ) }}
+  vars:
+    config_unreadable: "{{ proxmox_guest_configs.results | rejectattr('json', 'defined') | list }}"
+    ip_conflicts: "{{ vm_ip_targets | default([]) | selectattr('disposition', 'equalto', 'conflict') | list }}"
+
+# Shown even when empty, so a clean run says so
+- name: Report warnings
+  ansible.builtin.debug:
+    msg: "{{ sync_warnings if sync_warnings | length > 0 else ['none'] }}"

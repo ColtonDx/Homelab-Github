@@ -1,0 +1,94 @@
+---
+# Creates one NetBox interface per virtual NIC, from the configs already read
+
+# Each netN key in a guest's config is a NIC, recorded as ethN, the only mapping visible from outside the guest
+- name: Build one record per virtual NIC
+  ansible.builtin.set_fact:
+    vm_nic_records: >-
+      {{ (vm_nic_records | default([]))
+         + (item.json.data | dict2items
+            | selectattr('key', 'match', '^net[0-9]+$')
+            | map('combine', {'_vm': item.item.name, '_cfg': item.json.data})
+            | list) }}
+  loop: "{{ proxmox_guest_configs.results | selectattr('json', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Re-read so the VMs created above are included
+- name: Re-read NetBox virtual machines to include newly created ones
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbi_vms
+  no_log: true
+
+# What NetBox already holds, to avoid duplicates
+- name: Read the interfaces NetBox already holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbi_existing_ifaces
+  no_log: true
+
+# Keyed by VM ID and name, since every VM has an eth0
+- name: Index VMs and existing interfaces
+  ansible.builtin.set_fact:
+    nbi_vm_id_by_name: >-
+      {{ dict(nbi_vms.json.results | map(attribute='name') | list
+              | zip(nbi_vms.json.results | map(attribute='id') | list)) }}
+    nbi_iface_id_by_key: >-
+      {{ dict(nbi_existing_ifaces.json.results
+              | map(attribute='virtual_machine.id') | map('string') | list
+              | zip(nbi_existing_ifaces.json.results | map(attribute='name') | list)
+              | map('join', '/') | list
+              | zip(nbi_existing_ifaces.json.results | map(attribute='id') | list)) }}
+
+# Only NICs NetBox does not already have
+- name: Create interfaces that do not exist yet
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      virtual_machine: "{{ nbi_vm_id_by_name[item._vm] | int }}"
+      name: "eth{{ item.key | regex_replace('^net', '') }}"
+      enabled: true
+      tags: ["{{ netbox_dynamic_tag_id | int }}"]
+      description: "Proxmox {{ item.key }}"
+    status_code: [201]
+  loop: "{{ vm_nic_records | default([]) }}"
+  loop_control:
+    label: "{{ item._vm }} eth{{ item.key | regex_replace('^net', '') }}"
+  when:
+    - item._vm in nbi_vm_id_by_name
+    - (nbi_vm_id_by_name[item._vm] | string) ~ '/eth' ~ (item.key | regex_replace('^net', ''))
+      not in nbi_iface_id_by_key
+  register: nbi_created_ifaces
+
+# Re-read so new and existing interfaces can both be addressed below
+- name: Re-read interfaces so both existing and new ones are addressable
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbi_all_ifaces
+  no_log: true
+
+# Also records which interfaces already have a primary MAC
+- name: Index every interface by VM and name
+  ansible.builtin.set_fact:
+    nbi_iface_id_by_key: >-
+      {{ dict(nbi_all_ifaces.json.results
+              | map(attribute='virtual_machine.id') | map('string') | list
+              | zip(nbi_all_ifaces.json.results | map(attribute='name') | list)
+              | map('join', '/') | list
+              | zip(nbi_all_ifaces.json.results | map(attribute='id') | list)) }}
+    nbi_iface_has_mac: >-
+      {{ nbi_all_ifaces.json.results
+         | selectattr('primary_mac_address') | map(attribute='id') | list }}

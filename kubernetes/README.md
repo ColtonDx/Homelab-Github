@@ -1,6 +1,6 @@
 # Kubernetes
 
-Everything that runs on the Kubernetes clusters, applied by Flux. Apps are written once and shared by every cluster that runs them. Nothing in this folder is private: each cluster's domain and other site details come from Vault at deploy time.
+Everything that runs on the Kubernetes clusters, applied by Flux. Apps are written once and shared by every cluster that runs them.
 
 ## Layout
 
@@ -14,8 +14,6 @@ kubernetes/
     ├── base/<app>/         # one folder per app
     └── <cluster>/          # the list of apps that cluster runs, plus any patches
 ```
-
-Talos machine configs are kept elsewhere, since they describe the nodes rather than what runs on them.
 
 ## Load order
 

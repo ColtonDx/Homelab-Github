@@ -1,0 +1,68 @@
+---
+# Creates one NetBox virtual disk per disk attached in Proxmox
+
+# Bus keys with a size are disks; media=cdrom rules out the cloud-init drive and ISOs, and EFI and TPM state never match a bus key
+- name: Build one record per virtual disk
+  ansible.builtin.set_fact:
+    vm_disk_records: >-
+      {{ (vm_disk_records | default([]))
+         + (item.json.data | dict2items
+            | selectattr('key', 'match', '^(scsi|virtio|sata|ide)[0-9]+$')
+            | rejectattr('value', 'search', 'media=cdrom')
+            | selectattr('value', 'search', 'size=')
+            | map('combine', {'_vm': item.item.name})
+            | list) }}
+  loop: "{{ proxmox_guest_configs.results | selectattr('json', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# What NetBox already holds, to avoid duplicates
+- name: Read the virtual disks NetBox already holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-disks/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nbd_existing
+  no_log: true
+
+# Keyed by VM ID and disk name, since every VM has a scsi0
+- name: Index existing virtual disks
+  ansible.builtin.set_fact:
+    nbd_disk_keys: >-
+      {{ nbd_existing.json.results | default([])
+         | map(attribute='virtual_machine.id') | map('string') | list
+         | zip(nbd_existing.json.results | default([]) | map(attribute='name') | list)
+         | map('join', '/') | list }}
+
+# Sizes are converted from Proxmox's unit suffix to the MB NetBox stores
+- name: Create virtual disks that NetBox does not have
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-disks/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      virtual_machine: "{{ nbi_vm_id_by_name[item._vm] | int }}"
+      name: "{{ item.key }}"
+      size: "{{ size_mb | int }}"
+      tags: ["{{ netbox_dynamic_tag_id | int }}"]
+      description: "Proxmox {{ item.key }}"
+    status_code: [201]
+  vars:
+    size_num: "{{ item.value | regex_search('size=([0-9]+)', '\\1') | first | default('0') }}"
+    size_unit: "{{ item.value | regex_search('size=[0-9]+([KMGT])', '\\1') | first | default('M') }}"
+    size_mb: >-
+      {{ ((size_num | int) *
+          (1024 if size_unit == 'G' else
+           1048576 if size_unit == 'T' else
+           0.0009765625 if size_unit == 'K' else 1)) | round | int }}
+    disk_key: "{{ (nbi_vm_id_by_name[item._vm] | string) ~ '/' ~ item.key }}"
+  loop: "{{ vm_disk_records | default([]) }}"
+  loop_control:
+    label: "{{ item._vm }} {{ item.key }}"
+  when:
+    - item._vm in nbi_vm_id_by_name
+    - disk_key not in nbd_disk_keys
+    - (size_mb | int) > 0
+  register: nbd_created

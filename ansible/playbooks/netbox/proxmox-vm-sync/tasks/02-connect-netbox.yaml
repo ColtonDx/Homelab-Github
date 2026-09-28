@@ -1,0 +1,117 @@
+---
+# Resolves the NetBox objects every VM write refers to: cluster, VM type, Dynamic tag, devices and existing VMs
+# Platform is never set: in NetBox it means the guest OS, which Proxmox cannot see, and values set by hand would be overwritten
+
+# The cluster every synced VM belongs to, named by NETBOX_CLUSTER_NAME or netbox_cluster_name
+- name: Look up the NetBox cluster
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ netbox_cluster_name | urlencode }}"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nb_cluster
+  no_log: true
+
+# Writing VMs into a missing cluster would fail on every record, so stop here instead
+- name: Confirm the cluster exists
+  ansible.builtin.assert:
+    that:
+      - nb_cluster.json.count | int == 1
+    fail_msg: >-
+      No NetBox cluster named '{{ netbox_cluster_name }}'. Set NETBOX_CLUSTER_NAME
+      to match an existing cluster, or create it in NetBox first.
+
+# The VM type set on every synced VM; written through the raw API, since the NetBox collection supports neither it nor start_on_boot
+- name: Look up the QEMU virtual machine type
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machine-types/?slug=qemu"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nb_vm_type
+  no_log: true
+
+# Created rather than required, since it is not a curated vocabulary like device roles
+- name: Create the QEMU virtual machine type when it does not exist
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machine-types/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      name: QEMU
+      slug: qemu
+      description: "KVM/QEMU guest on Proxmox VE"
+    status_code: 201
+  register: nb_vm_type_created
+  when: nb_vm_type.json.count | int == 0
+  no_log: true
+
+# Marks everything this playbook creates, so records for guests that are gone can be found later; never added to existing records
+- name: Look up the Dynamic tag
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/extras/tags/?slug=dynamic"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nb_tag
+  no_log: true
+
+# Created on the first run
+- name: Create the Dynamic tag when it does not exist
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/extras/tags/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      name: Dynamic
+      slug: dynamic
+      color: "9e9e9e"
+      description: >-
+        Discovered automatically by the proxmox-vm-sync playbook. Safe to remove
+        when the source object is gone.
+    status_code: [201]
+  register: nb_tag_created
+  when: nb_tag.json.count | int == 0
+  no_log: true
+
+# Hypervisor devices, so each guest can be tied to the node it runs on
+- name: Fetch NetBox devices so guests can be tied to their hypervisor
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/dcim/devices/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: nb_devices
+  no_log: true
+
+# What NetBox already holds, to split the guests into create and update
+- name: Query NetBox for the virtual machines it already holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: netbox_existing_vms
+  retries: 5
+  delay: 3
+  until: netbox_existing_vms is not failed
+  no_log: true
+
+# Device names are indexed lower-case, since NetBox and Proxmox often capitalise node names differently
+- name: Index the resolved NetBox objects
+  ansible.builtin.set_fact:
+    netbox_cluster_id: "{{ nb_cluster.json.results[0].id }}"
+    netbox_vm_type_id: >-
+      {{ nb_vm_type.json.results[0].id if nb_vm_type.json.count | int > 0
+         else nb_vm_type_created.json.id }}
+    netbox_device_by_node: >-
+      {{ dict(nb_devices.json.results | map(attribute='name') | map('lower') | list
+              | zip(nb_devices.json.results | map(attribute='id') | list)) }}
+    netbox_dynamic_tag_id: >-
+      {{ nb_tag.json.results[0].id if nb_tag.json.count | int > 0
+         else nb_tag_created.json.id }}
+    netbox_vm_id_by_name: >-
+      {{ dict(netbox_existing_vms.json.results | map(attribute='name') | list
+              | zip(netbox_existing_vms.json.results | map(attribute='id') | list)) }}
