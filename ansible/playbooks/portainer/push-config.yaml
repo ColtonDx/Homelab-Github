@@ -1,0 +1,23 @@
+---
+# Renders docker/<app_name>/config/*.j2 from the inventory and copies the files into the app's running container through Portainer; deploy-stack.yaml does the same after a deploy
+# Connection settings and Vault fields are listed in tasks/setup.yaml; the templates read inventory variables, which must be in the all group since this runs on localhost
+# Required: app_name, portainer_endpoint; optional: push_config_restart=true for apps that only read config at start
+- name: Push a stack's config into its container
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # Validates inputs, loads credentials, reads the compose file's ConfigPath label and finds the environment and stack
+    - name: Prepare the stack
+      ansible.builtin.include_tasks: tasks/setup.yaml
+
+    # Config goes into a running container, so the stack has to be deployed first
+    - name: Fail if the stack is not deployed
+      ansible.builtin.fail:
+        msg: "Stack '{{ stack_name }}' does not exist on environment '{{ portainer_endpoint }}'. Deploy it first with deploy-stack.yaml."
+      when: existing_stack == {}
+
+    # Renders and copies the files
+    - name: Push the app's config
+      ansible.builtin.include_tasks: tasks/push_config.yaml

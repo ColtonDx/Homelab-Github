@@ -1,0 +1,24 @@
+---
+# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+{% set docker_domain = docker_subdomain ~ '.' ~ domain %}
+{% set kube_domain = (homepage.kubernetes_subdomain | default('k3s')) ~ '.' ~ domain %}
+- datetime:
+    text_size: 4xl
+    format:
+      timeStyle: short
+      hourCycle: h23
+      hour12: false
+
+- openmeteo:
+    label: {{ homepage.weather.label }}
+    latitude: {{ homepage.weather.latitude }}
+    longitude: {{ homepage.weather.longitude }}
+    timezone: {{ homepage.weather.timezone }}
+    units: imperial
+    cache: 5 # Time in minutes to cache API responses, to stay within limits
+
+- search:
+    provider: custom
+    url: https://searxng-core.{{ docker_domain }}/search?q=
+    target: _self
+    showSearchSuggestions: false

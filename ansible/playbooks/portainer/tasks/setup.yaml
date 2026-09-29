@@ -62,17 +62,21 @@
         stack_proxy_port: ""
         stack_proxy_scheme: http
         stack_backup_label: ""
+        stack_config_container: ""
+        stack_config_path: ""
       vars:
         compose_text: "{{ stack_compose_raw.content | b64decode }}"
         services: "{{ (compose_text | from_yaml).services | default({}) }}"
 
-    # AppPort marks the service the reverse proxy points at, AppScheme on that service picks http (default) or https, and Backup names the DVBM job; the last one found wins
-    - name: Read the AppPort, AppScheme and Backup labels
+    # AppPort marks the service the reverse proxy points at, AppScheme picks http (default) or https, Backup names the DVBM job, and ConfigPath is where push-config.yaml writes; the last one found wins
+    - name: Read the AppPort, AppScheme, Backup and ConfigPath labels
       ansible.builtin.set_fact:
         stack_proxy_container: "{{ (item.value.container_name | default(item.key)) if app_port | length > 0 else stack_proxy_container }}"
         stack_proxy_port: "{{ app_port if app_port | length > 0 else stack_proxy_port }}"
         stack_proxy_scheme: "{{ (app_scheme | default('http', true)) if app_port | length > 0 else stack_proxy_scheme }}"
         stack_backup_label: "{{ backup | default(stack_backup_label, true) }}"
+        stack_config_container: "{{ (item.value.container_name | default(item.key)) if config_path | length > 0 else stack_config_container }}"
+        stack_config_path: "{{ config_path if config_path | length > 0 else stack_config_path }}"
       loop: "{{ ((stack_compose_raw.content | b64decode | from_yaml).services | default({})) | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
@@ -81,6 +85,7 @@
         app_port: "{{ labels | select('match', '^AppPort=') | map('regex_replace', '^AppPort=([^/]*).*$', '\\1') | first | default('') }}"
         backup: "{{ labels | select('match', '^Backup=') | map('regex_replace', '^Backup=', '') | first | default('') }}"
         app_scheme: "{{ labels | select('match', '^AppScheme=') | map('regex_replace', '^AppScheme=', '') | map('lower') | first | default('') }}"
+        config_path: "{{ labels | select('match', '^ConfigPath=') | map('regex_replace', '^ConfigPath=', '') | first | default('') }}"
 
     # NPM only forwards over http or https, so a typo in the label stops here rather than creating a broken proxy host
     - name: Validate the AppScheme label

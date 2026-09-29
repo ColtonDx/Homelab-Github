@@ -1,0 +1,62 @@
+---
+# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/settings
+
+title: {{ homepage.title | default('Homepage') }}
+
+background:
+  image: >-
+    https://images.unsplash.com/photo-1608501078713-8e445a709b39?q=80&w=3870&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D
+  opacity: 15
+headerStyle: underlined
+theme: dark
+color: stone
+useEqualHeights: true
+statusStyle: "dot"
+cardBlur: md
+target: _self
+
+providers:
+  openweathermap: openweathermapapikey
+  weatherapi: weatherapiapikey
+
+hideVersion: true
+
+quicklaunch:
+  searchDescriptions: true
+  hideInternetSearch: true
+  showSearchSuggestions: true
+  hideVisitURL: true
+  provider: bing
+
+layout:
+  Links:
+    style: row
+    iconsOnly: true
+    header: false
+    disableCollapse: true
+    useEqualHeights: true
+  Column 1:
+    header: false
+    #tab: Overview
+    useEqualHeights: true
+  Column 2:
+    #tab: Overview
+    header: false
+    useEqualHeights: true
+    Compute:
+      style: row
+      columns: 2
+      disableCollapse: true
+  Column 3:
+    header: false
+    useEqualHeights: true
+  Media:
+    useEqualHeights: true
+  Tools:
+    useEqualHeights: true
+    initiallyCollapsed: true
+  Other:
+    useEqualHeights: true
+    initiallyCollapsed: true

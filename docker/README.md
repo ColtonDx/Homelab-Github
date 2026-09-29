@@ -52,6 +52,7 @@ If a name is set in more than one place, Vault wins over `docker_app_vars`, whic
 | `Backup=<app>` | The DVBM backup job that covers this container's volumes |
 | `AppPort=<port>` | The port Nginx Proxy Manager forwards to; set it on the one container that serves the app |
 | `AppScheme=https` | Optional, on the same container as `AppPort`: forward over HTTPS instead of the default HTTP, for apps that only serve TLS |
+| `ConfigPath=<path>` | Optional: where `docker/<app>/config/*.j2`, rendered from the inventory, is copied into this container by `deploy-stack.yaml` or `push-config.yaml` |
 
 ## Template
 

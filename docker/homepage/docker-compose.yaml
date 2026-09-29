@@ -1,0 +1,31 @@
+services:
+  homepage:
+    container_name: homepage
+    restart: unless-stopped
+    image: ghcr.io/gethomepage/homepage:latest
+    networks:
+      - reverseproxy-nw
+    # Internal names in the dashboard resolve through the site's own DNS
+    dns: ${DNS_SERVER}
+    environment:
+      - HOMEPAGE_VAR_NAVIDROME_TOKEN=${HOMEPAGE_VAR_NAVIDROME_TOKEN}
+      - HOMEPAGE_VAR_MEDIA_PASSWORD=${HOMEPAGE_VAR_MEDIA_PASSWORD}
+      - HOMEPAGE_VAR_AUDIOBOOKS_API=${HOMEPAGE_VAR_AUDIOBOOKS_API}
+      - HOMEPAGE_VAR_TAUTULLI_TOKEN=${HOMEPAGE_VAR_TAUTULLI_TOKEN}
+      - HOMEPAGE_VAR_TRUENAS_TOKEN=${HOMEPAGE_VAR_TRUENAS_TOKEN}
+      - HOMEPAGE_VAR_CLAW_TOKEN=${HOMEPAGE_VAR_CLAW_TOKEN}
+      - HOMEPAGE_ALLOWED_HOSTS=homepage.${DOCKER_DOMAIN}
+    volumes:
+      - data:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "Backup=homepage" # Sets the DVBM Backup Job Label
+      - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
+      - "ConfigPath=/app/config" # Sets where push-config.yaml writes docker/homepage/config
+
+networks:
+  reverseproxy-nw: # Use the existing Reverse Proxy Network
+    external: true
+
+volumes:
+  data:

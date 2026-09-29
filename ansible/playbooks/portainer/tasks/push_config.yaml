@@ -1,0 +1,93 @@
+---
+# Renders docker/<app_name>/config/*.j2 from the inventory and copies the results into the stack's container, like docker cp, through Portainer's Docker API
+# Needs setup.yaml first; the target is the container with a ConfigPath label, and that label is the folder the files land in
+# Optional: push_config_restart=true restarts the container afterwards, for apps that only read their config at start
+
+# Where the templates live in this checkout
+- name: Locate the app's config templates
+  ansible.builtin.set_fact:
+    push_config_dir: "{{ playbook_dir }}/../../../{{ compose_root | default('docker') }}/{{ app_name }}/config"
+
+# Found here so an app with no config folder is simply skipped
+- name: List the config templates
+  ansible.builtin.set_fact:
+    push_config_templates: "{{ query('ansible.builtin.fileglob', push_config_dir ~ '/*.j2') }}"
+
+# Only apps with templates have anything to push
+- name: Push the rendered config
+  when: push_config_templates | length > 0
+  block:
+    # Without the label there is no telling which container or folder the files belong in
+    - name: Require a ConfigPath label
+      ansible.builtin.assert:
+        that:
+          - stack_config_path | length > 0
+        fail_msg: "{{ stack_compose_path }} has config templates but no ConfigPath label saying where they go."
+
+    # Holds the rendered files, which carry site details, for this run only
+    - name: Create a private work folder
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: push-config-
+      register: push_config_work
+
+    # The rendered files go in their own folder, so only they are packed
+    - name: Create the folder for the rendered files
+      ansible.builtin.file:
+        path: "{{ push_config_work.path }}/files"
+        state: directory
+        mode: "0700"
+
+    # Each file.yaml.j2 becomes file.yaml, filled from the inventory; an undefined value fails here, naming it
+    - name: Render the config files into the folder
+      ansible.builtin.template:
+        src: "{{ item }}"
+        dest: "{{ push_config_work.path }}/files/{{ item | basename | regex_replace('\\.j2$', '') }}"
+        mode: "0644"
+      loop: "{{ push_config_templates }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
+    # Docker's archive API takes a tar stream, the same thing docker cp sends
+    - name: Pack the rendered files
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ push_config_work.path }}/config.tar", -C, "{{ push_config_work.path }}/files", .]
+      changed_when: false
+
+    # Extracts the files into ConfigPath inside the container, overwriting the old copies
+    - name: Copy the files into the container
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/{{ stack_config_container }}/archive?path={{ stack_config_path | urlencode }}"
+        method: PUT
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+          Content-Type: application/x-tar
+        src: "{{ push_config_work.path }}/config.tar"
+        status_code: 200
+        validate_certs: "{{ portainer_validate_certs }}"
+      register: push_config_upload
+      changed_when: true
+
+    # Only for apps that do not pick up config changes on their own
+    - name: Restart the container
+      ansible.builtin.uri:
+        url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/{{ stack_config_container }}/restart"
+        method: POST
+        headers:
+          X-API-Key: "{{ portainer_token }}"
+        status_code: 204
+        validate_certs: "{{ portainer_validate_certs }}"
+      when: push_config_restart | default(false) | bool
+
+    # Names only, never the rendered contents
+    - name: Report the pushed config
+      ansible.builtin.debug:
+        msg: "Pushed {{ push_config_templates | map('basename') | map('regex_replace', '\\.j2$', '') | join(', ') }} to {{ stack_config_container }}:{{ stack_config_path }}"
+
+  always:
+    # The rendered files never outlive the run
+    - name: Remove the work folder
+      ansible.builtin.file:
+        path: "{{ push_config_work.path }}"
+        state: absent
+      when: push_config_work.path is defined

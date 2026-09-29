@@ -1,0 +1,324 @@
+---
+# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+{% set docker_domain = docker_subdomain ~ '.' ~ domain %}
+{% set kube_domain = (homepage.kubernetes_subdomain | default('k3s')) ~ '.' ~ domain %}
+#
+- Column 1:
+    - CI/CD:
+        - Gitlab:
+            href: https://gitlab.{{ domain }}
+            icon: gitlab.png
+            description: Git Repository and CI/CD
+            siteMonitor: https://{{ homepage_addresses.gitlab }}
+        - Semaphore:
+            href: https://semaphore.{{ docker_domain }}
+            icon: semaphore.png
+            description: Automation UI
+            server: my-docker
+            container: semaphore
+        - Hashicorp Vault:
+            href: https://vault.{{ domain }}/
+            icon: hashicorp-vault.png
+            description: Secrets Management
+            siteMonitor: https://{{ homepage_addresses.vault }}
+        - Nginx Proxy Manager:
+            href: https://nginx.{{ docker_domain }}
+            icon: nginx-proxy-manager.svg
+            server: my-docker
+            container: nginx
+            description: Reverse Proxy for Services
+        - ArgoCD:
+            href: https://argocd.{{ kube_domain }}
+            icon: sh-argo-cd
+            description: GitOps Continuous Delivery
+            siteMonitor: https://argocd.{{ kube_domain }}
+
+    - Documentation:
+        - Bookstack:
+            href: https://bookstack.{{ docker_domain }}
+            icon: bookstack.png
+            server: my-docker
+            container: bookstack
+            description: Documentation
+        - Homebox:
+            href: https://homebox.{{ docker_domain }}
+            icon: sh-homebox
+            server: my-docker
+            container: homebox
+            description: Inventory Management
+        - Karakeep:
+            href: https://karakeep.{{ docker_domain }}
+            icon: karakeep.png
+            server: my-docker
+            container: karakeep
+            description: Bookmarks
+        - Kiwix:
+            href: https://kiwix.{{ docker_domain }}
+            icon: sh-kiwix
+            server: my-docker
+            container: kiwix
+            description: Offline Repository
+
+    - Identity:
+        - 2Fauth:
+            href: https://2f.{{ docker_domain }}/accounts
+            icon: mdi-shield-lock
+            server: my-docker
+            container: 2fauth
+            description: Two Factor Authentication
+        - Vaultwarden:
+            href: https://vault.{{ docker_domain }}/
+            icon: bitwarden.png
+            description: Password Manager
+            siteMonitor: https://vault.{{ docker_domain }}
+
+- Column 2:
+    - Containers:
+        - Portainer:
+            href: https://portainer.{{ docker_domain }}
+            icon: portainer.png
+            server: my-docker
+            container: ix-portainer-portainer-1
+            description: Container Management Interface
+        - KASM:
+            href: https://kasm.{{ domain }}
+            icon: kasm.png
+            description: Containerized Workspaces
+            siteMonitor: https://kasm.{{ domain }}
+        - Rancher:
+            href: https://rancher.{{ kube_domain }}
+            icon: rancher.png
+            description: Kubernetes Management
+            siteMonitor: https://rancher.{{ kube_domain }}
+    - Compute:
+        - PVE1:
+            href: https://pve-vm-1.{{ domain }}:8006
+            icon: proxmox.png
+            description: Proxmox Hypervisor
+            siteMonitor: https://{{ homepage_addresses.pve1 }}:8006
+        - PVE2:
+            href: https://pve-vm-2.{{ domain }}:8006
+            icon: proxmox.png
+            description: Proxmox Hypervisor
+            siteMonitor: https://pve-vm-2.{{ domain }}:8006
+        - PVE3:
+            href: https://pve-vm-3.{{ domain }}:8006
+            icon: proxmox.png
+            description: Proxmox Hypervisor
+            siteMonitor: https://pve-vm-3.{{ domain }}:8006
+    - Storage:
+        - TrueNAS Scale:
+            href: https://scale.{{ domain }}:9443
+            icon: truenas.png
+            description: TrueNAS Scale primary node.
+            siteMonitor: https://scale.{{ domain }}:9443
+        - TrueNAS Claw:
+            href: https://claw.{{ domain }}:9443
+            icon: truenas.png
+            description: TrueNAS Scale offsite ZFS replication node.
+            siteMonitor: https://claw.{{ domain }}:9443
+        - Unraid:
+            href: http://unraid.{{ domain }}
+            icon: unraid.png
+            description: Shared Media Network Attached Storage
+            siteMonitor: http://{{ homepage_addresses.unraid }}:6080
+        - NextCloud:
+            href: https://nextcloud.{{ docker_domain }}
+            icon: nextcloud.png
+            description: Personal Cloud
+            server: my-docker
+            container: nextcloud
+        - Garage:
+            href: https://garageui.{{ docker_domain }}
+            icon: garage.png
+            description: S3 Object Storage
+            server: my-docker
+            container: garage
+        - Longhorn:
+            href: https://longhorn.{{ kube_domain }}
+            icon: longhorn.png
+            description: Kubernetes Storage Management
+            siteMonitor: https://longhorn.{{ kube_domain }}
+        - DVBMv3:
+            href: https://dvbm3.{{ docker_domain }}
+            icon: backblaze.svg
+            description: Docker Volume Backups
+            server: my-docker
+            container: dvbmv3
+
+    - Network:
+        - Netbox:
+            href: https://netbox.{{ docker_domain }}
+            icon: netbox.svg
+            server: my-docker
+            container: netbox
+            description: Network Topology and Source of Truth
+        - Citadel:
+            href: https://citadel.{{ domain }}
+            icon: opnsense.png
+            description: Opnsense Network Security Appliance
+            siteMonitor: https://citadel.{{ domain }}
+        - ICX 7450-32ZP:
+            href: http://{{ homepage_addresses.switch }}/
+            icon: brocade.svg
+            description: Core Switch
+
+    - Power:
+        - APC AP7752:
+            href: http://{{ homepage_addresses.apc }}
+            icon: apc
+            description: Automatic Transfer Switch
+            ping: {{ homepage_addresses.apc }}
+        - Eaton 9130:
+            href: http://{{ homepage_addresses.eaton }}/
+            icon: mdi-power-plug-battery
+            description: Primary UPS
+            ping: {{ homepage_addresses.eaton }}
+
+- Column 3:
+    - Automation and Monitoring:
+        - Home Assistant:
+            href: https://hassio.{{ domain }}
+            icon: home-assistant.svg
+            description: Home Automation Platform
+            siteMonitor: http://{{ homepage_addresses.home_assistant }}:8123
+        - Malcolm:
+            href: https://malcolm.{{ docker_domain }}
+            icon: splunk.png
+            description: Network Traffic Monitoring
+        - NTFY:
+            href: https://Ntfy.{{ docker_domain }}
+            icon: sh-ntfy
+            description: Scripted Notifications
+            server: my-docker
+            container: ntfy
+        - Uptime Kuma:
+            href: https://kuma.{{ docker_domain }}
+            icon: uptime-kuma.svg
+            description: Uptime Monitoring
+            siteMonitor: http://{{ homepage_addresses.home_assistant }}:3001
+        - Crowdsec:
+            href: https://app.crowdsec.net/
+            icon: crowdsec.svg
+        - ChangeDetection.io:
+            href: https://detect.{{ docker_domain }}
+            icon: changedetection.png
+            description: Website Change Notifications
+            server: my-docker
+            container: changedetection
+        - Avocent KVM:
+            href: https://{{ homepage_addresses.kvm }}
+            icon: sh-jetkvm
+            description: Mergepoint Unity KVM
+            siteMonitor: https://{{ homepage_addresses.kvm }}
+        - KonnectedAlarm Panel:
+            href: http://{{ homepage_addresses.alarm_panel }}
+            icon: sh-konnected
+            description: Smart Home Alarm Panel
+        - SLZB06:
+            href: http://{{ homepage_addresses.zigbee }}
+            description: Zigbee Gateway
+            icon: sh-slzb06
+    - Productivity:
+        - Guacamole:
+            href: https://guacamole.{{ docker_domain }}/guacamole
+            icon: guacamole.svg
+            server: my-docker
+            container: guacamole
+            description: Remote System Management, RDP & SSH
+        - Omnitools:
+            href: https://omnitools.{{ docker_domain }}/
+            icon: sh-omnitools
+            server: my-docker
+            container: omnitools
+            description: PDF and Image Tools
+        - Cryptpad:
+            href: https://cryptpad.{{ docker_domain }}
+            icon: sh-cryptpad
+            server: my-docker
+            container: cryptpad
+            description: Secure Collaboration Docs
+        - IT-Tools:
+            href: https://it-tools.{{ docker_domain }}
+            icon: it-tools.png
+            server: my-docker
+            container: it-tools
+        - withoutBG:
+            href: https://withoutbg.{{ docker_domain }}
+            icon: sh-withoutbg
+            server: my-docker
+            container: withoutbg
+
+- Media:
+    - S.P.O.G.:
+        href: https://web.{{ domain }}
+        icon: organizr.png
+        server: my-unraid
+        container: organizrv2
+        description: Single Pane of Glass - Media Management
+    - Plex:
+        href: https://app.plex.tv/desktop/#!/
+        icon: plex.png
+        description: Media Server
+        siteMonitor: https://{{ homepage_addresses.plex }}:32400
+        widget:
+          type: tautulli
+          url: https://web.{{ domain }}/tautulli
+          key: "{{ '{{HOMEPAGE_VAR_TAUTULLI_TOKEN}}' }}"
+          enableUser: false # optional, defaults to false
+          showEpisodeNumber: true # optional, defaults to false
+          expandOneStreamToTwoRows: false # optional, defaults to true
+    - ROMM:
+        href: https://romm.{{ domain }}
+        icon: romm.png
+        server: my-unraid
+        container: romm
+        description: Retro Game Manager
+    - Navidrome:
+        href: https://media.{{ domain }}/music
+        icon: navidrome.png
+        server: my-unraid
+        container: navidrome
+        description: Music
+    - Komga:
+        href: https://media.{{ domain }}/textbooks
+        icon: komga.png
+        server: my-unraid
+        container: komga
+        description: Comics
+    - Audiobookshelf:
+        href: https://media.{{ domain }}
+        icon: audiobookshelf.png
+        server: my-unraid
+        container: audiobookshelf
+        description: Audiobooks
+    - Kavita:
+        href: https://media.{{ domain }}/books
+        icon: kavita.png
+        server: my-unraid
+        container: kavita
+        description: eBooks
+    - Berserk:
+        href: https://berserk.{{ docker_domain }}
+        icon: mdi-sword
+        server: my-unraid
+        container: kavita
+        description: eBooks
+    - Gametable:
+        href: https://magic.{{ docker_domain }}
+        icon: mdi-cards-playing
+        server: my-unraid
+        container: kavita
+        description: eBooks
+    - TvSync:
+        href: https://tvsync.{{ domain }}
+        icon: mdi-television-play
+        server: my-unraid
+        container: kavita
+        description: eBooks
+    - Plexbuster:
+        href: https://plexbuster.{{ docker_domain }}
+        icon: mdi-ghost
+        server: my-unraid
+        container: kavita
+        description: eBooks

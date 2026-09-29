@@ -51,7 +51,7 @@
     dvbm_run_job: >-
       {{ dvbm_run_jobs.json | selectattr('name', 'equalto', dvbm_backup_name) | list | first | default({}) }}
 
-# deploy-stack.yaml registers the job only when run with DVBM_JOB=true, so it can be missing
+# deploy-stack.yaml registers the job only when run with dvbm_job=true (or DVBM_JOB=true), so it can be missing
 - name: Fail if no matching backup job exists
   ansible.builtin.fail:
     msg: >-

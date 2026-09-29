@@ -1,0 +1,69 @@
+---
+# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+{% set docker_domain = docker_subdomain ~ '.' ~ domain %}
+{% set kube_domain = (homepage.kubernetes_subdomain | default('k3s')) ~ '.' ~ domain %}
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/bookmarks#
+- Links:
+    - CoPilot:
+        - icon: sh-microsoft-copilot
+          href: https://copilot.microsoft.com/
+    - Youtube:
+        - icon: youtube.png
+          href: https://youtube.com/
+    - Reddit:
+        - icon: reddit.png
+          href: https://reddit.com/
+    - Gmail:
+        - icon: gmail.png
+          href: https://gmail.com/
+    - ProtonMail:
+        - icon: proton-mail.png
+          href: https://mail.proton.me/
+    - Facebook:
+        - icon: facebook.png
+          href: https://facebook.com
+    - LinkedIn:
+        - icon: linkedin.png
+          href: https://linkedin.com/
+    - Onedrive:
+        - icon: sh-microsoft-onedrive
+          href: https://onedrive.com/
+    - Azure:
+        - icon: azure.svg
+          href: https://portal.azure.com
+    - Github:
+        - icon: sh-github
+          href: https://github.com/
+    - Cloudflare:
+        - icon: cloudflare.svg
+          href: https://dash.cloudflare.com/login
+    - Tailscale:
+        - icon: tailscale.svg
+          href: https://login.tailscale.com/admin/machines
+    - ZoHo Assist:
+        - icon: si-zoho
+          href: https://accounts.zoho.com/signin?servicename=ZohoHome&signupurl=https://www.zoho.com/signup.html
+    - Archidekt:
+        - icon: https://archidekt.com/images/logo.svg
+          href: https://archidekt.com
+    - Cardsphere:
+        - icon: https://www.cardsphere.com/static/img/logo-color-small.svg
+          href: https://www.cardsphere.com/
+    - MakerWorld:
+        - icon: si-makerbot
+          href: https://makerworld.com/en
+
+- Tools:
+    - OSINT Framework:
+        - href: https://osintframework.com/
+          icon: mdi-account-search
+    - Shodan.io:
+        - href: https://account.shodan.io/
+          icon: si-cyberdefenders
+    - Cyberchef:
+        - href: https://cyberchef.{{ docker_domain }}/
+          icon: cyberchef.png
+    - Cronmaker:
+        - href: http://www.cronmaker.com/?0
+          icon: mdi-clock-outline

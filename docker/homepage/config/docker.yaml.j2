@@ -1,0 +1,11 @@
+---
+# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/docker/
+
+my-unraid:
+  host: {{ homepage_addresses.unraid }}
+  port: 2375
+
+my-docker:
+  socket: /var/run/docker.sock

@@ -3,7 +3,7 @@
 # Connection settings and Vault fields are listed in tasks/setup.yaml; env value sources are listed in tasks/stack_env.yaml
 # Required: app_name, portainer_endpoint, repo_url (the repository Portainer clones)
 # Optional: repo_ref (default refs/heads/main), repo_auth with vault_repo_path, stack_prune (default false), stack_pull_image (default true)
-# Optional: npm_add_proxy with npm_domain to register the AppPort container in NPM (over AppScheme, default http); DVBM_JOB=true in the environment to register the Backup label's job
+# Optional: skip_push_config=true skips copying docker/<app_name>/config in; npm_add_proxy with npm_domain to register the AppPort container in NPM (over AppScheme, default http); dvbm_job=true (or DVBM_JOB=true in the environment) to register the Backup label's job
 - name: Deploy a Docker stack to Portainer
   hosts: localhost
   connection: local
@@ -123,7 +123,12 @@
       vars:
         dvbm_backup_name: "{{ stack_backup_label }}"
       when:
-        - lookup('ansible.builtin.env', 'DVBM_JOB') | default('false', true) | bool
+        - dvbm_job | default(lookup('ansible.builtin.env', 'DVBM_JOB'), true) | default('false', true) | bool
         - stack_backup_label | length > 0
         - dvbm_url | length > 0
         - dvbm_password | length > 0
+
+    # Apps with a docker/<app_name>/config folder get their rendered config copied in; push-config.yaml does this alone
+    - name: Push the app's config
+      ansible.builtin.include_tasks: tasks/push_config.yaml
+      when: not (skip_push_config | default(false) | bool)
