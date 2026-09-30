@@ -18,8 +18,8 @@ variable "nodes" {
   description = "The cluster's nodes, from terraform_k3s.nodes in the inventory; use an odd number, at least three, for etcd"
   type = list(object({
     name           = string
-    vmid           = number
-    proxmox_node   = string
+    vm_id          = number
+    target_node    = string
     address        = string
     cores          = optional(number, 2)
     memory         = optional(number, 8192)
@@ -29,8 +29,8 @@ variable "nodes" {
   }))
 
   validation {
-    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.name])) && length(var.nodes) == length(distinct([for n in var.nodes : n.vmid]))
-    error_message = "Every node needs a unique name and vmid."
+    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.name])) && length(var.nodes) == length(distinct([for n in var.nodes : n.vm_id]))
+    error_message = "Every node needs a unique name and vm_id."
   }
 }
 

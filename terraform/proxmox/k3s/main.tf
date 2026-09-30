@@ -1,7 +1,7 @@
 # Builds the legacy K3s cluster's VMs on Proxmox, one per entry in the nodes variable; Talos is the current cluster, and this is kept so K3s can be rebuilt
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which then runs ansible/playbooks/k3s/initialize.yaml to build the cluster on them
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
-# Adopting existing VMs: terraform import 'proxmox_vm_qemu.k3s_node["<name>"]' <proxmox_node>/qemu/<vmid>
+# Adopting existing VMs: terraform import 'proxmox_vm_qemu.k3s_node["<name>"]' <target_node>/qemu/<vm_id>
 
 terraform {
   # Garage stores the state; the key is the one the earlier K3s project used, so existing nodes carry over
@@ -42,9 +42,9 @@ resource "proxmox_vm_qemu" "k3s_node" {
   for_each = local.nodes
 
   name         = each.key
-  vmid         = each.value.vmid
+  vmid         = each.value.vm_id
   description  = var.description
-  target_nodes = [each.value.proxmox_node]
+  target_nodes = [each.value.target_node]
   tags         = "terraform;k3s"
 
   # Cloned once from the template; the template only matters at creation

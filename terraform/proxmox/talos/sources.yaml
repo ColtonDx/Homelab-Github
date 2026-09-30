@@ -10,8 +10,8 @@ vault:
   - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
   - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
-# Site values: talos_cluster supplies nodes, talos_iso, storage_pool and anything else declared; the playbooks read the rest of it
-inventory: talos_cluster
+# Each host in this group becomes one node; talos_iso and storage_pool come from terraform_defaults
+group: talos_cluster
 
 # Configures the nodes, bootstraps the cluster, then sets up Vault access and Flux; runs on the controller, since Talos has no SSH
 install:

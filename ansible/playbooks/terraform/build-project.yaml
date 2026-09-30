@@ -2,6 +2,7 @@
 # Plans or applies any Terraform project, filling its variables from overrides, the inventory, NetBox and Vault as its sources.yaml describes
 # Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, or apply)
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
+# Inventory: sources.yaml's host (one VM) or group (a cluster) supplies values from terraform_defaults, ansible_host and each host's terraform dict
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
 # After an apply it waits for the VM and runs the install playbook named by sources.yaml's install entry, which then runs its own TLS; tf_install=false skips that
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL (or garage_url) for the s3 backend; NETBOX_URL only when a lookup needs NetBox
@@ -103,6 +104,57 @@
         tf_from_inventory: >-
           {{ (lookup('ansible.builtin.vars', tf_sources.inventory, default={}) if tf_sources.inventory is defined else {})
              | dict2items | selectattr('key', 'in', tf_declared) | items2dict }}
+        tf_from_host: {}
+
+    # A project for one VM names its inventory host; the host's platform defaults, its address and its own terraform dict fill the variables, in that order
+    - name: Read the VM's settings from its inventory host
+      ansible.builtin.set_fact:
+        tf_from_host: >-
+          {{ (hv.terraform_defaults | default({}))
+             | combine({'ip_address': hv.ansible_host} if (hv.ansible_host | default('') | string) is match('^[0-9.]+$') else {})
+             | combine(hv.terraform | default({}))
+             | dict2items | selectattr('key', 'in', tf_declared) | items2dict }}
+      vars:
+        hv: "{{ hostvars[tf_sources.host] }}"
+      when: tf_sources.host is defined
+
+    # A host missing from the inventory would otherwise leave every value unset without saying why
+    - name: Require the VM's inventory host
+      ansible.builtin.assert:
+        that:
+          - tf_sources.host in hostvars
+        fail_msg: "sources.yaml names host '{{ tf_sources.host }}', which is not in the inventory."
+      when: tf_sources.host is defined
+
+    # A project for a cluster names its inventory group; each host becomes one entry in the node list, built the same way
+    - name: Build the node list from the inventory group
+      ansible.builtin.set_fact:
+        tf_group_nodes: >-
+          {{ tf_group_nodes | default([]) + [{'name': item}
+             | combine(hostvars[item].terraform_defaults | default({}))
+             | combine({'address': hostvars[item].ansible_host} if (hostvars[item].ansible_host | default('') | string) is match('^[0-9.]+$') else {})
+             | combine(hostvars[item].terraform | default({}))] }}
+      loop: "{{ groups[tf_sources.group] | default([]) }}"
+      when: tf_sources.group is defined
+
+    # Project-wide values such as the storage pool come from the platform defaults too, read from the group's first host
+    - name: Read the cluster's settings from its inventory group
+      ansible.builtin.set_fact:
+        tf_from_host: >-
+          {{ (hostvars[groups[tf_sources.group][0]].terraform_defaults | default({}))
+             | combine({tf_sources.nodes_var | default('nodes'): tf_group_nodes})
+             | dict2items | selectattr('key', 'in', tf_declared) | items2dict }}
+      when:
+        - tf_sources.group is defined
+        - groups[tf_sources.group] | default([]) | length > 0
+
+    # An empty or misspelt group would build nothing
+    - name: Require the cluster's inventory group
+      ansible.builtin.assert:
+        that:
+          - groups[tf_sources.group] | default([]) | length > 0
+        fail_msg: "sources.yaml names group '{{ tf_sources.group }}', which has no hosts in the inventory."
+      when: tf_sources.group is defined
 
     # NetBox is only asked for variables no override or inventory value covers, so a project whose inventory sets them never needs it
     - name: Start with no NetBox lookups
@@ -116,7 +168,7 @@
         netbox_lookups: "{{ netbox_lookups + [item.value | combine({'var': item.key})] }}"
       loop: >-
         {{ (tf_sources.netbox | default({})) | dict2items
-           | rejectattr('key', 'in', (tf_overrides.keys() | list) + (tf_from_inventory.keys() | list)) | list }}
+           | rejectattr('key', 'in', (tf_overrides.keys() | list) + (tf_from_inventory.keys() | list) + (tf_from_host.keys() | list)) | list }}
       loop_control:
         label: "{{ item.key }}"
 
@@ -131,12 +183,12 @@
         tf_from_netbox: "{{ netbox_values }}"
       when: netbox_lookups | length > 0
 
-    # Lowest to highest precedence: NetBox, inventory, overrides; the project's own defaults cover anything left
+    # Lowest to highest precedence: NetBox, an inventory dict, the host or group, overrides; the project's own defaults cover anything left
     # Secret variables are kept out of this merge, so even an overridden secret never becomes a logged -var
     - name: Merge the variable sources
       ansible.builtin.set_fact:
         tf_variables: >-
-          {{ tf_from_netbox | combine(tf_from_inventory, tf_overrides)
+          {{ tf_from_netbox | combine(tf_from_inventory, tf_from_host, tf_overrides)
              | dict2items | selectattr('key', 'in', tf_declared) | rejectattr('key', 'in', tf_secret_names) | items2dict }}
       vars:
         tf_secret_names: "{{ tf_sources.vault | default([]) | map(attribute='var') | list }}"
@@ -159,7 +211,7 @@
       loop: "{{ (tf_variables.keys() | list) + (tf_sources.vault | default([]) | map(attribute='var') | list) }}"
       vars:
         source: >-
-          {{ 'override' if item in tf_overrides else 'inventory' if item in tf_from_inventory
+          {{ 'override' if item in tf_overrides else 'host' if item in tf_from_host else 'inventory' if item in tf_from_inventory
              else 'netbox' if item in tf_from_netbox else 'vault' }}
 
     # Shows the source of every value this run passes to Terraform; anything unlisted uses the project's default

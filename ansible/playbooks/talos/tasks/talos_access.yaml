@@ -1,43 +1,65 @@
 ---
-# Shared by init-cluster.yaml and bootstrap-secrets.yaml: validates talos_cluster, loads the secrets bundle, and writes a talosconfig into a private work folder
+# Shared by init-cluster.yaml and bootstrap-secrets.yaml: builds the node list from the talos_cluster group, loads the secrets bundle, and writes a talosconfig into a private work folder
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: SECRETS_YAML at talos (vault_talos_path renames it), the one piece of Talos state kept anywhere
 # talos_generate_secrets=true creates the bundle when Vault has none, which means a brand-new cluster identity; without it a missing bundle stops the run
-# talos_access_image=true also resolves the install image: talos_cluster.install_image if set, otherwise an Image Factory ID for talos_cluster.extensions
-# Sets: talos_work (removed by the caller), talos_nodes with defaults filled in, talos_controlplane_nodes, talos_worker_nodes, talos_first_address, talos_install_image when asked
+# Settings: cluster.yaml's committed defaults, overridden by the group's talos dict; per host: ansible_host, optional talos_role and a talos_node dict of overrides
+# talos_access_image=true also resolves the install image: talos.install_image if set, otherwise an Image Factory ID for the extensions
+# Sets: talos_cfg, talos_work (removed by the caller), talos_nodes with defaults filled in, talos_controlplane_nodes, talos_worker_nodes, talos_first_address, talos_install_image when asked
 
-# Stop before touching anything when the cluster description is incomplete
-- name: Validate talos_cluster
+# The nodes are the hosts of this inventory group; talos_group renames it
+- name: Find the cluster's inventory group
+  ansible.builtin.set_fact:
+    talos_group_hosts: "{{ groups[talos_group | default('talos_cluster')] | default([]) }}"
+
+# Without hosts there is no cluster to configure
+- name: Require the cluster's hosts
   ansible.builtin.assert:
     that:
-      - talos_cluster is mapping
-      - talos_cluster.name | default('') | length > 0
-      - talos_cluster.vip | default('') | length > 0
-      - talos_cluster.talos_version | default('') is match('^v[0-9]')
-      - talos_cluster.kubernetes_version | default('') is match('^v?[0-9]')
-      - talos_cluster.node_cidr | default('') is search('/')
-      - talos_cluster.nodes | default([]) | length > 0
-      - talos_cluster.nodes | selectattr('name', 'undefined') | list | length == 0
-      - talos_cluster.nodes | selectattr('address', 'undefined') | list | length == 0
-      - talos_cluster.nodes | rejectattr('role', 'undefined') | rejectattr('role', 'in', ['controlplane', 'worker']) | list | length == 0
+      - talos_group_hosts | length > 0
+    fail_msg: "The inventory group {{ talos_group | default('talos_cluster') }} has no hosts."
+
+# Settings that say nothing about the site are committed in cluster.yaml
+- name: Load the cluster's committed defaults
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../talos/cluster.yaml"
+    name: talos_repo_defaults
+
+# The inventory's talos dict is a group var, which only the group's hosts see, so it is read through the first one; it overrides the committed defaults
+- name: Combine the defaults with the inventory's settings
+  ansible.builtin.set_fact:
+    talos_cfg: "{{ talos_repo_defaults | combine(hostvars[talos_group_hosts[0]].talos | default({})) }}"
+
+# Stop before touching anything when the cluster description is incomplete
+- name: Validate the cluster settings
+  ansible.builtin.assert:
+    that:
+      - talos_cfg.name | default('') | length > 0
+      - talos_cfg.vip | default('') | length > 0
+      - talos_cfg.talos_version | default('') is match('^v[0-9]')
+      - talos_cfg.kubernetes_version | default('') is match('^v?[0-9]')
+      - talos_cfg.node_cidr | default('') is search('/')
+      - talos_group_hosts | reject('in', hostvars) | list | length == 0
+      - talos_group_hosts | map('extract', hostvars) | selectattr('ansible_host', 'undefined') | list | length == 0
+      - talos_group_hosts | map('extract', hostvars) | selectattr('talos_role', 'defined') | rejectattr('talos_role', 'in', ['controlplane', 'worker']) | list | length == 0
     fail_msg: >-
-      talos_cluster needs name, vip, talos_version, kubernetes_version, node_cidr and nodes;
-      each node needs name and address, and role must be controlplane (default) or worker.
+      The talos dict on the inventory group needs vip and node_cidr (name and versions default from cluster.yaml);
+      each host needs ansible_host, and talos_role must be controlplane (default) or worker.
 
 # Start empty, since init-cluster.yaml and bootstrap-secrets.yaml both run this in one play run
 - name: Reset the node list
   ansible.builtin.set_fact:
     talos_nodes: []
 
-# Each node's settings with the cluster-wide values filled in, in inventory order, so later tasks never repeat the fallbacks
+# Each host becomes a node with the cluster-wide values filled in, in inventory order; a host's talos_node dict overrides them for that node
 - name: Fill in each node's defaults
   ansible.builtin.set_fact:
     talos_nodes: >-
-      {{ talos_nodes + [{'role': 'controlplane', 'install_disk': talos_cluster.install_disk | default('/dev/sda')}
-                                      | combine(talos_cluster | dict2items | selectattr('key', 'in', ['interface', 'prefix', 'gateway']) | items2dict)
-                                      | combine(item)] }}
-  loop: "{{ talos_cluster.nodes }}"
-  loop_control:
-    label: "{{ item.name }}"
+      {{ talos_nodes + [{'name': item, 'address': hostvars[item].ansible_host,
+                         'role': hostvars[item].talos_role | default('controlplane'),
+                         'install_disk': talos_cfg.install_disk | default('/dev/sda')}
+                        | combine(talos_cfg | dict2items | selectattr('key', 'in', ['interface', 'prefix', 'gateway']) | items2dict)
+                        | combine(hostvars[item].talos_node | default({}))] }}
+  loop: "{{ talos_group_hosts }}"
 
 # Every node needs an interface, prefix and gateway, from its own settings or the cluster's
 - name: Require each node's network settings
@@ -46,7 +68,7 @@
       - talos_nodes | selectattr('interface', 'undefined') | list | length == 0
       - talos_nodes | selectattr('prefix', 'undefined') | list | length == 0
       - talos_nodes | selectattr('gateway', 'undefined') | list | length == 0
-    fail_msg: "Every node needs interface, prefix and gateway, set on the node or once on talos_cluster."
+    fail_msg: "Every node needs interface, prefix and gateway, from cluster.yaml, the talos dict, or its talos_node dict."
 
 # Bootstrap runs on the first controlplane node, and every talosctl call goes through it
 - name: Work out the controlplane nodes
@@ -59,7 +81,7 @@
   ansible.builtin.assert:
     that:
       - talos_controlplane_nodes | length > 0
-    fail_msg: "talos_cluster.nodes needs at least one controlplane node."
+    fail_msg: "The cluster needs at least one controlplane node."
 
 # Kept in inventory order so the first node is always the same one
 - name: Record the first controlplane address
@@ -173,17 +195,17 @@
         body_format: raw
         headers:
           Content-Type: application/yaml
-        body: "{{ {'customization': {'systemExtensions': {'officialExtensions': talos_cluster.extensions | default(['siderolabs/iscsi-tools', 'siderolabs/util-linux-tools'])}}} | to_nice_yaml }}"
+        body: "{{ {'customization': {'systemExtensions': {'officialExtensions': talos_cfg.extensions | default(['siderolabs/iscsi-tools', 'siderolabs/util-linux-tools'])}}} | to_nice_yaml }}"
         status_code: [200, 201]
       register: talos_schematic
-      when: talos_cluster.install_image | default('') | length == 0
+      when: talos_cfg.install_image | default('') | length == 0
 
     # A fixed image in the inventory wins, so a run can avoid Image Factory entirely
     - name: Record the install image
       ansible.builtin.set_fact:
         talos_install_image: >-
-          {{ talos_cluster.install_image if talos_cluster.install_image | default('') | length > 0
-             else 'factory.talos.dev/installer/' ~ talos_schematic.json.id ~ ':' ~ talos_cluster.talos_version }}
+          {{ talos_cfg.install_image if talos_cfg.install_image | default('') | length > 0
+             else 'factory.talos.dev/installer/' ~ talos_schematic.json.id ~ ':' ~ talos_cfg.talos_version }}
 
 # Admin client credentials, derived from the bundle's CA, so nothing but the bundle ever needs storing
 - name: Generate a talosconfig
@@ -192,8 +214,8 @@
       - talosctl
       - gen
       - config
-      - "{{ talos_cluster.name }}"
-      - "https://{{ talos_cluster.vip }}:6443"
+      - "{{ talos_cfg.name }}"
+      - "https://{{ talos_cfg.vip }}:6443"
       - --with-secrets
       - "{{ talos_work }}/secrets.yaml"
       - --output-types

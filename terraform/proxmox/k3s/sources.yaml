@@ -10,8 +10,8 @@ vault:
   - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
   - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
-# Site values: terraform_k3s supplies nodes, gateway, storage_pool, template_name, ci_user and anything else declared
-inventory: terraform_k3s
+# Each host in this group becomes one node; gateway, storage_pool, template_name and ci_user come from terraform_defaults
+group: k3s_nodes
 
 # Builds the cluster on the new VMs, then deploys its services
 install:

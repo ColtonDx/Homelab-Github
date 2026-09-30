@@ -28,5 +28,5 @@ kind: UserVolumeConfig
 name: longhorn
 provisioning:
   diskSelector:
-    match: '!system_disk && disk.size >= {{ talos_cluster.longhorn_disk_min_gib | default(64) }}u * GiB'
-  minSize: {{ talos_cluster.longhorn_volume_min_size | default('90GiB') }}
+    match: '!system_disk && disk.size >= {{ talos_cfg.longhorn_disk_min_gib | default(64) }}u * GiB'
+  minSize: {{ talos_cfg.longhorn_volume_min_size | default('90GiB') }}

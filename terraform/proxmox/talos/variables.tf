@@ -19,8 +19,8 @@ variable "nodes" {
   description = "The cluster's nodes, from talos_cluster.nodes in the inventory"
   type = list(object({
     name           = string
-    vmid           = number
-    proxmox_node   = string
+    vm_id          = number
+    target_node    = string
     address        = optional(string)
     prefix         = optional(number)
     gateway        = optional(string)
@@ -36,8 +36,8 @@ variable "nodes" {
   }))
 
   validation {
-    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.name])) && length(var.nodes) == length(distinct([for n in var.nodes : n.vmid]))
-    error_message = "Every node needs a unique name and vmid."
+    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.name])) && length(var.nodes) == length(distinct([for n in var.nodes : n.vm_id]))
+    error_message = "Every node needs a unique name and vm_id."
   }
 }
 

@@ -16,5 +16,5 @@ machine:
             gateway: {{ talos_node.gateway }}
 {% if talos_node.role == 'controlplane' %}
         vip:
-          ip: {{ talos_cluster.vip }}
+          ip: {{ talos_cfg.vip }}
 {% endif %}

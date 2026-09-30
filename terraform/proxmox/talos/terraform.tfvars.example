@@ -3,7 +3,7 @@ talos_iso    = "local:iso/talos-amd64.iso"
 storage_pool = "local-zfs"
 
 nodes = [
-  { name = "talos-1", vmid = 1064, proxmox_node = "pve-a" },
-  { name = "talos-2", vmid = 1065, proxmox_node = "pve-b" },
-  { name = "talos-3", vmid = 1066, proxmox_node = "pve-c" },
+  { name = "talos-1", vm_id = 1064, target_node = "pve-a" },
+  { name = "talos-2", vm_id = 1065, target_node = "pve-b" },
+  { name = "talos-3", vm_id = 1066, target_node = "pve-c" },
 ]

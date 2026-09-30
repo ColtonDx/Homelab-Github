@@ -1,8 +1,8 @@
 ---
-# Configures the Talos cluster described by talos_cluster: nodes in maintenance mode get their config, a new cluster is bootstrapped once, and running nodes are updated one at a time
+# Configures the Talos cluster made of the talos_cluster group's hosts: nodes in maintenance mode get their config, a new cluster is bootstrapped once, and running nodes are updated one at a time
 # Normally run by terraform/build-project.yaml after the talos project applies, and it runs bootstrap-secrets.yaml at the end; it can also be run on its own
-# Inventory: talos_cluster (name, vip, talos_version, kubernetes_version, node_cidr, nodes, and optionally extensions or install_image, interface, prefix, gateway)
-# config_version on talos_cluster sets the config format apart from the installed version; the patches use the pre-1.14 format, so keep it at v1.13 until they move to 1.14's documents
+# Settings: cluster.yaml's committed name, versions and extensions, overridden by the group's talos dict (vip, gateway, prefix, node_cidr, and optionally install_image); each host's ansible_host is its address
+# The patches use the pre-1.14 format, so cluster.yaml keeps config_version at v1.13 while nodes run 1.14; see the check below
 # Environment and Vault: as tasks/talos_access.yaml; talos_generate_secrets=true for a brand-new cluster; talos_bootstrap_secrets=false skips the last step
 - name: Configure the Talos cluster
   hosts: localhost
@@ -23,10 +23,10 @@
         - name: Require a config format the patches support
           ansible.builtin.assert:
             that:
-              - (talos_cluster.config_version | default(talos_cluster.talos_version) | regex_replace('^v', '')) is version('1.14', '<')
+              - (talos_cfg.config_version | default(talos_cfg.talos_version) | regex_replace('^v', '')) is version('1.14', '<')
             fail_msg: >-
-              The patches use the pre-1.14 config format. Set talos_cluster.config_version to v1.13
-              (Talos {{ talos_cluster.talos_version }} still installs and runs), or move the templates to 1.14's documents.
+              The patches use the pre-1.14 config format. Set talos_cfg.config_version to v1.13
+              (Talos {{ talos_cfg.talos_version }} still installs and runs), or move the templates to 1.14's documents.
 
         # Patches shared by every node, and by every controlplane node
         - name: Render the shared patches
@@ -54,14 +54,14 @@
               - talosctl
               - gen
               - config
-              - "{{ talos_cluster.name }}"
-              - "https://{{ talos_cluster.vip }}:6443"
+              - "{{ talos_cfg.name }}"
+              - "https://{{ talos_cfg.vip }}:6443"
               - --with-secrets
               - "{{ talos_work }}/secrets.yaml"
               - --talos-version
-              - "{{ talos_cluster.config_version | default(talos_cluster.talos_version) }}"
+              - "{{ talos_cfg.config_version | default(talos_cfg.talos_version) }}"
               - --kubernetes-version
-              - "{{ talos_cluster.kubernetes_version | regex_replace('^v', '') }}"
+              - "{{ talos_cfg.kubernetes_version | regex_replace('^v', '') }}"
               - --install-image
               - "{{ talos_install_image }}"
               - --config-patch
@@ -202,7 +202,7 @@
         - name: Report the cluster
           ansible.builtin.debug:
             msg: >-
-              Cluster {{ talos_cluster.name }} is healthy on {{ talos_install_image }}.
+              Cluster {{ talos_cfg.name }} is healthy on {{ talos_install_image }}.
               New nodes: {{ talos_new_nodes | map(attribute='name') | join(', ') or 'none' }};
               running nodes checked for updates: {{ talos_running_nodes | map(attribute='name') | join(', ') or 'none' }}.
 

@@ -10,8 +10,8 @@ vault:
   - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
   - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
-# Site values: this dict in the private inventory supplies any variable it names
-inventory: terraform_gitlab
+# The VM's inventory host: its terraform_defaults, its ansible_host as ip_address, then its own terraform dict, supply any variable they name
+host: gitlab
 
 # Fallbacks for anything the inventory does not set; set both ip_address and ip_prefix in the inventory to keep GitLab independent of NetBox
 netbox:

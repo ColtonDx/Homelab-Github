@@ -3,19 +3,19 @@
 machine:
   # Certificates must cover the VIP and every controlplane address, or connections through them are rejected
   certSANs:
-    - {{ talos_cluster.vip }}
+    - {{ talos_cfg.vip }}
 {% for n in talos_controlplane_nodes %}
     - {{ n.address }}
 {% endfor %}
 cluster:
-  allowSchedulingOnControlPlanes: {{ talos_cluster.allow_scheduling_on_control_planes | default(true) | bool | lower }}
+  allowSchedulingOnControlPlanes: {{ talos_cfg.allow_scheduling_on_control_planes | default(true) | bool | lower }}
   apiServer:
     certSANs:
-      - {{ talos_cluster.vip }}
+      - {{ talos_cfg.vip }}
 {% for n in talos_controlplane_nodes %}
       - {{ n.address }}
 {% endfor %}
   etcd:
     # Pin etcd peering to the node network so it cannot pick a CNI address
     advertisedSubnets:
-      - {{ talos_cluster.node_cidr }}
+      - {{ talos_cfg.node_cidr }}

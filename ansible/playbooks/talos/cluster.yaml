@@ -1,0 +1,14 @@
+---
+# The Talos cluster's settings that say nothing about the site, read by tasks/talos_access.yaml; the inventory's talos dict overrides any of them
+# Site values (vip, gateway, prefix, node_cidr) belong in the inventory, on the talos_cluster group
+name: homelab
+talos_version: v1.14.1
+# The machine-config patches use the pre-1.14 format, which Talos 1.14 accepts in configs generated for 1.13
+config_version: v1.13
+kubernetes_version: v1.37.1
+# Longhorn needs both; add siderolabs/qemu-guest-agent to let Proxmox see the guest agent
+extensions:
+  - siderolabs/iscsi-tools
+  - siderolabs/util-linux-tools
+interface: ens18
+install_disk: /dev/sda

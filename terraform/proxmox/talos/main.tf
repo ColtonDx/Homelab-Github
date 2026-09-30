@@ -1,7 +1,7 @@
 # Builds the Talos cluster's VMs on Proxmox, one per entry in talos_cluster.nodes; each boots the Talos ISO and waits in maintenance mode for its config
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which then runs ansible/playbooks/talos/init-cluster.yaml to configure and bootstrap the cluster
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
-# Adopting existing VMs: terraform import 'proxmox_vm_qemu.talos_node["<name>"]' <proxmox_node>/qemu/<vmid>
+# Adopting existing VMs: terraform import 'proxmox_vm_qemu.talos_node["<name>"]' <target_node>/qemu/<vm_id>
 
 terraform {
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
@@ -42,8 +42,8 @@ resource "proxmox_vm_qemu" "talos_node" {
   for_each = local.nodes
 
   name        = each.key
-  vmid        = each.value.vmid
-  target_node = each.value.proxmox_node
+  vmid        = each.value.vm_id
+  target_node = each.value.target_node
   description = var.description
   tags        = "terraform;talos"
 
