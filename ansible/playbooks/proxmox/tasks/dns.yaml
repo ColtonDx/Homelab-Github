@@ -1,0 +1,83 @@
+---
+# Sets the node's search domain and DNS servers through Proxmox's DNS API, and makes sure the node's own name resolves to its address in /etc/hosts
+# Inventory: proxmox_domain (required for this step), proxmox_dns_servers (up to three, optional), proxmox_node_ip (default ansible_host when it is an IP, otherwise the default route's address)
+# A wrong /etc/hosts entry is reported, not rewritten, since Proxmox's cluster service finds its own address there; -e proxmox_fix_hosts=true rewrites it
+
+# Nothing to do without a domain
+- name: Configure DNS and the domain
+  when: proxmox_domain | default('') | length > 0
+  block:
+    # Proxmox names each node by its hostname, which is also how its API addresses it
+    - name: Work out the node's name and address
+      ansible.builtin.set_fact:
+        proxmox_node: "{{ ansible_facts.hostname }}"
+        proxmox_fqdn: "{{ ansible_facts.hostname }}.{{ proxmox_domain }}"
+        proxmox_ip: >-
+          {{ proxmox_node_ip | default(ansible_host if (ansible_host | default('')) is match('^[0-9.]+$')
+             else ansible_facts.default_ipv4.address) }}
+
+    # The current search domain and servers, so an unchanged node is not touched
+    - name: Read the node's DNS settings
+      ansible.builtin.command:
+        argv: [pvesh, get, "/nodes/{{ proxmox_node }}/dns", --output-format, json]
+      register: proxmox_dns_current
+      changed_when: false
+      check_mode: false
+
+    # Only the servers given are set; Proxmox keeps up to three
+    - name: Set the search domain and DNS servers
+      ansible.builtin.command:
+        argv: >-
+          {{ ['pvesh', 'set', '/nodes/' ~ proxmox_node ~ '/dns', '--search', proxmox_domain]
+             + (proxmox_dns_servers | default([]))[:3] | map('string') | zip(['--dns1', '--dns2', '--dns3']) | map('reverse') | flatten | list }}
+      when: >-
+        (proxmox_dns_current.stdout | from_json).search | default('') != proxmox_domain
+        or ((proxmox_dns_servers | default([])) | length > 0
+            and [(proxmox_dns_current.stdout | from_json).dns1 | default(''),
+                 (proxmox_dns_current.stdout | from_json).dns2 | default(''),
+                 (proxmox_dns_current.stdout | from_json).dns3 | default('')][:(proxmox_dns_servers | length)]
+                != (proxmox_dns_servers | map('string') | list)[:3])
+
+    # Read so the node's own entry can be checked without rewriting anything else in the file
+    - name: Read /etc/hosts
+      ansible.builtin.slurp:
+        src: /etc/hosts
+      register: proxmox_hosts_file
+
+    # The lines that mention this node's name, however they are written
+    - name: Find the node's entry in /etc/hosts
+      ansible.builtin.set_fact:
+        proxmox_hosts_entries: >-
+          {{ (proxmox_hosts_file.content | b64decode).split('\n')
+             | reject('match', '^\s*#') | select('search', '(^|\s)' ~ (proxmox_node | regex_escape) ~ '(\.|\s|$)') | list }}
+        proxmox_hosts_wanted: "{{ proxmox_ip }} {{ proxmox_fqdn }} {{ proxmox_node }}"
+
+    # A missing entry is safe to add, since nothing relies on it yet
+    - name: Add the node's entry to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ proxmox_hosts_wanted }}"
+        insertafter: '^127\.0\.1\.1|^127\.0\.0\.1'
+      when: proxmox_hosts_entries | length == 0
+
+    # An entry with another address or without the domain is only changed on request
+    - name: Fix the node's entry in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^\S+\s+.*(\s|^){{ proxmox_node | regex_escape }}(\s|$)'
+        line: "{{ proxmox_hosts_wanted }}"
+      when:
+        - proxmox_hosts_entries | length > 0
+        - (proxmox_hosts_entries | map('split') | map('join', ' ') | list) != [proxmox_hosts_wanted]
+        - proxmox_fix_hosts | default(false) | bool
+
+    # Says what differs and how to fix it, rather than changing it silently
+    - name: Report a mismatched /etc/hosts entry
+      ansible.builtin.debug:
+        msg: >-
+          /etc/hosts on {{ proxmox_node }} has {{ proxmox_hosts_entries }}, expected '{{ proxmox_hosts_wanted }}'.
+          Left alone, since the cluster service reads it; re-run with -e proxmox_fix_hosts=true to rewrite it.
+      when:
+        - proxmox_hosts_entries | length > 0
+        - (proxmox_hosts_entries | map('split') | map('join', ' ') | list) != [proxmox_hosts_wanted]
+        - not (proxmox_fix_hosts | default(false) | bool)

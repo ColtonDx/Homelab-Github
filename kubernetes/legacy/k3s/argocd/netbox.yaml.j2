@@ -1,0 +1,41 @@
+---
+# Rendered and applied by ansible/playbooks/k3s/service-argo-bootstrap.yaml; the repo and site values come from its vars and the inventory
+# Upstream chart with values from this repo; the chart bundles PostgreSQL and Valkey and reads its secrets from the ExternalSecrets in apps/netbox
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: netbox
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.netbox.oss.netboxlabs.com/
+      chart: netbox
+      targetRevision: 8.3.57
+      helm:
+        releaseName: netbox
+        valueFiles:
+          - $values/kubernetes/legacy/k3s/values/netbox.yaml
+        # Wins over the values file, so the host never has to be in Git
+        valuesObject:
+          ingress:
+            hosts:
+              - host: netbox.{{ traefik_domain }}
+                paths:
+                  - /
+    - repoURL: {{ argocd_repo }}
+      targetRevision: {{ argocd_ref }}
+      ref: values
+    - repoURL: {{ argocd_repo }}
+      targetRevision: {{ argocd_ref }}
+      path: kubernetes/legacy/k3s/apps/netbox
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: netbox
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

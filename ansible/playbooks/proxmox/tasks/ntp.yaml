@@ -1,0 +1,45 @@
+---
+# Points chrony at the site's time servers; Proxmox uses chrony by default, and the cluster needs its nodes' clocks to agree
+# Inventory: proxmox_ntp_servers (a list; when empty or unset this step changes nothing), proxmox_ntp_keep_pool=true to keep Debian's public pool as well
+
+# Nothing to do without a server list
+- name: Configure NTP
+  when: proxmox_ntp_servers | default([]) | length > 0
+  block:
+    # A drop-in file, so chrony's own config stays as the package ships it
+    - name: Write the time servers
+      ansible.builtin.copy:
+        dest: /etc/chrony/sources.d/homelab.sources
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/proxmox/configure-proxmox.yaml
+          {% for server in proxmox_ntp_servers %}
+          server {{ server }} iburst
+          {% endfor %}
+      notify: Restart chrony
+
+    # The public pool is commented out so only the site's servers are used, unless asked to keep it
+    - name: Turn off the default public pool
+      ansible.builtin.replace:
+        path: /etc/chrony/chrony.conf
+        regexp: '^(pool .*)$'
+        replace: '# \1'
+      when: not (proxmox_ntp_keep_pool | default(false) | bool)
+      notify: Restart chrony
+
+    # Apply now, so the check below sees the new servers
+    - name: Apply the NTP change
+      ansible.builtin.meta: flush_handlers
+
+    # Shows which servers chrony is using, without failing the run while it syncs
+    - name: Read chrony's sources
+      ansible.builtin.command:
+        argv: [chronyc, -n, sources]
+      register: proxmox_chrony_sources
+      changed_when: false
+      check_mode: false
+
+    # Names only
+    - name: Report the time sources
+      ansible.builtin.debug:
+        msg: "{{ proxmox_chrony_sources.stdout_lines }}"

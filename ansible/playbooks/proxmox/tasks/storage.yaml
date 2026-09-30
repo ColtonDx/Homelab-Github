@@ -1,0 +1,102 @@
+---
+# Registers the existing local ZFS pool as Proxmox storage for VM and container disks; never creates a pool or touches a disk
+# Storage is cluster-wide config, so it is set once from the first node, limited to the nodes that actually have the pool
+# Inventory: proxmox_zfs_storage with id (the storage name), pool (the zpool, default the id), content (default [images, rootdir]) and sparse (default true); unset skips this step
+
+# Nothing to do without a pool to register
+- name: Configure the ZFS storage
+  when: proxmox_zfs_storage is defined
+  block:
+    # The values this step works with, with the defaults filled in
+    - name: Work out the ZFS storage settings
+      ansible.builtin.set_fact:
+        proxmox_zfs_id: "{{ proxmox_zfs_storage.id }}"
+        proxmox_zfs_pool: "{{ proxmox_zfs_storage.pool | default(proxmox_zfs_storage.id) }}"
+        proxmox_zfs_content: "{{ (proxmox_zfs_storage.content | default(['images', 'rootdir'])) | join(',') }}"
+        proxmox_zfs_sparse: "{{ proxmox_zfs_storage.sparse | default(true) | bool }}"
+
+    # Checked on every node, since each node's pool is its own local disks
+    - name: Check the pool exists on this node
+      ansible.builtin.command:
+        argv: [zpool, list, -H, -o, name, "{{ proxmox_zfs_pool }}"]
+      register: proxmox_zpool
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # The storage entry covers only nodes that have the pool, so Proxmox never offers it where it would fail
+    - name: Work out which nodes have the pool
+      ansible.builtin.set_fact:
+        proxmox_zfs_nodes: >-
+          {{ ansible_play_hosts | map('extract', hostvars) | selectattr('proxmox_zpool.rc', 'equalto', 0)
+             | map(attribute='ansible_facts.hostname') | list }}
+      run_once: true
+
+    # Registering storage for a pool that exists nowhere would only produce errors
+    - name: Require the pool on at least one node
+      ansible.builtin.assert:
+        that:
+          - proxmox_zfs_nodes | length > 0
+        fail_msg: "No node has a zpool named {{ proxmox_zfs_pool }}; create it first, since this playbook never creates pools."
+      run_once: true
+
+    # Proxmox's storage list, to decide between adding and updating
+    - name: Read the configured storage
+      ansible.builtin.command:
+        argv: [pvesh, get, /storage, --output-format, json]
+      register: proxmox_storage_list
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # The existing entry for this id, or an empty one
+    - name: Find the existing ZFS storage entry
+      ansible.builtin.set_fact:
+        proxmox_zfs_existing: "{{ proxmox_storage_list.stdout | from_json | selectattr('storage', 'equalto', proxmox_zfs_id) | first | default({}) }}"
+      run_once: true
+
+    # A name already used by another storage type or pool is a conflict for a person to resolve
+    - name: Refuse to repoint an existing storage entry
+      ansible.builtin.assert:
+        that:
+          - proxmox_zfs_existing == {} or (proxmox_zfs_existing.type == 'zfspool' and proxmox_zfs_existing.pool == proxmox_zfs_pool)
+        fail_msg: >-
+          Storage {{ proxmox_zfs_id }} already exists as {{ proxmox_zfs_existing.type | default('?') }} on
+          {{ proxmox_zfs_existing.pool | default(proxmox_zfs_existing.path | default('?')) }}; change it by hand, or pick another id.
+      run_once: true
+
+    # New entry, limited to the nodes that have the pool
+    - name: Add the ZFS storage
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - zfspool
+          - "{{ proxmox_zfs_id }}"
+          - --pool
+          - "{{ proxmox_zfs_pool }}"
+          - --content
+          - "{{ proxmox_zfs_content }}"
+          - --sparse
+          - "{{ proxmox_zfs_sparse | ternary('1', '0') }}"
+          - --nodes
+          - "{{ proxmox_zfs_nodes | join(',') }}"
+      when: proxmox_zfs_existing == {}
+      run_once: true
+
+    # Only content and nodes can change on an existing entry
+    - name: Update the ZFS storage
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - set
+          - "{{ proxmox_zfs_id }}"
+          - --content
+          - "{{ proxmox_zfs_content }}"
+          - --nodes
+          - "{{ proxmox_zfs_nodes | join(',') }}"
+      when:
+        - proxmox_zfs_existing != {}
+        - (proxmox_zfs_existing.content | default('')).split(',') | sort != proxmox_zfs_content.split(',') | sort
+          or (proxmox_zfs_existing.nodes | default('')).split(',') | sort != proxmox_zfs_nodes | sort
+      run_once: true

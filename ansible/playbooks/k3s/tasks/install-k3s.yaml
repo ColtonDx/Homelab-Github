@@ -1,0 +1,28 @@
+---
+# Installs K3s; callers set k3s_exec, and optionally k3s_version to pin
+
+# An existing install is left alone, so re-runs never upgrade a node in place
+- name: Check whether K3s is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+# Fetched only when K3s is missing
+- name: Download the K3s installer
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+  when: not k3s_binary.stat.exists
+
+# Built as a dict so an unset k3s_version adds no key, since even an empty INSTALL_K3S_VERSION overrides the installer
+- name: Run the K3s installer
+  ansible.builtin.command: /tmp/k3s-install.sh
+  environment: "{{ {'INSTALL_K3S_EXEC': k3s_exec}
+                   | combine({'INSTALL_K3S_VERSION': k3s_version}
+                             if k3s_version | default('', true) | length > 0
+                             else {}) }}"
+  when: not k3s_binary.stat.exists
+  changed_when: true
+  register: k3s_install
+  no_log: true

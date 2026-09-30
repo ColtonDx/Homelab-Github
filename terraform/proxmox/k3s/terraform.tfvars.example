@@ -1,0 +1,11 @@
+# For a direct Terraform run, copy to terraform.tfvars (gitignored) and fill in; build-project.yaml reads these from terraform_k3s in the inventory instead
+gateway       = "192.0.2.1"
+storage_pool  = "local-zfs"
+template_name = "debian-cloud-template"
+ci_user       = "ansible"
+
+nodes = [
+  { name = "k3s-node-1", vmid = 1060, proxmox_node = "pve-a", address = "192.0.2.60" },
+  { name = "k3s-node-2", vmid = 1061, proxmox_node = "pve-b", address = "192.0.2.61" },
+  { name = "k3s-node-3", vmid = 1062, proxmox_node = "pve-c", address = "192.0.2.62" },
+]

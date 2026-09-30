@@ -1,0 +1,69 @@
+---
+# Upgrades one node, then optionally reboots it, checking the cluster is quorate before and whole again after; the playbook runs this one node at a time
+# Only runs with -e proxmox_upgrade=true; -e proxmox_reboot=true reboots when the upgrade changed anything, and proxmox_reboot_always=true reboots regardless
+# Rebooting stops or migrates the node's guests; -e proxmox_ha_maintenance=true puts the node in HA maintenance first so HA-managed guests move away
+
+# Upgrading while the cluster is already degraded risks losing quorum
+- name: Check the cluster before upgrading
+  ansible.builtin.command:
+    argv: [pvecm, status]
+  register: proxmox_pre_upgrade
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# A standalone node has no cluster to check, but a clustered one must be quorate
+- name: Require quorum before upgrading
+  ansible.builtin.assert:
+    that:
+      - proxmox_pre_upgrade.rc != 0 or proxmox_pre_upgrade.stdout is search('Quorate:\\s+Yes')
+    fail_msg: "The cluster is not quorate; upgrading {{ ansible_facts.hostname }} now could take it down. Fix the cluster first."
+
+# Proxmox needs a full upgrade, since new releases replace and add packages
+- name: Upgrade the packages
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+    autoremove: false
+  register: proxmox_upgraded
+
+# Only when asked, and only when something changed unless told to reboot anyway
+- name: Reboot the node
+  when:
+    - proxmox_reboot | default(false) | bool
+    - proxmox_upgraded is changed or proxmox_reboot_always | default(false) | bool
+  block:
+    # HA-managed guests migrate to other nodes before this one goes down
+    - name: Enter HA maintenance
+      ansible.builtin.command:
+        argv: [ha-manager, crm-command, node-maintenance, enable, "{{ ansible_facts.hostname }}"]
+      when: proxmox_ha_maintenance | default(false) | bool
+
+    # Long timeout, since guests shutting down can hold the reboot up
+    - name: Reboot
+      ansible.builtin.reboot:
+        reboot_timeout: 1800
+
+    # The node is back in service for HA
+    - name: Leave HA maintenance
+      ansible.builtin.command:
+        argv: [ha-manager, crm-command, node-maintenance, disable, "{{ ansible_facts.hostname }}"]
+      when: proxmox_ha_maintenance | default(false) | bool
+
+    # The next node only starts once this one has rejoined and the cluster is quorate again
+    - name: Wait for the cluster to be whole again
+      ansible.builtin.command:
+        argv: [pvecm, status]
+      register: proxmox_post_upgrade
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 10
+      until: proxmox_post_upgrade.rc != 0 or proxmox_post_upgrade.stdout is search('Quorate:\\s+Yes')
+
+# What happened on this node
+- name: Report the upgrade
+  ansible.builtin.debug:
+    msg: >-
+      {{ ansible_facts.hostname }}: {{ 'packages upgraded' if proxmox_upgraded is changed else 'already up to date' }}{{
+      ', rebooted' if (proxmox_reboot | default(false) | bool and (proxmox_upgraded is changed or proxmox_reboot_always | default(false) | bool)) else '' }}.

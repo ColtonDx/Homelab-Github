@@ -1,0 +1,31 @@
+---
+# Rendered and applied by ansible/playbooks/k3s/service-argo-bootstrap.yaml; the repo and site values come from its vars and the inventory
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: it-tools
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: {{ argocd_repo }}
+    targetRevision: {{ argocd_ref }}
+    path: kubernetes/legacy/k3s/apps/it-tools
+    # The ingress in Git carries a placeholder host; this sets the real one
+    kustomize:
+      patches:
+        - target:
+            kind: Ingress
+            name: it-tools
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: it-tools.{{ traefik_domain }}
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

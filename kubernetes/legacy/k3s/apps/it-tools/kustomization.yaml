@@ -1,0 +1,9 @@
+---
+# Makes this a Kustomize app, so its Argo Application can patch in the ingress host
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml

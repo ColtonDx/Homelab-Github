@@ -1,0 +1,107 @@
+---
+# Sets up and configures the Proxmox nodes: repositories, NTP, DNS and domain, the cluster, ZFS and backup storage, the backup schedule, ACME certificates, and optionally upgrades
+# Safe to re-run: every step reads the current state first and only changes what differs; run with --check to see what would change without changing it
+# Tags: repos, ntp, dns, cluster, storage, backup, acme, upgrade; the inventory settings each part reads are listed in its task file under tasks/
+# One-way or disruptive steps only run on request: -e proxmox_cluster_create=true, -e proxmox_cluster_join=true, -e proxmox_upgrade=true, -e proxmox_reboot=true
+
+# Per-node settings, on every node at once since none of them affect the cluster
+- name: Configure each Proxmox node
+  hosts: "{{ target_hosts | default('proxmox') }}"
+  become: true
+  gather_facts: true
+
+  handlers:
+    # Picks up a changed sources file
+    - name: Restart chrony
+      ansible.builtin.systemd:
+        name: chrony
+        state: restarted
+
+  tasks:
+    # Proxmox's own package repositories, without a subscription
+    - name: Configure the package repositories
+      ansible.builtin.include_tasks:
+        file: tasks/repos.yaml
+        apply:
+          tags: [repos]
+      tags: [repos]
+
+    # The site's time servers
+    - name: Configure NTP
+      ansible.builtin.include_tasks:
+        file: tasks/ntp.yaml
+        apply:
+          tags: [ntp]
+      tags: [ntp]
+
+    # Search domain, DNS servers and the node's own name in /etc/hosts
+    - name: Configure DNS and the domain
+      ansible.builtin.include_tasks:
+        file: tasks/dns.yaml
+        apply:
+          tags: [dns]
+      tags: [dns]
+
+# Cluster membership, one node at a time, since joining changes the cluster's quorum
+- name: Build and check the Proxmox cluster
+  hosts: "{{ target_hosts | default('proxmox') }}"
+  become: true
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    # Creates or joins only on request, and always checks quorum and membership
+    - name: Build and check the cluster
+      ansible.builtin.include_tasks:
+        file: tasks/cluster.yaml
+        apply:
+          tags: [cluster]
+      tags: [cluster]
+
+# Storage, backups and the ACME account live in the cluster's shared config, so they are set once from the first node
+- name: Configure cluster-wide settings
+  hosts: "{{ target_hosts | default('proxmox') }}"
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Registers the existing ZFS pool; never creates or touches disks
+    - name: Configure the ZFS storage
+      ansible.builtin.include_tasks:
+        file: tasks/storage.yaml
+        apply:
+          tags: [storage]
+      tags: [storage]
+
+    # NFS backup storage on TrueNAS and the backup schedule
+    - name: Configure backups
+      ansible.builtin.include_tasks:
+        file: tasks/backup.yaml
+        apply:
+          tags: [backup]
+      tags: [backup]
+
+    # The Let's Encrypt account, the Cloudflare DNS plugin, and each node's certificate
+    - name: Configure ACME certificates
+      ansible.builtin.include_tasks:
+        file: tasks/acme.yaml
+        apply:
+          tags: [acme]
+      tags: [acme]
+
+# Upgrades one node at a time and waits for the cluster to be whole again before the next; only with -e proxmox_upgrade=true
+- name: Upgrade the Proxmox nodes
+  hosts: "{{ target_hosts | default('proxmox') }}"
+  become: true
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    # Full-upgrade, then an optional reboot with quorum checks around it
+    - name: Upgrade the node
+      ansible.builtin.include_tasks:
+        file: tasks/upgrade.yaml
+        apply:
+          tags: [upgrade]
+      when: proxmox_upgrade | default(false) | bool
+      tags: [upgrade]

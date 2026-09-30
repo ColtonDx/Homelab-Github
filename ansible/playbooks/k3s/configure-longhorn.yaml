@@ -1,0 +1,91 @@
+---
+# Infra stage 2: deploys Longhorn; run configure-cluster.yaml first, and safe to re-run
+
+# Facts for the mount check below; without these it silently skips
+- name: Gather node facts
+  hosts: k3s_nodes
+  gather_facts: true
+  any_errors_fatal: true
+
+# Longhorn is applied once, from the first server
+- name: Deploy Longhorn
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    # Unset resolves the latest stable release below; set to pin a tag
+    longhorn_version: ""
+    longhorn_mount_path: /var/lib/longhorn
+
+  tasks:
+    # Runnable on its own, so it cannot assume the previous stage just ran
+    - name: Confirm every node is Ready
+      block:
+        # Retries until every node reports Ready
+        - name: Poll node readiness
+          ansible.builtin.command: k3s kubectl get nodes --no-headers
+          register: k3s_nodes_status
+          changed_when: false
+          retries: 10
+          delay: 10
+          until:
+            - k3s_nodes_status.rc == 0
+            - k3s_nodes_status.stdout_lines | select('search', '\\sReady\\s')
+              | list | length == groups['k3s_nodes'] | length
+      rescue:
+        # Points back to the cluster stage rather than failing on a bare retry count
+        - name: Report why Longhorn cannot be deployed
+          ansible.builtin.fail:
+            msg:
+              - "Cluster not ready - run configure-cluster.yaml first."
+              - "{{ k3s_nodes_status.stdout_lines | default(['<no output>']) }}"
+
+    # Without the mount Longhorn fills the root disk instead
+    - name: Confirm the data disk is mounted on every node
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].ansible_mounts | selectattr('mount', 'equalto', longhorn_mount_path) | list | length > 0
+        fail_msg: "{{ longhorn_mount_path }} is not a mount point on {{ item }} - run configure-cluster.yaml."
+      loop: "{{ groups['k3s_nodes'] }}"
+
+    # Releases API, not master: master carries an unreleased dev manifest
+    - name: Resolve the latest stable Longhorn release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/longhorn/longhorn/releases/latest
+        return_content: true
+      register: longhorn_latest
+      retries: 5
+      delay: 3
+      until: longhorn_latest is not failed
+      when: not (longhorn_version | string | length)
+      delegate_to: localhost
+      become: false
+
+    # A pinned version wins over the resolved latest
+    - name: Select the version to deploy
+      ansible.builtin.set_fact:
+        longhorn_deploy_version: >-
+          {{ longhorn_version if (longhorn_version | string | length)
+             else longhorn_latest.json.tag_name }}
+
+    # Applies the upstream manifest for the chosen release
+    - name: Deploy Longhorn
+      ansible.builtin.command: >-
+        k3s kubectl apply -f
+        https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_deploy_version }}/deploy/longhorn.yaml
+      register: longhorn_apply
+      changed_when: "'created' in longhorn_apply.stdout"
+
+    # Storage is not usable until the driver deployer is Available
+    - name: Wait for Longhorn to become available
+      ansible.builtin.command: >-
+        k3s kubectl -n longhorn-system wait deployment/longhorn-driver-deployer
+        --for=condition=Available --timeout=600s
+      changed_when: false
+
+    # Version deployed and the next stage to run
+    - name: Report what was deployed
+      ansible.builtin.debug:
+        msg: "Longhorn {{ longhorn_deploy_version }} deployed. Next: configure-traefik.yaml"

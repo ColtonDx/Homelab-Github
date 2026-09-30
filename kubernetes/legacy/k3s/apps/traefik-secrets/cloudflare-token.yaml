@@ -1,0 +1,21 @@
+---
+# Replaces the plain Secret that configure-traefik-tls.yaml used to create.
+# ESO keeps it in sync with Vault; the value never lands in this repo.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: traefik-cloudflare
+  namespace: kube-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault
+  target:
+    name: traefik-cloudflare
+    creationPolicy: Owner
+  data:
+    - secretKey: CF_DNS_API_TOKEN
+      remoteRef:
+        key: cloudflare
+        property: CF_API

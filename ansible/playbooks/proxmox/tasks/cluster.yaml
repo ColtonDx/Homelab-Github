@@ -1,0 +1,119 @@
+---
+# Checks each node's cluster membership, creates the cluster or joins nodes only on request, then requires a quorate cluster with every node present
+# Runs one node at a time (serial 1 in the playbook), so a join never overlaps another
+# Inventory: proxmox_cluster_name (needed to create); -e proxmox_cluster_create=true creates it on the first node, -e proxmox_cluster_join=true joins the others
+# Joining needs root SSH from each joining node to the first, with its host key already trusted, and a node with no VMs or containers; it cannot be undone cleanly
+
+# The first node in the play is the one the cluster is created on and the others join
+- name: Work out this node's role
+  ansible.builtin.set_fact:
+    proxmox_node: "{{ ansible_facts.hostname }}"
+    proxmox_first: "{{ ansible_play_hosts_all[0] }}"
+    proxmox_is_first: "{{ inventory_hostname == ansible_play_hosts_all[0] }}"
+    proxmox_join_address: >-
+      {{ hostvars[ansible_play_hosts_all[0]].proxmox_node_ip | default(hostvars[ansible_play_hosts_all[0]].ansible_host) }}
+
+# Exits non-zero when the node has no cluster config at all
+- name: Read this node's cluster status
+  ansible.builtin.command:
+    argv: [pvecm, status]
+  register: proxmox_pvecm
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Recorded for this node, and read by the others when they join
+- name: Record whether this node is clustered
+  ansible.builtin.set_fact:
+    proxmox_clustered: "{{ proxmox_pvecm.rc == 0 and 'Cluster information' in proxmox_pvecm.stdout }}"
+
+# Creating is one-way, so it needs the explicit flag and a name
+- name: Create the cluster on the first node
+  ansible.builtin.command:
+    argv: [pvecm, create, "{{ proxmox_cluster_name }}"]
+  when:
+    - proxmox_is_first | bool
+    - not (proxmox_clustered | bool)
+    - proxmox_cluster_create | default(false) | bool
+    - proxmox_cluster_name | default('') | length > 0
+  register: proxmox_created
+
+# A joining node must not hold guests, since joining replaces its config with the cluster's
+- name: Check the node has no VMs or containers before joining
+  when:
+    - not (proxmox_is_first | bool)
+    - not (proxmox_clustered | bool)
+    - proxmox_cluster_join | default(false) | bool
+  block:
+    # Both lists include a header line, so more than one line means guests exist
+    - name: List this node's guests
+      ansible.builtin.shell:
+        cmd: set -o pipefail; { qm list; pct list; } | grep -vcE '^\s*(VMID|$)' || true
+        executable: /bin/bash
+      register: proxmox_guest_count
+      changed_when: false
+      check_mode: false
+
+    # Stops before pvecm would refuse, with the reason
+    - name: Refuse to join a node that has guests
+      ansible.builtin.assert:
+        that:
+          - proxmox_guest_count.stdout | int == 0
+          - hostvars[proxmox_first].proxmox_clustered | default(false) | bool or hostvars[proxmox_first].proxmox_created is changed
+        fail_msg: >-
+          {{ proxmox_node }} cannot join: it holds {{ proxmox_guest_count.stdout }} guest(s), or the first node
+          {{ proxmox_first }} is not clustered yet. Move or remove the guests, and create the cluster first.
+
+    # Uses SSH to the first node, so no password prompt is needed
+    - name: Join the cluster
+      ansible.builtin.command:
+        argv: [pvecm, add, "{{ proxmox_join_address }}", --use_ssh]
+      register: proxmox_joined
+
+# Says what would happen, so a node outside the cluster is never a silent surprise
+- name: Report a node outside the cluster
+  ansible.builtin.debug:
+    msg: >-
+      {{ proxmox_node }} is not in a cluster.
+      {{ 'Re-run with -e proxmox_cluster_create=true (and proxmox_cluster_name set) to create one here.' if proxmox_is_first | bool
+         else 'Re-run with -e proxmox_cluster_join=true to join it to ' ~ proxmox_first ~ '.' }}
+  when:
+    - not (proxmox_clustered | bool)
+    - proxmox_created is not changed
+    - proxmox_joined is not defined or proxmox_joined is not changed
+
+# Read again after any create or join, from this node's point of view
+- name: Read the cluster status again
+  ansible.builtin.command:
+    argv: [pvecm, status]
+  register: proxmox_pvecm_now
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: proxmox_created is changed or (proxmox_joined is defined and proxmox_joined is changed) or (proxmox_clustered | bool)
+
+# The members the cluster itself reports, to compare with the inventory
+- name: Read the cluster's member list
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/status, --output-format, json]
+  register: proxmox_cluster_status
+  changed_when: false
+  check_mode: false
+  when: proxmox_pvecm_now is not skipped
+
+# Writes to the cluster's shared config need quorum, and a missing or offline node is worth knowing before anything else runs
+- name: Require a quorate cluster with every node present
+  ansible.builtin.assert:
+    that:
+      - proxmox_quorate | bool
+      - proxmox_missing | length == 0
+    fail_msg: >-
+      The cluster is {{ 'quorate' if proxmox_quorate | bool else 'not quorate' }}
+      and is missing or has offline: {{ proxmox_missing | join(', ') or 'none' }}. Fix that before configuring cluster-wide settings.
+    success_msg: "Cluster is quorate with every node online."
+  vars:
+    proxmox_quorate: "{{ proxmox_pvecm_now.stdout | regex_search('Quorate:\\s+Yes') is not none }}"
+    proxmox_members: "{{ proxmox_cluster_status.stdout | from_json | selectattr('type', 'equalto', 'node') | list }}"
+    proxmox_online: "{{ proxmox_members | selectattr('online', 'equalto', 1) | map(attribute='name') | list }}"
+    proxmox_missing: "{{ ansible_play_hosts_all | map('extract', hostvars, ['ansible_facts', 'hostname']) | reject('in', proxmox_online) | list }}"
+  when: proxmox_pvecm_now is not skipped

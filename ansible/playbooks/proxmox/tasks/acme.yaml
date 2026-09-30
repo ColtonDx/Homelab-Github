@@ -1,0 +1,154 @@
+---
+# Uses Proxmox's own ACME client with the Cloudflare DNS plugin: one Let's Encrypt account and plugin for the cluster, then each node's domain and certificate
+# Proxmox renews the certificate itself from its daily job, so a certificate is only ordered here when the current one is missing, not Let's Encrypt, or for another name
+# Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: CF_API and CF_EMAIL at cloudflare (vault_cloudflare_path renames it)
+# Inventory: proxmox_domain, or proxmox_acme_domain per node; optional proxmox_acme with account (default), plugin (cloudflare) and directory (Let's Encrypt production)
+
+# Nothing to do without a name to put on the certificate
+- name: Configure ACME certificates
+  when: (proxmox_acme_domain | default('') | length > 0) or (proxmox_domain | default('') | length > 0)
+  block:
+    # The values this step works with, with the defaults filled in
+    - name: Work out the ACME settings
+      ansible.builtin.set_fact:
+        proxmox_node: "{{ ansible_facts.hostname }}"
+        proxmox_acme_cert_domain: "{{ proxmox_acme_domain | default(ansible_facts.hostname ~ '.' ~ proxmox_domain) }}"
+        proxmox_acme_account: "{{ (proxmox_acme | default({})).account | default('default') }}"
+        proxmox_acme_plugin: "{{ (proxmox_acme | default({})).plugin | default('cloudflare') }}"
+        proxmox_acme_directory: "{{ (proxmox_acme | default({})).directory | default('https://acme-v02.api.letsencrypt.org/directory') }}"
+
+    # Vault connection for the Cloudflare credentials
+    - name: Read the Vault connection from the environment
+      ansible.builtin.set_fact:
+        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+        vault_secrets:
+          - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_API, var: cloudflare_api_token }
+          - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_EMAIL, var: acme_email }
+      no_log: true
+      run_once: true
+
+    # Fetched once for the cluster; fails naming the path when a field is missing
+    - name: Load the Cloudflare credentials from Vault
+      ansible.builtin.include_tasks:
+        file: ../../../tasks/var_lookup.yaml
+        apply:
+          run_once: true
+
+    # The cluster's ACME accounts, to decide whether one is needed
+    - name: Read the ACME accounts
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/acme/account, --output-format, json]
+      register: proxmox_acme_accounts
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # Registering needs the directory's current terms of service, accepted by passing their URL
+    - name: Register the ACME account
+      when: proxmox_acme_account not in (proxmox_acme_accounts.stdout | from_json | map(attribute='name') | list)
+      run_once: true
+      block:
+        # The terms' URL for this directory
+        - name: Read the directory's terms of service
+          ansible.builtin.command:
+            argv: [pvesh, get, /cluster/acme/tos, --directory, "{{ proxmox_acme_directory }}", --output-format, json]
+          register: proxmox_acme_tos
+          changed_when: false
+          check_mode: false
+
+        # The contact email gets Let's Encrypt's expiry notices
+        - name: Create the ACME account
+          ansible.builtin.command:
+            argv:
+              - pvesh
+              - create
+              - /cluster/acme/account
+              - --name
+              - "{{ proxmox_acme_account }}"
+              - --contact
+              - "{{ acme_email }}"
+              - --directory
+              - "{{ proxmox_acme_directory }}"
+              - --tos_url
+              - "{{ proxmox_acme_tos.stdout | from_json }}"
+          no_log: true
+
+    # The cluster's DNS plugins, to decide whether this one is needed
+    - name: Read the ACME plugins
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/acme/plugins, --output-format, json]
+      register: proxmox_acme_plugins
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # Proxmox stores the plugin's settings as base64 key=value lines; the token is only written when the plugin is new, or with -e proxmox_acme_update_token=true
+    - name: Add or update the Cloudflare DNS plugin
+      ansible.builtin.command:
+        argv: >-
+          {{ (['pvesh', 'create', '/cluster/acme/plugins', '--id', proxmox_acme_plugin, '--type', 'dns', '--api', 'cf'] if plugin_missing
+              else ['pvesh', 'set', '/cluster/acme/plugins/' ~ proxmox_acme_plugin])
+             + ['--data', ('CF_Token=' ~ cloudflare_api_token) | b64encode] }}
+      vars:
+        plugin_missing: "{{ proxmox_acme_plugin not in (proxmox_acme_plugins.stdout | from_json | map(attribute='plugin') | list) }}"
+      when: plugin_missing | bool or proxmox_acme_update_token | default(false) | bool
+      no_log: true
+      run_once: true
+
+    # Each node's ACME settings, to decide whether they need setting
+    - name: Read the node's ACME settings
+      ansible.builtin.command:
+        argv: [pvesh, get, "/nodes/{{ proxmox_node }}/config", --output-format, json]
+      register: proxmox_node_config
+      changed_when: false
+      check_mode: false
+
+    # The node's certificate is for its own name, validated through the plugin
+    - name: Set the node's ACME domain and account
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - set
+          - "/nodes/{{ proxmox_node }}/config"
+          - --acme
+          - "account={{ proxmox_acme_account }}"
+          - --acmedomain0
+          - "domain={{ proxmox_acme_cert_domain }},plugin={{ proxmox_acme_plugin }}"
+      when: >-
+        (proxmox_node_config.stdout | from_json).acme | default('') != 'account=' ~ proxmox_acme_account
+        or (proxmox_node_config.stdout | from_json).acmedomain0 | default('')
+           != 'domain=' ~ proxmox_acme_cert_domain ~ ',plugin=' ~ proxmox_acme_plugin
+
+    # What the web UI currently serves, to decide whether to order a certificate
+    - name: Read the node's certificates
+      ansible.builtin.command:
+        argv: [pvesh, get, "/nodes/{{ proxmox_node }}/certificates/info", --output-format, json]
+      register: proxmox_certs
+      changed_when: false
+      check_mode: false
+
+    # A custom certificate lives in pveproxy-ssl.pem; without one Proxmox serves its own self-signed certificate
+    - name: Check the served certificate
+      ansible.builtin.set_fact:
+        proxmox_needs_cert: >-
+          {{ current == {}
+             or 'Let\'s Encrypt' not in current.issuer | default('')
+             or proxmox_acme_cert_domain not in current.san | default([]) }}
+      vars:
+        current: "{{ proxmox_certs.stdout | from_json | selectattr('filename', 'equalto', 'pveproxy-ssl.pem') | first | default({}) }}"
+
+    # Validates through Cloudflare DNS, then installs the certificate and restarts the web UI, so the page blinks once
+    - name: Order the node's certificate
+      ansible.builtin.command:
+        argv: [pvenode, acme, cert, order]
+      when: proxmox_needs_cert | bool
+      register: proxmox_cert_order
+
+    # Names only, so the run says what each node is serving
+    - name: Report the node's certificate
+      ansible.builtin.debug:
+        msg: >-
+          {{ proxmox_node }} serves {{ proxmox_acme_cert_domain }}:
+          {{ 'certificate ordered' if proxmox_cert_order is changed else 'current certificate is valid, Proxmox renews it' }}.

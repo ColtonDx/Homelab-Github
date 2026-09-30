@@ -1,0 +1,75 @@
+---
+# Service: renders the Argo CD Applications in kubernetes/legacy/k3s/argocd/ from the inventory and applies them; Argo then syncs each app from the public repo
+# Argo has no variable substitution, so site values such as traefik_domain are filled in here rather than written into Git; re-run after adding or changing an Application
+# Inventory: traefik_domain; optional argocd_repo_url (default this repo on GitHub) and argocd_revision (default main)
+
+# Runs on the first server, where kubectl talks to the cluster directly
+- name: Apply the Argo CD Applications
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    argocd_namespace: argocd
+    argocd_app_dir: "{{ playbook_dir }}/../../../kubernetes/legacy/k3s/argocd"
+    argocd_repo: "{{ argocd_repo_url | default('https://github.com/ColtonDx/Homelab-Github.git') }}"
+    argocd_ref: "{{ argocd_revision | default('main') }}"
+
+  tasks:
+    # The Applications need somewhere to run
+    - name: Confirm ArgoCD is running
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} get deployment argocd-server
+      changed_when: false
+
+    # Hostnames in the Applications come from here, so it must be set
+    - name: Validate the ingress domain
+      ansible.builtin.assert:
+        that:
+          - traefik_domain | default('') | string | length > 0
+        fail_msg: "traefik_domain must be set in the inventory."
+
+    # One template per Application; the list comes from the repo, so a new file is picked up on the next run
+    - name: Find the Application templates
+      ansible.builtin.set_fact:
+        argocd_templates: "{{ query('ansible.builtin.fileglob', argocd_app_dir ~ '/*.yaml.j2') | sort }}"
+      delegate_to: localhost
+      become: false
+
+    # Rendered on the controller and applied from stdin, so nothing with site values is written to the node
+    - name: Apply each Application
+      ansible.builtin.command: >-
+        k3s kubectl apply -n {{ argocd_namespace }} -f -
+      args:
+        stdin: "{{ lookup('ansible.builtin.template', item) }}"
+      loop: "{{ argocd_templates }}"
+      loop_control:
+        label: "{{ item | basename | regex_replace('\\.yaml\\.j2$', '') }}"
+      register: argocd_apply
+      changed_when: "'created' in argocd_apply.stdout or 'configured' in argocd_apply.stdout"
+
+    # Argo reports each app's sync state once it has cloned the repo
+    - name: Wait for every Application to sync
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} get applications
+        -o jsonpath={.items[*].status.sync.status}
+      register: argocd_sync
+      changed_when: false
+      failed_when: false
+      retries: 20
+      delay: 15
+      until: argocd_sync.stdout | trim | length > 0 and (argocd_sync.stdout | split | reject('equalto', 'Synced') | list | length == 0)
+
+    # Names, sync and health for each app
+    - name: Report the application state
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} get applications
+        -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status
+      register: argocd_apps
+      changed_when: false
+
+    # Shown so the run log says what Argo is managing
+    - name: Show what Argo is managing
+      ansible.builtin.debug:
+        msg: "{{ argocd_apps.stdout_lines }}"

@@ -1,0 +1,41 @@
+---
+# Full K3s build: configure-* lay down the cluster, service-* deploy onto it
+# Each is runnable on its own and idempotent, so re-running this is safe
+# Skip the certificate stage with -e configure_tls=false
+
+# Stage 1: node prep, etcd bootstrap and joining the servers
+- name: Cluster
+  ansible.builtin.import_playbook: configure-cluster.yaml
+
+# Stage 2: Longhorn storage on the data disks
+- name: Longhorn
+  ansible.builtin.import_playbook: configure-longhorn.yaml
+
+# Stage 3: the floating VIP with Traefik on 443
+- name: MetalLB and Traefik
+  ansible.builtin.import_playbook: configure-traefik.yaml
+
+# Stage 4: Traefik's own ACME wildcard, skipped with configure_tls=false
+- name: Wildcard certificate
+  ansible.builtin.import_playbook: configure-traefik-tls.yaml
+  when: configure_tls | default(true) | bool
+
+# Services start here (add new ones as service-<name>.yaml); ESO syncs Vault secrets into the cluster
+- name: External Secrets Operator
+  ansible.builtin.import_playbook: service-external-secrets.yaml
+
+# ArgoCD itself, served through Traefik
+- name: ArgoCD
+  ansible.builtin.import_playbook: service-argo.yaml
+
+# The Argo Applications that sync the rest from Git
+- name: ArgoCD root application
+  ansible.builtin.import_playbook: service-argo-bootstrap.yaml
+
+# Ingress for the Longhorn dashboard
+- name: Longhorn UI
+  ansible.builtin.import_playbook: service-longhorn-ui.yaml
+
+# Rancher, installed through the K3s HelmChart CRD
+- name: Rancher
+  ansible.builtin.import_playbook: service-rancher.yaml

@@ -1,0 +1,133 @@
+---
+# Service: ArgoCD, published at argocd.<traefik_domain>; safe to re-run
+
+# Installed from the first server with kubectl and the K3s manifests directory
+- name: Deploy ArgoCD
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    argocd_namespace: argocd
+    argocd_host: "argocd.{{ traefik_domain }}"
+    # Unset: `stable` tracks the current release; set to a tag to pin
+    argocd_version: ""
+    k3s_manifest_dir: /var/lib/rancher/k3s/server/manifests
+
+  tasks:
+    # The ingress host is built from it
+    - name: Validate the ingress domain
+      ansible.builtin.assert:
+        that:
+          - "'traefik_domain' in hostvars[inventory_hostname]"
+          - traefik_domain | string | length > 0
+        fail_msg: "traefik_domain must be set in the inventory; ArgoCD publishes as argocd.<traefik_domain>."
+
+    # Fails early when K3s is not up on this node
+    - name: Confirm the cluster is reachable
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      changed_when: false
+
+    # The install manifest is namespaced but does not create its namespace
+    - name: Create the ArgoCD namespace
+      ansible.builtin.command: k3s kubectl create namespace {{ argocd_namespace }}
+      register: argocd_ns
+      changed_when: argocd_ns.rc == 0
+      # Already exists is the re-run case, not an error
+      failed_when:
+        - argocd_ns.rc != 0
+        - "'AlreadyExists' not in argocd_ns.stderr"
+
+    # Server-side, since the ~1.4MB ApplicationSet CRD overflows the 256KB annotation a client-side apply writes
+    - name: Install ArgoCD
+      ansible.builtin.command: >-
+        k3s kubectl apply --server-side --force-conflicts
+        -n {{ argocd_namespace }} -f
+        https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version | default('stable', true) }}/manifests/install.yaml
+      register: argocd_apply
+      changed_when: "'created' in argocd_apply.stdout or 'configured' in argocd_apply.stdout"
+
+    # Traefik terminates TLS, so argocd-server serves plain HTTP; otherwise its self-signed cert makes Traefik return 500
+    - name: Run argocd-server in insecure mode
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} patch configmap argocd-cmd-params-cm
+        --type merge -p {{ '{"data":{"server.insecure":"true"}}' | quote }}
+      register: argocd_insecure
+      changed_when: "'patched' in argocd_insecure.stdout"
+
+    # The server reads the parameter only at startup
+    - name: Restart argocd-server to pick up the parameter
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} rollout restart deployment/argocd-server
+      changed_when: true
+      when: argocd_insecure is changed
+
+    # Nothing below is useful until the server is up
+    - name: Wait for the ArgoCD server to become available
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} rollout status deployment/argocd-server
+        --timeout=300s
+      changed_when: false
+
+    # The Service stays ClusterIP, reachable only through Traefik on the VIP
+    - name: Define the ArgoCD ingress
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/argocd-ingress.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: argocd-server
+            namespace: {{ argocd_namespace }}
+            annotations:
+              traefik.ingress.kubernetes.io/router.entrypoints: websecure
+              traefik.ingress.kubernetes.io/router.tls: "true"
+          spec:
+            rules:
+              - host: {{ argocd_host }}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: argocd-server
+                          port:
+                            number: 80
+
+    # Applied now rather than waiting on the addon manager's poll
+    - name: Apply the ArgoCD ingress
+      ansible.builtin.command: k3s kubectl apply -f {{ k3s_manifest_dir }}/argocd-ingress.yaml
+      register: argocd_ingress_apply
+      changed_when: "'created' in argocd_ingress_apply.stdout or 'configured' in argocd_ingress_apply.stdout"
+
+    # From the image tag, since the manifest carries no version label
+    - name: Read the installed version
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} get deployment argocd-server
+        -o jsonpath={.spec.template.spec.containers[0].image}
+      register: argocd_image
+      changed_when: false
+
+    # Absent once the password has been changed, so this must not fail
+    - name: Read the initial admin password
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret
+        -o jsonpath={.data.password}
+      register: argocd_secret
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    # Version, admin credentials and the UI address
+    - name: Report what was deployed
+      ansible.builtin.debug:
+        msg:
+          - "ArgoCD {{ argocd_image.stdout | regex_search(':([^:]+)$', '\\1') | first | default('unknown', true) }} in namespace {{ argocd_namespace }}."
+          - >-
+            admin / {{ argocd_secret.stdout | b64decode
+               if argocd_secret.stdout | default('') | length > 0
+               else '<secret deleted - password already changed>' }}
+          - "UI: https://{{ argocd_host }} (via Traefik; no node port is exposed)"

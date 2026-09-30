@@ -1,0 +1,69 @@
+---
+# Service: Longhorn UI, published at longhorn.<traefik_domain>; safe to re-run
+
+# Adds only an ingress; Longhorn itself comes from configure-longhorn.yaml
+- name: Expose the Longhorn UI
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    longhorn_namespace: longhorn-system
+    longhorn_host: "longhorn.{{ traefik_domain }}"
+    k3s_manifest_dir: /var/lib/rancher/k3s/server/manifests
+
+  tasks:
+    # The ingress host is built from it
+    - name: Validate the ingress domain
+      ansible.builtin.assert:
+        that:
+          - "'traefik_domain' in hostvars[inventory_hostname]"
+          - traefik_domain | string | length > 0
+        fail_msg: "traefik_domain must be set in the inventory."
+
+    # Nothing to expose until configure-longhorn.yaml has run
+    - name: Confirm the Longhorn UI is deployed
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ longhorn_namespace }} get svc longhorn-frontend
+      changed_when: false
+
+    # longhorn-frontend serves plain HTTP, so no serversscheme is needed; the UI has no authentication of its own
+    - name: Define the Longhorn ingress
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/longhorn-ingress.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: longhorn-frontend
+            namespace: {{ longhorn_namespace }}
+            annotations:
+              traefik.ingress.kubernetes.io/router.entrypoints: websecure
+              traefik.ingress.kubernetes.io/router.tls: "true"
+          spec:
+            rules:
+              - host: {{ longhorn_host }}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: longhorn-frontend
+                          port:
+                            number: 80
+
+    # Applied now rather than waiting on the addon manager's poll
+    - name: Apply the Longhorn ingress
+      ansible.builtin.command: k3s kubectl apply -f {{ k3s_manifest_dir }}/longhorn-ingress.yaml
+      register: longhorn_ingress_apply
+      changed_when: "'created' in longhorn_ingress_apply.stdout or 'configured' in longhorn_ingress_apply.stdout"
+
+    # Repeats the warning that the UI has no authentication
+    - name: Report what was exposed
+      ansible.builtin.debug:
+        msg:
+          - "Longhorn UI: https://{{ longhorn_host }}"
+          - "WARNING: the UI has no built-in authentication - anyone who can reach it has full control of cluster storage."

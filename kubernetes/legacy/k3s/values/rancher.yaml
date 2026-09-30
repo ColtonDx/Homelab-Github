@@ -1,0 +1,24 @@
+---
+# Values for the upstream rancher chart, migrated from
+# ansible/playbooks/k3s/service-rancher.yaml.
+
+# hostname is set by argocd/rancher.yaml.j2 from the inventory, so it is not written here
+
+# The playbook computed this from the node count; Argo does no templating, so
+# it is written out. Rancher wants 3 on a 3-node cluster, 1 on a single node.
+replicas: 3
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  extraAnnotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  # tls.source=secret stops Rancher managing its own certificate, so no
+  # cert-manager is needed - Traefik's wildcard terminates TLS instead.
+  tls:
+    source: secret
+
+# Rancher generates a bootstrap password when this is unset; read it back with
+# `kubectl -n cattle-system get secret bootstrap-secret`.
+bootstrapPassword: ""

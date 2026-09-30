@@ -1,0 +1,179 @@
+---
+# Infra stage 4: wildcard certificate, issued and renewed by Traefik itself
+# Traefik owns the ACME lifecycle, so renewal survives losing any single node
+
+# Needs VAULT_ADDR and VAULT_TOKEN for the Cloudflare token and ACME email
+- name: Configure Traefik ACME
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
+    vault_secrets:
+      - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_API, var: cloudflare_api_token }
+      - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_EMAIL, var: acme_email }
+
+    acme_resolver: letsencrypt
+    acme_secret_name: traefik-cloudflare
+    acme_storage_size: 128Mi
+    k3s_manifest_dir: /var/lib/rancher/k3s/server/manifests
+
+  pre_tasks:
+    # Sets cloudflare_api_token and acme_email from Vault
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # The wildcard is issued for this domain, so it must be set
+    - name: Validate the ingress domain
+      ansible.builtin.assert:
+        that:
+          - "'traefik_domain' in hostvars[inventory_hostname]"
+          - traefik_domain | string | length > 0
+        fail_msg: "traefik_domain must be set in the inventory."
+
+  tasks:
+    # Fails early when K3s is not up on this node
+    - name: Confirm the cluster is reachable
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      changed_when: false
+
+    # Traefik reads the token from this Secret; once ESO owns it (see kubernetes/apps/traefik-secrets) it is left alone
+    - name: Check whether ESO already manages the token
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system get externalsecret {{ acme_secret_name }}
+      register: acme_eso
+      changed_when: false
+      failed_when: false
+
+    # Only written when ESO does not own the Secret, and kept out of the logs
+    - name: Store the Cloudflare token for Traefik
+      ansible.builtin.shell: >-
+        k3s kubectl -n kube-system create secret generic {{ acme_secret_name }}
+        --from-literal=CF_DNS_API_TOKEN={{ cloudflare_api_token | quote }}
+        --dry-run=client -o yaml | k3s kubectl apply -f -
+      register: acme_secret_apply
+      changed_when: "'created' in acme_secret_apply.stdout or 'configured' in acme_secret_apply.stdout"
+      no_log: true
+      when: acme_eso.rc != 0
+
+    # Only one HelmChartConfig per chart is honoured, so this carries the VIP settings too; DNS-01 for the wildcard, and the init container keeps acme.json private or Traefik refuses to start
+    - name: Configure the ACME resolver on Traefik
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/traefik-config.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: traefik
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              service:
+                spec:
+                  loadBalancerIP: {{ k3s_traefik_vip }}
+                annotations:
+                  metallb.io/address-pool: traefik-vip
+              ports:
+                websecure:
+                  exposedPort: 443
+              persistence:
+                enabled: true
+                size: {{ acme_storage_size }}
+                path: /data
+              podSecurityContext:
+                runAsNonRoot: true
+                runAsUser: 65532
+                runAsGroup: 65532
+                # Kubernetes chowns the volume to this GID on mount, which is
+                # what lets the unprivileged init container write acme.json.
+                fsGroup: 65532
+                fsGroupChangePolicy: OnRootMismatch
+                seccompProfile:
+                  type: RuntimeDefault
+              deployment:
+                # persistence mounts a single ReadWriteOnce PVC (acme.json).
+                # The chart's default RollingUpdate surges a second pod before
+                # killing the first, which Longhorn can't satisfy - the surge
+                # pod gets scheduled to whichever node the scheduler picks,
+                # and it can only attach the volume once the running pod
+                # releases it. Recreate kills the old pod first so the volume
+                # is free before the replacement is scheduled.
+                updateStrategy:
+                  type: Recreate
+                initContainers:
+                  - name: volume-permissions
+                    image: busybox:latest
+                    command: ["sh", "-c", "touch /data/acme.json && chmod 600 /data/acme.json"]
+                    securityContext:
+                      readOnlyRootFilesystem: true
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: ["ALL"]
+                    volumeMounts:
+                      - name: data
+                        mountPath: /data
+              env:
+                - name: CF_DNS_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ acme_secret_name }}
+                      key: CF_DNS_API_TOKEN
+              certificatesResolvers:
+                {{ acme_resolver }}:
+                  acme:
+                    email: {{ acme_email }}
+                    storage: /data/acme.json
+                    dnsChallenge:
+                      provider: cloudflare
+                      resolvers:
+                        - "1.1.1.1:53"
+              ingressRoute:
+                dashboard:
+                  enabled: false
+              tlsStore:
+                default:
+                  defaultGeneratedCert:
+                    resolver: {{ acme_resolver }}
+                    domain:
+                      main: {{ traefik_domain }}
+                      sans:
+                        - "*.{{ traefik_domain }}"
+      register: traefik_acme_config
+
+    # The addon manager redeploys the chart on a poll after the config changes
+    - name: Wait for Traefik to roll out with the new configuration
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system rollout status deployment/traefik --timeout=300s
+      register: traefik_rollout
+      changed_when: false
+      retries: 10
+      delay: 15
+      until: traefik_rollout.rc == 0
+
+    # Issuing over DNS-01 takes a propagation cycle, so this is expected to retry
+    - name: Wait for the wildcard certificate to be issued
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        k3s kubectl -n kube-system exec deploy/traefik --
+        cat /data/acme.json 2>/dev/null | grep -c '"certificate"'
+      args:
+        executable: /bin/bash
+      register: acme_issued
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 20
+      until: acme_issued.stdout | trim | int > 0
+
+    # Reports success, or where to look when no certificate arrived in time
+    - name: Report the certificate state
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Wildcard certificate issued for *.' ~ traefik_domain ~ '; Traefik renews it itself.'
+             if acme_issued.stdout | default('0') | trim | int > 0
+             else 'Traefik is configured but no certificate yet - check `kubectl -n kube-system logs deploy/traefik` for ACME errors.' }}

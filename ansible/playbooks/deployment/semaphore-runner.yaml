@@ -22,10 +22,11 @@
     runner_python_packages:
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
       - hvac==2.4.0
-    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml
+    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the K3s data-disk mount
     runner_collection_pins:
       - community.general:==13.4.0
       - community.hashi_vault:==7.1.0
+      - ansible.posix:==2.2.2
     runner_user: semaphore
     runner_home: /var/lib/semaphore-runner
     runner_config_dir: /etc/semaphore-runner

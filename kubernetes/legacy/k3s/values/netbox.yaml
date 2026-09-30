@@ -1,0 +1,46 @@
+---
+# Values for the upstream netbox chart. Secrets come from ESO, never this file.
+
+superuser:
+  existingSecret: netbox-superuser
+
+existingSecret: netbox-config
+
+# The host is set by argocd/netbox.yaml.j2 from the inventory, so it is not written here
+ingress:
+  enabled: true
+  className: traefik
+
+persistence:
+  enabled: true
+  storageClass: longhorn
+  size: 10Gi
+
+postgresql:
+  enabled: true
+  auth:
+    username: netbox
+    database: netbox
+    existingSecret: netbox-postgresql
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+  primary:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 10Gi
+
+valkey:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: netbox-valkey
+    existingSecretPasswordKey: valkey-password
+  primary:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 1Gi
+  replica:
+    replicaCount: 0

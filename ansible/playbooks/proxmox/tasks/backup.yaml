@@ -1,0 +1,164 @@
+---
+# Adds the TrueNAS NFS share as backup storage and sets the scheduled backup job; both are cluster-wide, so they are set once from the first node
+# Inventory: proxmox_backup with storage_id, nfs_server, nfs_export, and optionally nfs_options (vers=4.2), job_id (nightly), schedule (02:00),
+#   mode (snapshot), compress (zstd), retention (a dict such as {keep-daily: 7, keep-weekly: 4}), vmids (a list; default every guest), exclude (a list), mailto
+# Unset skips this step; the share must already be exported to the Proxmox nodes on TrueNAS
+
+# Nothing to do without backup settings
+- name: Configure backups
+  when: proxmox_backup is defined
+  block:
+    # The values this step works with, with the defaults filled in
+    - name: Work out the backup settings
+      ansible.builtin.set_fact:
+        proxmox_bk: >-
+          {{ {'nfs_options': 'vers=4.2', 'job_id': 'nightly', 'schedule': '02:00', 'mode': 'snapshot', 'compress': 'zstd',
+              'retention': {'keep-daily': 7, 'keep-weekly': 4, 'keep-monthly': 3}, 'vmids': [], 'exclude': [], 'mailto': ''}
+             | combine(proxmox_backup) }}
+      run_once: true
+
+    # The storage and the job both need these
+    - name: Require the NFS share details
+      ansible.builtin.assert:
+        that:
+          - proxmox_bk.storage_id | default('') | length > 0
+          - proxmox_bk.nfs_server | default('') | length > 0
+          - proxmox_bk.nfs_export | default('') | length > 0
+        fail_msg: "proxmox_backup needs storage_id, nfs_server and nfs_export."
+      run_once: true
+
+    # Retention in the key=value form Proxmox uses, sorted so it compares reliably
+    - name: Format the retention setting
+      ansible.builtin.set_fact:
+        proxmox_bk_prune: "{{ proxmox_bk.retention | dictsort | map('join', '=') | sort | join(',') }}"
+      run_once: true
+
+    # Proxmox's storage list, to decide between adding and updating
+    - name: Read the configured storage
+      ansible.builtin.command:
+        argv: [pvesh, get, /storage, --output-format, json]
+      register: proxmox_bk_storage_list
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # The existing entry for this id, or an empty one
+    - name: Find the existing backup storage entry
+      ansible.builtin.set_fact:
+        proxmox_bk_storage: "{{ proxmox_bk_storage_list.stdout | from_json | selectattr('storage', 'equalto', proxmox_bk.storage_id) | first | default({}) }}"
+      run_once: true
+
+    # A name already used for something else is a conflict for a person to resolve
+    - name: Refuse to repoint an existing storage entry
+      ansible.builtin.assert:
+        that:
+          - proxmox_bk_storage == {} or (proxmox_bk_storage.type == 'nfs' and proxmox_bk_storage.server == proxmox_bk.nfs_server
+            and proxmox_bk_storage.export == proxmox_bk.nfs_export)
+        fail_msg: >-
+          Storage {{ proxmox_bk.storage_id }} already exists as {{ proxmox_bk_storage.type | default('?') }} from
+          {{ proxmox_bk_storage.server | default('?') }}:{{ proxmox_bk_storage.export | default('?') }}; change it by hand, or pick another id.
+      run_once: true
+
+    # Backups only, so nobody places VM disks on the share by mistake
+    - name: Add the NFS backup storage
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - nfs
+          - "{{ proxmox_bk.storage_id }}"
+          - --server
+          - "{{ proxmox_bk.nfs_server }}"
+          - --export
+          - "{{ proxmox_bk.nfs_export }}"
+          - --content
+          - backup
+          - --options
+          - "{{ proxmox_bk.nfs_options }}"
+      when: proxmox_bk_storage == {}
+      run_once: true
+
+    # Only the mount options and content can change on an existing entry
+    - name: Update the NFS backup storage
+      ansible.builtin.command:
+        argv: [pvesm, set, "{{ proxmox_bk.storage_id }}", --content, backup, --options, "{{ proxmox_bk.nfs_options }}"]
+      when:
+        - proxmox_bk_storage != {}
+        - proxmox_bk_storage.content | default('') != 'backup' or proxmox_bk_storage.options | default('') != proxmox_bk.nfs_options
+      run_once: true
+
+    # Each node mounts the share itself, so each one is checked; a node that cannot reach TrueNAS would fail its backups
+    - name: Check each node has the share mounted
+      ansible.builtin.command:
+        argv: [pvesm, status, --storage, "{{ proxmox_bk.storage_id }}"]
+      register: proxmox_bk_status
+      changed_when: false
+      failed_when: false
+      retries: 3
+      delay: 5
+      until: proxmox_bk_status.stdout is search('\\sactive\\s')
+      check_mode: false
+
+    # Says which node cannot reach the share, rather than letting its backups fail later
+    - name: Report a node that cannot mount the share
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ ansible_facts.hostname }} cannot mount {{ proxmox_bk.nfs_server }}:{{ proxmox_bk.nfs_export }};
+          check TrueNAS exports it to this node's address.
+      when: proxmox_bk_status.stdout is not search('\\sactive\\s')
+
+    # The scheduled jobs, to decide between creating and updating
+    - name: Read the backup jobs
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/backup, --output-format, json]
+      register: proxmox_bk_jobs
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # The settings the job should have, in the form Proxmox's API takes and reports them
+    - name: Work out the backup job
+      ansible.builtin.set_fact:
+        proxmox_bk_existing: "{{ proxmox_bk_jobs.stdout | from_json | selectattr('id', 'equalto', proxmox_bk.job_id) | first | default({}) }}"
+        proxmox_bk_args: >-
+          {{ ['--schedule', proxmox_bk.schedule, '--storage', proxmox_bk.storage_id, '--mode', proxmox_bk.mode,
+              '--compress', proxmox_bk.compress, '--prune-backups', proxmox_bk_prune, '--enabled', '1']
+             + (['--vmid', proxmox_bk.vmids | join(','), '--all', '0'] if proxmox_bk.vmids | length > 0 else ['--all', '1'])
+             + (['--exclude', proxmox_bk.exclude | join(',')] if proxmox_bk.exclude | length > 0 and proxmox_bk.vmids | length == 0 else [])
+             + (['--mailto', proxmox_bk.mailto, '--mailnotification', 'failure'] if proxmox_bk.mailto | length > 0 else []) }}
+      run_once: true
+
+    # Retention comes back as either a string or a dict depending on the Proxmox release, so both are normalised before comparing
+    - name: Compare the job with what it should be
+      ansible.builtin.set_fact:
+        proxmox_bk_differs: >-
+          {{ proxmox_bk_existing == {}
+             or proxmox_bk_existing.schedule | default('') != proxmox_bk.schedule
+             or proxmox_bk_existing.storage | default('') != proxmox_bk.storage_id
+             or proxmox_bk_existing.mode | default('') != proxmox_bk.mode
+             or proxmox_bk_existing.compress | default('') != proxmox_bk.compress
+             or (proxmox_bk_existing.enabled | default(1) | int) != 1
+             or (existing_prune if existing_prune is string else existing_prune | dictsort | map('join', '=') | join(','))
+                .split(',') | sort | join(',') != proxmox_bk_prune
+             or (proxmox_bk_existing.all | default(0) | int) != (0 if proxmox_bk.vmids | length > 0 else 1)
+             or (proxmox_bk_existing.vmid | default('') | string) != (proxmox_bk.vmids | join(','))
+             or (proxmox_bk_existing.exclude | default('') | string) != (proxmox_bk.exclude | join(',') if proxmox_bk.vmids | length == 0 else '') }}
+      vars:
+        existing_prune: "{{ proxmox_bk_existing['prune-backups'] | default('') }}"
+      run_once: true
+
+    # A new job
+    - name: Create the backup job
+      ansible.builtin.command:
+        argv: "{{ ['pvesh', 'create', '/cluster/backup', '--id', proxmox_bk.job_id] + proxmox_bk_args }}"
+      when: proxmox_bk_existing == {}
+      run_once: true
+
+    # An existing job with different settings
+    - name: Update the backup job
+      ansible.builtin.command:
+        argv: "{{ ['pvesh', 'set', '/cluster/backup/' ~ proxmox_bk.job_id] + proxmox_bk_args }}"
+      when:
+        - proxmox_bk_existing != {}
+        - proxmox_bk_differs | bool
+      run_once: true

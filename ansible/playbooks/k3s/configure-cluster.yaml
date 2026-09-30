@@ -1,0 +1,201 @@
+---
+# Infra stage 1: prepares every node and builds the K3s cluster; safe to re-run
+
+# Node prep runs everywhere: packages, services and the Longhorn data disk
+- name: Prepare K3s nodes
+  hosts: k3s_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    longhorn_mount_path: /var/lib/longhorn
+
+  tasks:
+    # Stop before any change if a node is unreachable, since a partial etcd loses quorum
+    - name: Check the cluster is whole before touching anything
+      ansible.builtin.assert:
+        that:
+          - groups['k3s_nodes'] | default([]) | length >= 1
+          - ansible_play_hosts | length == groups['k3s_nodes'] | length
+        fail_msg: >-
+          Expected {{ groups['k3s_nodes'] | default([]) | length }} nodes,
+          {{ ansible_play_hosts | length }} reachable. Missing:
+          {{ groups['k3s_nodes'] | default([]) | difference(ansible_play_hosts) | join(', ') }}.
+          A two-member etcd loses quorum when either member fails; nothing has
+          been changed.
+      run_once: true
+
+    # An even or single-member etcd survives no failures, so flag it without stopping
+    - name: Warn when the node count cannot form an etcd quorum
+      ansible.builtin.debug:
+        msg: "WARNING: {{ groups['k3s_nodes'] | length }} node(s); etcd needs an odd number >= 3."
+      when: groups['k3s_nodes'] | length < 3
+      run_once: true
+
+    # Longhorn needs iSCSI and NFS tooling, or its volumes fail to attach
+    - name: Install prerequisites
+      ansible.builtin.package:
+        name: [curl, open-iscsi, nfs-common, util-linux, qemu-guest-agent]
+        state: present
+
+    # Proxmox reports the VM's IPs and shuts it down cleanly only with the guest agent running; Terraform sets agent=1 to match
+    - name: Ensure services are running and enabled
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - iscsid
+        - qemu-guest-agent
+
+    # Detected rather than named, since Linux does not enumerate the SCSI disks in a stable order
+    - name: Select the Longhorn data disk
+      ansible.builtin.set_fact:
+        root_disk: "{{ root_dev | basename | regex_replace('p?[0-9]+$', '') }}"
+        longhorn_disk_device: >-
+          /dev/{{ (ansible_devices | dict2items
+                   | rejectattr('key', 'match', '^(sr|loop|fd|dm-|zram)')
+                   | selectattr('value.partitions', 'eq', {})
+                   | map(attribute='key') | list
+                   | difference([root_dev | basename | regex_replace('p?[0-9]+$', '')]))[0] }}
+      vars:
+        root_dev: >-
+          {{ ansible_mounts | selectattr('mount', 'equalto', '/')
+             | map(attribute='device') | first | default('') }}
+
+    # mkfs is destructive, so never let it run against the root disk
+    - name: Confirm the data disk is not the root disk
+      ansible.builtin.assert:
+        that:
+          - longhorn_disk_device | basename != root_disk
+        fail_msg: >-
+          Refusing to format {{ longhorn_disk_device }} on {{ inventory_hostname }}:
+          it holds the root filesystem. Check the second disk is attached.
+
+    # ext4 for Longhorn's data; an existing filesystem is left alone
+    - name: Create a filesystem on the data disk
+      community.general.filesystem:
+        fstype: ext4
+        dev: "{{ longhorn_disk_device }}"
+        # force omitted: a no-op when a filesystem already exists
+
+    # Longhorn stores its replicas here, and the fstab entry keeps it mounted across reboots
+    - name: Mount the Longhorn data disk
+      ansible.posix.mount:
+        path: "{{ longhorn_mount_path }}"
+        src: "{{ longhorn_disk_device }}"
+        fstype: ext4
+        opts: defaults
+        state: mounted
+
+# Only one node may bootstrap etcd, so the first server initialises alone
+- name: Initialise the first K3s server
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    # --cluster-init on this node only, and servicelb off so MetalLB owns the VIP
+    - name: Install K3s and initialise the cluster
+      ansible.builtin.include_tasks: tasks/install-k3s.yaml
+      vars:
+        k3s_exec: server --cluster-init --disable=servicelb
+
+    # Joiners install this exact version, so a release landing mid-run cannot split the cluster
+    - name: Record the version the leader ended up on
+      ansible.builtin.command: k3s --version
+      register: k3s_leader_version_raw
+      changed_when: false
+
+    # Only the version is set here, for joiners to read through hostvars; the token follows below
+    - name: Publish the leader's version and join token
+      ansible.builtin.set_fact:
+        k3s_installed_version: "{{ k3s_leader_version_raw.stdout | regex_search('k3s version (\\S+)', '\\1') | first }}"
+
+    # Joiners need the API up before they can register
+    - name: Wait for the Kubernetes API to accept connections
+      ansible.builtin.wait_for:
+        port: 6443
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        timeout: 300
+        delay: 5
+
+    # Generated at bootstrap, so the cluster is the authority on it, not Vault
+    - name: Read the cluster join token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_node_token_raw
+      no_log: true
+
+    # Decoded and kept as a fact for the joiners, and never logged
+    - name: Publish the join token
+      ansible.builtin.set_fact:
+        k3s_join_token: "{{ k3s_node_token_raw.content | b64decode | trim }}"
+      no_log: true
+
+# The other servers join through the leader's API with its token
+- name: Join the remaining K3s servers
+  hosts: k3s_nodes[1:]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  # Sequentially, so etcd keeps quorum while members are added
+  serial: 1
+
+  vars:
+    k3s_leader: "{{ groups['k3s_nodes'][0] }}"
+
+  tasks:
+    # Same version and servicelb setting as the leader, pointed at its API
+    - name: Install K3s and join the cluster
+      ansible.builtin.include_tasks: tasks/install-k3s.yaml
+      vars:
+        k3s_version: "{{ hostvars[k3s_leader].k3s_installed_version }}"
+        k3s_exec: >-
+          server --server https://{{ hostvars[k3s_leader].ansible_host }}:6443
+          --token {{ hostvars[k3s_leader].k3s_join_token }}
+          --disable=servicelb
+
+# Checks from the leader that every server joined
+- name: Verify the cluster
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    # Wrapped so a timeout reports cluster state instead of bare retry spam
+    - name: Wait for every node to report Ready
+      block:
+        # Retries until every node reports Ready or the retries run out
+        - name: Poll node readiness
+          ansible.builtin.command: k3s kubectl get nodes --no-headers
+          register: k3s_nodes_status
+          changed_when: false
+          retries: 30
+          delay: 10
+          until:
+            - k3s_nodes_status.rc == 0
+            - k3s_nodes_status.stdout_lines | select('search', '\\sReady\\s')
+              | list | length == groups['k3s_nodes'] | length
+      rescue:
+        # Shows the node list and the usual causes instead of a bare timeout
+        - name: Report what the cluster actually looks like
+          ansible.builtin.fail:
+            msg:
+              - "Timed out waiting for {{ groups['k3s_nodes'] | length }} nodes to report Ready."
+              - "{{ k3s_nodes_status.stdout_lines | default(['<no output>']) }}"
+              - >-
+                NotReady is usually the CNI still starting; a node missing
+                entirely never joined - check k3s on it and reachability to
+                {{ inventory_hostname }}:6443.
+
+    # Summary with the version, node list and the next stage to run
+    - name: Report what was built
+      ansible.builtin.debug:
+        msg:
+          - "K3s {{ k3s_installed_version | default('unknown') }}, {{ groups['k3s_nodes'] | length }} servers. Leader {{ inventory_hostname }}."
+          - "{{ k3s_nodes_status.stdout_lines }}"
+          - "kubeconfig: /etc/rancher/k3s/k3s.yaml. Next: configure-longhorn.yaml"

@@ -1,0 +1,169 @@
+---
+# Infra stage 3: MetalLB owns a floating VIP that Traefik serves 443 on
+
+# Runs on the first server; changes go through kubectl and the K3s manifests directory
+- name: Configure MetalLB and Traefik
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    # From the inventory: k3s_traefik_vip and traefik_domain
+    traefik_vip: "{{ k3s_traefik_vip }}"
+    # Unset resolves the latest stable release; set to pin a tag
+    metallb_version: ""
+    k3s_manifest_dir: /var/lib/rancher/k3s/server/manifests
+
+  tasks:
+    # MetalLB answers ARP for this address, so it must be a real IPv4 outside any DHCP range
+    - name: Validate the VIP
+      ansible.builtin.assert:
+        that:
+          - "'k3s_traefik_vip' in hostvars[inventory_hostname]"
+          - traefik_vip is match('^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$')
+        fail_msg: >-
+          k3s_traefik_vip must be a valid IPv4 address set in the inventory.
+          It must sit outside any DHCP range, since MetalLB answers ARP for it.
+
+    # Fails early when K3s is not up on this node
+    - name: Confirm the cluster is reachable
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      changed_when: false
+
+    # Klipper would claim the Service first and the VIP would never be assigned
+    - name: Confirm ServiceLB is disabled
+      ansible.builtin.command: k3s kubectl -n kube-system get daemonset -o name
+      register: k3s_daemonsets
+      changed_when: false
+      failed_when: "'svclb' in k3s_daemonsets.stdout"
+
+    # Releases mix manifest and Helm chart tags, so /latest is unreliable
+    - name: Resolve the latest MetalLB manifest release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/metallb/metallb/releases?per_page=30
+        return_content: true
+      register: metallb_releases
+      retries: 5
+      delay: 3
+      until: metallb_releases is not failed
+      when: not (metallb_version | string | length)
+      delegate_to: localhost
+      become: false
+
+    # A pinned version wins; otherwise the newest non-prerelease manifest tag
+    - name: Select the MetalLB version
+      ansible.builtin.set_fact:
+        metallb_deploy_version: >-
+          {{ metallb_version if (metallb_version | string | length)
+             else (metallb_releases.json
+                   | rejectattr('prerelease')
+                   | map(attribute='tag_name')
+                   | select('match', '^v[0-9]')
+                   | first) }}
+
+    # The native manifest, which needs no Helm
+    - name: Install MetalLB
+      ansible.builtin.command: >-
+        k3s kubectl apply -f
+        https://raw.githubusercontent.com/metallb/metallb/{{ metallb_deploy_version }}/config/manifests/metallb-native.yaml
+      register: metallb_apply
+      changed_when: "'created' in metallb_apply.stdout"
+
+    # The webhook rejects IPAddressPool until it is serving
+    - name: Wait for the MetalLB controller
+      ansible.builtin.command: >-
+        k3s kubectl -n metallb-system wait deployment/controller
+        --for=condition=Available --timeout=300s
+      changed_when: false
+
+    # A /32 pool, so no neighbouring address can be handed to another Service
+    - name: Configure the VIP pool and L2 advertisement
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/metallb-vip.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: traefik-vip
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ traefik_vip }}/32
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: traefik-vip
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - traefik-vip
+
+    # Retried because the webhook can lag behind the controller becoming Available
+    - name: Apply the VIP pool
+      ansible.builtin.command: k3s kubectl apply -f {{ k3s_manifest_dir }}/metallb-vip.yaml
+      register: metallb_pool_apply
+      changed_when: "'created' in metallb_pool_apply.stdout or 'configured' in metallb_pool_apply.stdout"
+      retries: 5
+      delay: 5
+      until: metallb_pool_apply.rc == 0
+
+    # Only one HelmChartConfig per chart is honoured, so overwriting the TLS stage's superset would strip ACME and fall back to a self-signed cert
+    - name: Check whether the ACME resolver is already configured
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system get helmchartconfig traefik
+        -o jsonpath={.spec.valuesContent}
+      register: traefik_existing_config
+      changed_when: false
+      failed_when: false
+
+    # K3s rewrites its own traefik.yaml on restart, so customise via HelmChartConfig
+    - name: Pin Traefik to the VIP
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/traefik-config.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: traefik
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              service:
+                spec:
+                  loadBalancerIP: {{ traefik_vip }}
+                annotations:
+                  metallb.io/address-pool: traefik-vip
+              ports:
+                websecure:
+                  exposedPort: 443
+      when: "'certificatesResolvers' not in traefik_existing_config.stdout"
+
+    # The addon manager reconciles on a poll, so wait for the assignment
+    - name: Wait for Traefik to take the VIP
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system get svc traefik
+        -o jsonpath={.status.loadBalancer.ingress[0].ip}
+      register: traefik_vip_actual
+      changed_when: false
+      retries: 30
+      delay: 10
+      until: traefik_vip_actual.stdout | trim == traefik_vip
+
+    # Proves the VIP answers end to end, not just that it was assigned
+    - name: Confirm Traefik is serving 443 on the VIP
+      ansible.builtin.wait_for:
+        host: "{{ traefik_vip }}"
+        port: 443
+        timeout: 120
+
+    # Summary of what was configured and the next stage to run
+    - name: Report what was configured
+      ansible.builtin.debug:
+        msg:
+          - "MetalLB {{ metallb_deploy_version }}; Traefik on {{ traefik_vip }}:443."
+          - "Services publish as <name>.{{ traefik_domain }} via the wildcard record."
+          - "Next: configure-traefik-tls.yaml"

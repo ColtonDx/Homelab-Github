@@ -1,0 +1,154 @@
+---
+# Service: Rancher, published at rancher.<traefik_domain>; safe to re-run
+# Installed via the K3s HelmChart CRD, so no helm binary is needed on the node
+
+# Runs from the first server and relies on Traefik's wildcard for TLS
+- name: Deploy Rancher
+  hosts: k3s_nodes[0]
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    rancher_namespace: cattle-system
+    rancher_host: "rancher.{{ traefik_domain }}"
+    # latest, not stable: stable caps kubeVersion below 1.36 and so excludes current K3s; check the chart's kubeVersion before changing this
+    rancher_repo: https://releases.rancher.com/server-charts/latest
+    # Unset takes the newest chart in the repo; set to pin a version
+    rancher_chart_version: ""
+    # One replica per node, up to 3
+    rancher_replicas: "{{ [groups['k3s_nodes'] | length, 3] | min }}"
+    k3s_manifest_dir: /var/lib/rancher/k3s/server/manifests
+
+  tasks:
+    # The Rancher hostname is built from it
+    - name: Validate the ingress domain
+      ansible.builtin.assert:
+        that:
+          - "'traefik_domain' in hostvars[inventory_hostname]"
+          - traefik_domain | string | length > 0
+        fail_msg: "traefik_domain must be set in the inventory."
+
+    # Fails early when K3s is not up on this node
+    - name: Confirm the cluster is reachable
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      changed_when: false
+
+    # Created up front; an existing namespace is the re-run case, not an error
+    - name: Create the Rancher namespace
+      ansible.builtin.command: k3s kubectl create namespace {{ rancher_namespace }}
+      register: rancher_ns
+      changed_when: rancher_ns.rc == 0
+      failed_when:
+        - rancher_ns.rc != 0
+        - "'AlreadyExists' not in rancher_ns.stderr"
+
+    # tls.source=secret stops Rancher managing its own certificate, so no cert-manager is needed; Traefik's wildcard terminates TLS
+    - name: Define the Rancher chart
+      ansible.builtin.copy:
+        dest: "{{ k3s_manifest_dir }}/rancher.yaml"
+        mode: "0600"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChart
+          metadata:
+            name: rancher
+            namespace: kube-system
+          spec:
+            chart: rancher
+            repo: {{ rancher_repo }}
+            version: "{{ rancher_chart_version }}"
+            targetNamespace: {{ rancher_namespace }}
+            createNamespace: true
+            valuesContent: |-
+              hostname: {{ rancher_host }}
+              replicas: {{ rancher_replicas }}
+              ingress:
+                enabled: true
+                ingressClassName: traefik
+                extraAnnotations:
+                  traefik.ingress.kubernetes.io/router.entrypoints: websecure
+                  traefik.ingress.kubernetes.io/router.tls: "true"
+                tls:
+                  source: secret
+              # Rancher generates a bootstrap password when this is unset;
+              # it is read back below.
+              bootstrapPassword: ""
+
+    # Applied now rather than waiting on the addon manager's poll
+    - name: Apply the Rancher chart
+      ansible.builtin.command: k3s kubectl apply -f {{ k3s_manifest_dir }}/rancher.yaml
+      register: rancher_apply
+      changed_when: "'created' in rancher_apply.stdout or 'configured' in rancher_apply.stdout"
+
+    # The helm-controller installs via a Job; check it rather than wait on a Deployment a failed install never creates
+    - name: Wait for the helm install job to finish
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system get job helm-install-rancher
+        -o jsonpath={.status.succeeded}
+      register: rancher_job
+      changed_when: false
+      failed_when: false
+      retries: 20
+      delay: 15
+      until: rancher_job.stdout | trim == "1"
+
+    # Only runs when the Job did not succeed, to surface helm's own error
+    - name: Report the helm install failure
+      block:
+        # The tail of the Job log carries helm's error
+        - name: Read the helm install log
+          ansible.builtin.command: >-
+            k3s kubectl -n kube-system logs job/helm-install-rancher --tail=20
+          register: rancher_job_log
+          changed_when: false
+          failed_when: false
+
+        # Stops the run with that log attached
+        - name: Fail with the helm error
+          ansible.builtin.fail:
+            msg:
+              - "The Rancher helm install job did not succeed."
+              - "{{ rancher_job_log.stdout_lines | default(['<no log>']) }}"
+      when: rancher_job.stdout | trim != "1"
+
+    # The Job can finish before the Deployment object exists, so wait for it first
+    - name: Wait for the Rancher deployment to appear
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ rancher_namespace }} get deployment rancher
+      register: rancher_deploy_exists
+      changed_when: false
+      failed_when: false
+      retries: 10
+      delay: 15
+      until: rancher_deploy_exists.rc == 0
+
+    # Rancher is slow to start, so the rollout wait is retried
+    - name: Wait for Rancher to become available
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ rancher_namespace }} rollout status deployment/rancher --timeout=120s
+      register: rancher_rollout
+      changed_when: false
+      retries: 10
+      delay: 20
+      until: rancher_rollout.rc == 0
+
+    # Absent once the password has been set, so this must not fail
+    - name: Read the bootstrap password
+      ansible.builtin.command: >-
+        k3s kubectl -n {{ rancher_namespace }} get secret bootstrap-secret
+        -o jsonpath={.data.bootstrapPassword}
+      register: rancher_bootstrap
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    # The UI address, replica count and bootstrap password while it still exists
+    - name: Report what was deployed
+      ansible.builtin.debug:
+        msg:
+          - "Rancher UI: https://{{ rancher_host }} ({{ rancher_replicas }} replica(s))"
+          - >-
+            {{ 'Bootstrap password: ' ~ (rancher_bootstrap.stdout | b64decode)
+               if rancher_bootstrap.stdout | default('') | length > 0
+               else 'Bootstrap secret not found - it is consumed once the password is set.' }}
