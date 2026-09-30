@@ -1,0 +1,114 @@
+---
+# Updates one node for update-proxmox.yaml: checks quorum, skips a node with nothing to install, empties it when it will reboot, upgrades, reboots, and restarts the guests that stayed
+
+# Proxmox knows the node by its hostname
+- name: Record the node's name
+  ansible.builtin.set_fact:
+    proxmox_node: "{{ ansible_facts.hostname }}"
+    proxmox_stayed: []
+
+# Exits non-zero on a standalone node, which has no quorum to lose
+- name: Read the cluster status
+  ansible.builtin.command:
+    argv: [pvecm, status]
+  register: proxmox_pre
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Taking a node down in a degraded cluster could cost it quorum
+- name: Require quorum before starting
+  ansible.builtin.assert:
+    that:
+      - proxmox_pre.rc != 0 or proxmox_pre.stdout is search('Quorate:\\s+Yes')
+    fail_msg: "The cluster is not quorate; updating {{ proxmox_node }} now could take it down. Fix the cluster first."
+
+# Fresh package lists, so the check below is accurate
+- name: Refresh the package lists
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false
+
+# Nothing to install means nothing to move, unless a reboot was asked for regardless
+- name: List the pending updates
+  ansible.builtin.command:
+    argv: [apt-get, --simulate, --quiet, dist-upgrade]
+  register: proxmox_pending
+  changed_when: false
+  check_mode: false
+
+# The count comes from apt's own simulation
+- name: Decide what this node needs
+  ansible.builtin.set_fact:
+    proxmox_has_updates: "{{ proxmox_pending.stdout_lines | select('match', '^Inst ') | list | length > 0 }}"
+    proxmox_will_reboot: >-
+      {{ (proxmox_reboot | default(false) | bool)
+         and ((proxmox_pending.stdout_lines | select('match', '^Inst ') | list | length > 0) or (proxmox_reboot_always | default(false) | bool)) }}
+
+# Says so rather than silently doing nothing
+- name: Report a node with nothing to do
+  ansible.builtin.debug:
+    msg: "{{ proxmox_node }} is up to date{{ ' and no reboot was asked for' if not proxmox_reboot_always | default(false) | bool else '' }}; skipped."
+  when:
+    - not (proxmox_has_updates | bool)
+    - not (proxmox_will_reboot | bool)
+
+# Guests only need to move when the node is about to go down
+- name: Empty the node before its reboot
+  ansible.builtin.include_tasks: evacuate.yaml
+  when: proxmox_will_reboot | bool
+
+# Proxmox needs a full upgrade, since new releases replace and add packages
+- name: Upgrade the packages
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: false
+  when: proxmox_has_updates | bool
+
+# The node is empty by now, apart from the guests that stayed and were shut down
+- name: Reboot the node
+  when: proxmox_will_reboot | bool
+  block:
+    # Long timeout, since shutting down can take a while
+    - name: Reboot
+      ansible.builtin.reboot:
+        reboot_timeout: 1800
+
+    # The next node only starts once this one has rejoined and the cluster is quorate again
+    - name: Wait for the cluster to be whole again
+      ansible.builtin.command:
+        argv: [pvecm, status]
+      register: proxmox_post
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 10
+      until: proxmox_post.rc != 0 or proxmox_post.stdout is search('Quorate:\\s+Yes')
+
+    # Only the guests that were running before, and only if their start-on-boot has not already started them
+    - name: Read the status of the guests that stayed
+      ansible.builtin.command:
+        argv: [pvesh, get, "/nodes/{{ proxmox_node }}/{{ item.type }}/{{ item.vmid }}/status/current", --output-format, json]
+      loop: "{{ proxmox_stayed }}"
+      loop_control:
+        label: "{{ item.name | default(item.vmid) }}"
+      register: proxmox_stayed_status
+      changed_when: false
+      check_mode: false
+
+    # Brings back what was shut down for the reboot
+    - name: Start the guests that stayed
+      ansible.builtin.command:
+        argv: ["{{ 'qm' if item.item.type == 'qemu' else 'pct' }}", start, "{{ item.item.vmid }}"]
+      loop: "{{ proxmox_stayed_status.results }}"
+      loop_control:
+        label: "{{ item.item.name | default(item.item.vmid) }}"
+      when: (item.stdout | from_json).status != 'running'
+
+# What happened on this node
+- name: Report the node
+  ansible.builtin.debug:
+    msg: >-
+      {{ proxmox_node }}: {{ 'packages upgraded' if proxmox_has_updates | bool else 'no updates' }}{{
+      ', emptied and rebooted' if proxmox_will_reboot | bool else '' }}{{
+      ', restarted ' ~ (proxmox_stayed | map(attribute='name') | join(', ')) if proxmox_stayed | length > 0 else '' }}.

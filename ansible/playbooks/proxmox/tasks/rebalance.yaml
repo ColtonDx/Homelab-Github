@@ -1,0 +1,87 @@
+---
+# Moves every guest update_node.yaml migrated back to the node it started on, once all nodes are done; run once for the cluster
+# A guest already back where it started, or whose original node is offline, is left alone
+
+# What the updates moved, recorded on localhost as they went
+- name: Read the moves to undo
+  ansible.builtin.set_fact:
+    proxmox_to_return: "{{ hostvars['localhost'].proxmox_moved | default([]) }}"
+  run_once: true
+
+# Nothing moved means nothing to do
+- name: Return the guests
+  when: proxmox_to_return | length > 0
+  run_once: true
+  block:
+    # Where each guest is now, and which nodes are online
+    - name: Read where the guests are now
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --output-format, json]
+      register: proxmox_now
+      changed_when: false
+      check_mode: false
+
+    # Start empty
+    - name: Reset the return plan
+      ansible.builtin.set_fact:
+        proxmox_return_plan: []
+
+    # A move runs on the node holding the guest, so each guest's current node is mapped back to its inventory host
+    - name: Work out where each guest is and which inventory host holds it
+      ansible.builtin.set_fact:
+        proxmox_return_plan: >-
+          {{ proxmox_return_plan + [item | combine({'current': current, 'host': proxmox_hostmap[current] | default(''),
+             'home_online': resources | selectattr('type', 'equalto', 'node') | selectattr('node', 'equalto', item['from'])
+                            | selectattr('status', 'equalto', 'online') | list | length > 0})] }}
+      loop: "{{ proxmox_to_return }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        resources: "{{ proxmox_now.stdout | from_json }}"
+        current: "{{ resources | selectattr('vmid', 'defined') | selectattr('vmid', 'equalto', item.vmid) | map(attribute='node') | first | default('') }}"
+        proxmox_hostmap: "{{ dict(ansible_play_hosts_all | map('extract', hostvars, ['ansible_facts', 'hostname']) | zip(ansible_play_hosts_all)) }}"
+
+    # HA guests go back through HA
+    - name: Move HA-managed guests back
+      ansible.builtin.command:
+        argv: [ha-manager, migrate, "{{ ('vm:' if item.type == 'qemu' else 'ct:') ~ item.vmid }}", "{{ item['from'] }}"]
+      loop: "{{ proxmox_return_plan | selectattr('ha') | rejectattr('current', 'equalto', '') | list }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item['from'] }}"
+      when:
+        - item.current != item['from']
+        - item.home_online | bool
+
+    # Live, with local disks, from the node holding each VM
+    - name: Move VMs back
+      ansible.builtin.command:
+        argv: [qm, migrate, "{{ item.vmid }}", "{{ item['from'] }}", --online, --with-local-disks]
+      loop: "{{ proxmox_return_plan | rejectattr('ha') | selectattr('type', 'equalto', 'qemu') | rejectattr('host', 'equalto', '') | list }}"
+      loop_control:
+        label: "{{ item.name }}: {{ item.current }} -> {{ item['from'] }}"
+      delegate_to: "{{ item.host }}"
+      when:
+        - item.current != item['from']
+        - item.host | length > 0
+        - item.home_online | bool
+
+    # Containers restart once more to go home
+    - name: Move containers back
+      ansible.builtin.command:
+        argv: [pct, migrate, "{{ item.vmid }}", "{{ item['from'] }}", --restart, --timeout, "{{ proxmox_shutdown_timeout | default(300) }}"]
+      loop: "{{ proxmox_return_plan | rejectattr('ha') | selectattr('type', 'equalto', 'lxc') | rejectattr('host', 'equalto', '') | list }}"
+      loop_control:
+        label: "{{ item.name }}: {{ item.current }} -> {{ item['from'] }}"
+      delegate_to: "{{ item.host }}"
+      when:
+        - item.current != item['from']
+        - item.host | length > 0
+        - item.home_online | bool
+
+    # Anything that could not go home is named, so it can be moved by hand
+    - name: Report guests left where they are
+      ansible.builtin.debug:
+        msg: >-
+          Left in place: {{ proxmox_return_plan | rejectattr('home_online') | map(attribute='name') | join(', ') or 'none' }}
+          (their original node is offline); not found: {{ proxmox_return_plan | selectattr('current', 'equalto', '') | map(attribute='name') | join(', ') or 'none' }};
+          on a node outside this run's hosts: {{ proxmox_return_plan | rejectattr('ha') | rejectattr('current', 'equalto', '') | selectattr('host', 'equalto', '') | map(attribute='name') | join(', ') or 'none' }}.

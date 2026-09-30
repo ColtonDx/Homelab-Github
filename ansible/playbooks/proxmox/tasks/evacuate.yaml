@@ -1,0 +1,110 @@
+---
+# Empties one node before its reboot, for update_node.yaml: moves the running guests that can move, and shuts down the ones that should stay
+# A guest stays when it has a tag in proxmox_stay_tags (default talos, k3s) or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
+
+# Running VMs on this node
+- name: List the node's VMs
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ proxmox_node }}/qemu", --output-format, json]
+  register: proxmox_vms
+  changed_when: false
+  check_mode: false
+
+# Running containers on this node
+- name: List the node's containers
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ proxmox_node }}/lxc", --output-format, json]
+  register: proxmox_cts
+  changed_when: false
+  check_mode: false
+
+# HA-managed guests are moved by ha-manager, since HA would otherwise move them back
+- name: List the HA-managed guests
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/ha/resources, --output-format, json]
+  register: proxmox_ha
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Every running guest, with its type, so the tasks below treat VMs and containers alike
+- name: Gather the running guests
+  ansible.builtin.set_fact:
+    proxmox_running: >-
+      {{ (proxmox_vms.stdout | from_json | selectattr('status', 'equalto', 'running') | rejectattr('template', 'defined') | map('combine', {'type': 'qemu'}) | list)
+         + (proxmox_vms.stdout | from_json | selectattr('status', 'equalto', 'running') | selectattr('template', 'defined') | rejectattr('template', 'in', [1, '1']) | map('combine', {'type': 'qemu'}) | list)
+         + (proxmox_cts.stdout | from_json | selectattr('status', 'equalto', 'running') | map('combine', {'type': 'lxc'}) | list) }}
+    proxmox_ha_sids: "{{ (proxmox_ha.stdout | default('[]', true) | from_json) | map(attribute='sid') | list if proxmox_ha.rc == 0 else [] }}"
+
+# Passthrough devices tie a VM to this host, so their configs are read to find them
+- name: Read the running VMs' configs
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ proxmox_node }}/qemu/{{ item.vmid }}/config", --output-format, json]
+  loop: "{{ proxmox_running | selectattr('type', 'equalto', 'qemu') | list }}"
+  loop_control:
+    label: "{{ item.name | default(item.vmid) }}"
+  register: proxmox_vm_configs
+  changed_when: false
+  check_mode: false
+
+# Split into what moves and what stays; tags come as a semicolon-separated list
+- name: Decide which guests move and which stay
+  ansible.builtin.set_fact:
+    proxmox_pinned_ids: >-
+      {{ proxmox_vm_configs.results | selectattr('stdout', 'defined')
+         | selectattr('stdout', 'search', '"(hostpci|usb)[0-9]+"') | map(attribute='item.vmid') | list }}
+    proxmox_stay_tag_ids: >-
+      {{ proxmox_running | selectattr('tags', 'defined')
+         | selectattr('tags', 'search', '(^|;)(' ~ (proxmox_stay_tags | default(['talos', 'k3s']) | join('|')) ~ ')(;|$)')
+         | map(attribute='vmid') | list }}
+
+# The two lists, with the reason each stays
+- name: List the guests to move and to stay
+  ansible.builtin.set_fact:
+    proxmox_movers: "{{ proxmox_running | rejectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids) | list }}"
+    proxmox_stayed: "{{ proxmox_running | selectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids) | list }}"
+
+# The other online nodes' free memory, to be sure everything fits before anything moves
+- name: Read the other nodes' free memory
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/resources, --type, node, --output-format, json]
+  register: proxmox_nodes_now
+  changed_when: false
+  check_mode: false
+
+# Stopping here is better than leaving guests half-moved when memory runs out part way
+- name: Require room on the other nodes
+  ansible.builtin.assert:
+    that:
+      - proxmox_need <= proxmox_free
+    fail_msg: >-
+      Moving {{ proxmox_movers | length }} guest(s) off {{ proxmox_node }} needs {{ (proxmox_need / 1073741824) | round(1) }} GiB,
+      but the other online nodes have {{ (proxmox_free / 1073741824) | round(1) }} GiB free. Stop or move some guests first.
+  vars:
+    proxmox_others: "{{ proxmox_nodes_now.stdout | from_json | selectattr('status', 'equalto', 'online') | rejectattr('node', 'equalto', proxmox_node) | list }}"
+    proxmox_need: "{{ proxmox_movers | map(attribute='maxmem') | map('int') | sum }}"
+    proxmox_free: "{{ (proxmox_others | map(attribute='maxmem') | map('int') | sum) - (proxmox_others | map(attribute='mem') | map('int') | sum) }}"
+  when: proxmox_movers | length > 0
+
+# Names only, so the run log shows the plan before anything moves
+- name: Report the plan for this node
+  ansible.builtin.debug:
+    msg: >-
+      {{ proxmox_node }}: moving {{ proxmox_movers | map(attribute='name') | join(', ') or 'nothing' }};
+      shutting down for the reboot {{ proxmox_stayed | map(attribute='name') | join(', ') or 'nothing' }}.
+
+# One guest at a time, each to whichever node has the most free memory at that moment
+- name: Move each guest
+  ansible.builtin.include_tasks: migrate_guest.yaml
+  loop: "{{ proxmox_movers }}"
+  loop_control:
+    loop_var: proxmox_guest
+    label: "{{ proxmox_guest.name | default(proxmox_guest.vmid) }}"
+
+# A clean shutdown, so the guest's own services stop properly; it is started again after the reboot
+- name: Shut down the guests that stay
+  ansible.builtin.command:
+    argv: ["{{ 'qm' if item.type == 'qemu' else 'pct' }}", shutdown, "{{ item.vmid }}", --timeout, "{{ proxmox_shutdown_timeout | default(300) }}"]
+  loop: "{{ proxmox_stayed }}"
+  loop_control:
+    label: "{{ item.name | default(item.vmid) }}"

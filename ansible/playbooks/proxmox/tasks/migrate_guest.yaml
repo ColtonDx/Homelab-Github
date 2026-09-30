@@ -1,0 +1,85 @@
+---
+# Moves one guest off the node being updated, for evacuate.yaml, and records where it came from so rebalance.yaml can move it back
+
+# Free memory changes after every move, so it is read again for each guest
+- name: Read the nodes' free memory
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/resources, --type, node, --output-format, json]
+  register: proxmox_nodes_mem
+  changed_when: false
+  check_mode: false
+
+# Start empty for each guest
+- name: Reset the candidate nodes
+  ansible.builtin.set_fact:
+    proxmox_candidates: []
+
+# Every other online node with its free memory
+- name: Work out each node's free memory
+  ansible.builtin.set_fact:
+    proxmox_candidates: "{{ proxmox_candidates + [{'node': item.node, 'free': (item.maxmem | int) - (item.mem | int)}] }}"
+  loop: "{{ proxmox_nodes_mem.stdout | from_json | selectattr('status', 'equalto', 'online') | rejectattr('node', 'equalto', proxmox_node) | list }}"
+  loop_control:
+    label: "{{ item.node }}"
+
+# The node with the most free memory that still fits the guest
+- name: Pick the target node
+  ansible.builtin.set_fact:
+    proxmox_target: >-
+      {{ (proxmox_candidates | selectattr('free', 'ge', proxmox_guest.maxmem | int) | sort(attribute='free', reverse=true)
+          | map(attribute='node') | list + [''])[0] }}
+
+# Nowhere to go means stopping, rather than rebooting with the guest still running
+- name: Require a node with room for the guest
+  ansible.builtin.assert:
+    that:
+      - proxmox_target | length > 0
+    fail_msg: "No online node has room for {{ proxmox_guest.name | default(proxmox_guest.vmid) }} ({{ ((proxmox_guest.maxmem | int) / 1073741824) | round(1) }} GiB)."
+
+# HA-managed guests are moved by HA itself, so HA does not fight the move
+- name: Move an HA-managed guest
+  when: (('vm:' if proxmox_guest.type == 'qemu' else 'ct:') ~ proxmox_guest.vmid) in proxmox_ha_sids
+  block:
+    # Queues the move; for a VM it is a live migration
+    - name: Ask HA to move the guest
+      ansible.builtin.command:
+        argv: [ha-manager, migrate, "{{ ('vm:' if proxmox_guest.type == 'qemu' else 'ct:') ~ proxmox_guest.vmid }}", "{{ proxmox_target }}"]
+
+    # HA moves it in the background, so wait until the guest is reported on the target
+    - name: Wait for HA to finish the move
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      register: proxmox_ha_move
+      changed_when: false
+      retries: 60
+      delay: 10
+      until: >-
+        (proxmox_ha_move.stdout | from_json | selectattr('vmid', 'equalto', proxmox_guest.vmid | int) | map(attribute='node') | first | default(''))
+        == proxmox_target
+
+# A VM moves live, taking its local disks with it, so it keeps running throughout
+- name: Live-migrate the VM
+  ansible.builtin.command:
+    argv: [qm, migrate, "{{ proxmox_guest.vmid }}", "{{ proxmox_target }}", --online, --with-local-disks]
+  when:
+    - proxmox_guest.type == 'qemu'
+    - ('vm:' ~ proxmox_guest.vmid) not in proxmox_ha_sids
+
+# Containers cannot move live, so this stops the container, moves it, and starts it on the target
+- name: Restart-migrate the container
+  ansible.builtin.command:
+    argv: [pct, migrate, "{{ proxmox_guest.vmid }}", "{{ proxmox_target }}", --restart, --timeout, "{{ proxmox_shutdown_timeout | default(300) }}"]
+  when:
+    - proxmox_guest.type == 'lxc'
+    - ('ct:' ~ proxmox_guest.vmid) not in proxmox_ha_sids
+
+# Kept on localhost, so it survives the move to the next node and rebalance.yaml can read it
+- name: Record where the guest came from
+  ansible.builtin.set_fact:
+    proxmox_moved: >-
+      {{ hostvars['localhost'].proxmox_moved | default([])
+         + [{'vmid': proxmox_guest.vmid | int, 'type': proxmox_guest.type, 'name': proxmox_guest.name | default(proxmox_guest.vmid | string),
+             'from': proxmox_node, 'to': proxmox_target,
+             'ha': (('vm:' if proxmox_guest.type == 'qemu' else 'ct:') ~ proxmox_guest.vmid) in proxmox_ha_sids}] }}
+  delegate_to: localhost
+  delegate_facts: true

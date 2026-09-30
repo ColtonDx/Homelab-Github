@@ -1,0 +1,30 @@
+---
+# Updates the Proxmox nodes one at a time; with -e proxmox_reboot=true each node is emptied first, rebooted, and its guests moved back once every node is done
+# Emptying: running VMs live-migrate to the node with most free memory, containers restart-migrate, HA guests move through ha-manager, and guests that should stay are shut down and started again
+# Stay in place: guests tagged with one of proxmox_stay_tags (default talos, k3s: cluster nodes kept one per host) or using PCI or USB passthrough
+# Optional: proxmox_reboot_always=true reboots even without updates, proxmox_rebalance=false leaves migrated guests where they went, target_hosts (default proxmox) to update some nodes
+
+# One node at a time, so the cluster never loses more than one member and guests always have somewhere to go
+- name: Update the Proxmox nodes
+  hosts: "{{ target_hosts | default('proxmox') }}"
+  become: true
+  gather_facts: true
+  serial: 1
+
+  tasks:
+    # Quorum check, upgrade check, evacuation, upgrade, reboot and restart of the guests that stayed
+    - name: Update this node
+      ansible.builtin.include_tasks: tasks/update_node.yaml
+
+# Once every node is done, guests go back to the node they started on; this covers the whole group, since guests may have moved to nodes outside target_hosts
+- name: Move migrated guests back
+  hosts: "{{ proxmox_group | default('proxmox') }}"
+  become: true
+  gather_facts: true
+  gather_subset: [min]
+
+  tasks:
+    # Run once for the whole cluster, from whichever node currently holds each guest
+    - name: Rebalance the guests
+      ansible.builtin.include_tasks: tasks/rebalance.yaml
+      when: proxmox_rebalance | default(true) | bool
