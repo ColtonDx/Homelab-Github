@@ -140,6 +140,5 @@
     - name: Add the GitLab monitor
       ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
       vars:
-        kuma_monitor_name: GitLab
-        kuma_monitor_url: "https://{{ gitlab_domain }}"
-        kuma_monitor_group: Core
+        kuma_monitors:
+          - { name: GitLab, url: "https://{{ gitlab_domain }}", group: Core }

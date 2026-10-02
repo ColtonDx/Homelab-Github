@@ -182,5 +182,5 @@
     - name: Add the Kasm monitor
       ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
       vars:
-        kuma_monitor_name: Kasm
-        kuma_monitor_url: "https://{{ kasm_domain }}"
+        kuma_monitors:
+          - { name: Kasm, url: "https://{{ kasm_domain }}" }

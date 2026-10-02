@@ -222,8 +222,9 @@
     - name: Add the Vault monitor
       ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
       vars:
-        kuma_monitor_name: HashiCorp Vault
-        kuma_monitor_url: "https://{{ vault_domain }}/v1/sys/health"
-        kuma_monitor_group: Core
-        kuma_monitor_accepted_codes: ["200-299", "429"]
+        kuma_monitors:
+          - name: HashiCorp Vault
+            url: "https://{{ vault_domain }}/v1/sys/health"
+            group: Core
+            accepted_codes: ["200-299", "429"]
       when: vault_ready | default(false) | bool

@@ -1,10 +1,12 @@
 ---
-# Adds or updates an Uptime Kuma HTTP monitor; called at the end of install and deploy playbooks so every service they set up is watched
-# Needs: kuma_monitor_name, kuma_monitor_url; optional kuma_monitor_group (default Applications, empty for none), kuma_monitor_interval (60), kuma_monitor_accepted_codes (['200-299']), kuma_monitor_ignore_tls (false)
-# Connection: uptime_kuma_url in the inventory or UPTIME_KUMA_URL in the environment; when neither is set the monitor is skipped, so Kuma stays optional
+# Adds or updates Uptime Kuma monitors; called by install and deploy playbooks, and by uptime-kuma/seed-monitors.yaml for every inventory host with kuma_monitor
+# Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
+# http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
+# Every type: optional group (default kuma_monitor_group, else Applications; empty for none) and interval (default 60 seconds)
+# Connection: uptime_kuma_url in the inventory or UPTIME_KUMA_URL in the environment; when neither is set the monitors are skipped, so Kuma stays optional
 # Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); needs VAULT_ADDR and VAULT_TOKEN unless the calling play already set vault_addr and vault_token
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
-# Every Kuma call runs from the controller, so this works from plays on any host; needs the lucasheld.uptime_kuma collection with the uptime-kuma-api2 package (Kuma 1.21.3 to 2.5.0) in place of its unmaintained uptime-kuma-api
+# Every Kuma call runs from the controller, so this works from plays on any host; needs the lucasheld.uptime_kuma collection with the uptime-kuma-api2 package
 
 # The inventory wins over the environment, the same as the other service URLs
 - name: Find the Uptime Kuma address
@@ -12,22 +14,40 @@
     kuma_api_url: "{{ (uptime_kuma_url | default(lookup('ansible.builtin.env', 'UPTIME_KUMA_URL'), true) | default('', true)) | regex_replace('/+$', '') }}"
 
 # Says why nothing happened rather than failing, since Kuma is optional
-- name: Skip the monitor when Uptime Kuma is not configured
+- name: Skip the monitors when Uptime Kuma is not configured
   ansible.builtin.debug:
-    msg: "No uptime_kuma_url or UPTIME_KUMA_URL is set, so no Uptime Kuma monitor was added for {{ kuma_monitor_name | default('this service') }}."
+    msg: "No uptime_kuma_url or UPTIME_KUMA_URL is set, so these monitors were not added: {{ kuma_monitors | default([]) | map(attribute='name', default='(no name)') | join(', ') }}"
   when: kuma_api_url | length == 0
 
 # Everything below needs Kuma
-- name: Add the Uptime Kuma monitor
+- name: Add the Uptime Kuma monitors
   when: kuma_api_url | length > 0
   block:
-    # A missing name or URL is a bug in the calling playbook
-    - name: Validate the monitor inputs
+    # Catches a malformed entry before logging in, naming the entry
+    - name: Validate the monitors
       ansible.builtin.assert:
         that:
-          - kuma_monitor_name | default('') | length > 0
-          - kuma_monitor_url | default('') is match('^https?://')
-        fail_msg: "kuma_monitor_name and an http(s) kuma_monitor_url must be set by the calling playbook."
+          - item.name | default('') | length > 0
+          - kuma_type in ['http', 'ping', 'port', 'dns']
+          - kuma_type != 'http' or (item.url | default('') is match('^https?://'))
+          - kuma_type == 'http' or (item.hostname | default('') | length > 0)
+          - kuma_type != 'port' or (item.port | default('') | string | length > 0)
+          - kuma_type != 'dns' or (item.dns_resolve_server | default('') | length > 0)
+        fail_msg: "Monitor {{ item.name | default('(no name)') }}: needs a name and a type of http (with an http(s) url), ping (hostname), port (hostname and port) or dns (hostname and dns_resolve_server)."
+        quiet: true
+      loop: "{{ kuma_monitors }}"
+      loop_control:
+        label: "{{ item.name | default('(no name)') }}"
+      vars:
+        kuma_type: "{{ item.type | default('http') }}"
+
+    # Two entries with one name would overwrite each other in Kuma
+    - name: Require unique monitor names
+      ansible.builtin.assert:
+        that:
+          - kuma_monitors | map(attribute='name') | unique | length == kuma_monitors | length
+        fail_msg: "Monitor names must be unique; repeated: {{ kuma_monitors | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ') }}"
+        quiet: true
 
     # Plays that never read Vault themselves still need the connection details for var_lookup.yaml
     - name: Read the Vault connection settings
@@ -69,37 +89,47 @@
         fail_msg: "Uptime Kuma login at {{ kuma_api_url }} failed. Check the runner can reach it, KUMA_USERNAME and KUMA_PASSWORD at {{ vault_uptime_kuma_path | default('uptime-kuma') }}, that 2FA is off for that user, and that the runner has uptime-kuma-api2 (the old uptime-kuma-api is 1.x only)."
         quiet: true
 
-    # Groups keep the dashboard sorted; created the first time a monitor uses one
-    - name: Ensure the monitor group exists
+    # Groups keep the dashboard sorted; each is created the first time a monitor uses it
+    - name: Ensure the monitor groups exist
       lucasheld.uptime_kuma.monitor:
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
-        name: "{{ kuma_monitor_group | default('Applications') }}"
+        name: "{{ item }}"
         type: group
         state: present
+      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default('Applications')) | select | unique | list }}"
       delegate_to: localhost
       become: false
-      when: kuma_monitor_group | default('Applications') | length > 0
 
-    # Matched by name, so re-running updates the monitor instead of adding a second one
-    - name: Add or update the monitor
+    # Fields that do not apply to a monitor's type are left out, so Kuma keeps its own defaults for them
+    - name: Add or update the monitors
       lucasheld.uptime_kuma.monitor:
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
-        name: "{{ kuma_monitor_name }}"
-        type: http
-        url: "{{ kuma_monitor_url }}"
-        interval: "{{ kuma_monitor_interval | default(60) | int }}"
-        accepted_statuscodes: "{{ kuma_monitor_accepted_codes | default(['200-299']) }}"
-        ignoreTls: "{{ kuma_monitor_ignore_tls | default(false) | bool }}"
-        expiryNotification: "{{ kuma_monitor_url is match('^https://') }}"
-        parent_name: "{{ kuma_monitor_group | default('Applications') if kuma_monitor_group | default('Applications') | length > 0 else omit }}"
+        name: "{{ item.name }}"
+        type: "{{ kuma_type }}"
+        url: "{{ item.url if kuma_type == 'http' else omit }}"
+        hostname: "{{ item.hostname if kuma_type != 'http' else omit }}"
+        port: "{{ item.port | default(53) | int if kuma_type in ['port', 'dns'] else omit }}"
+        dns_resolve_server: "{{ item.dns_resolve_server if kuma_type == 'dns' else omit }}"
+        dns_resolve_type: "{{ item.dns_resolve_type | default('A') if kuma_type == 'dns' else omit }}"
+        accepted_statuscodes: "{{ item.accepted_codes | default(['200-299']) if kuma_type == 'http' else omit }}"
+        ignoreTls: "{{ item.ignore_tls | default(false) | bool if kuma_type == 'http' else omit }}"
+        expiryNotification: "{{ item.url is match('^https://') if kuma_type == 'http' else omit }}"
+        interval: "{{ item.interval | default(60) | int }}"
+        parent_name: "{{ kuma_group if kuma_group | length > 0 else omit }}"
         notification_names: "{{ uptime_kuma_notifications | default(omit) }}"
         state: present
+      loop: "{{ kuma_monitors }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        kuma_type: "{{ item.type | default('http') }}"
+        kuma_group: "{{ item.group | default(kuma_monitor_group | default('Applications')) }}"
       delegate_to: localhost
       become: false
 
     # Shown so the run log says what is being watched
-    - name: Report the monitor
+    - name: Report the monitors
       ansible.builtin.debug:
-        msg: "Uptime Kuma is monitoring {{ kuma_monitor_name }} at {{ kuma_monitor_url }}"
+        msg: "Uptime Kuma is monitoring: {{ kuma_monitors | map(attribute='name') | join(', ') }}"
