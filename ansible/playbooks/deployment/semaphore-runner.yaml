@@ -4,6 +4,7 @@
 # Bootstrap needs only git and ansible-core from the distribution, since this playbook uses no collections
 # Inventory or extra vars: semaphore_url, defaulting to https://semaphore.<docker_domain> when the inventory sets docker_domain; semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
 # Optional: semaphore_runner_docker=true also installs Docker, for runners that build images
+# An existing runner keeps its registration: the token is taken from the config its running service uses, or from -e runner_previous_config=<path>
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: SEMAPHORE_REGISTRATION_TOKEN at semaphore (vault_semaphore_path renames it), read only when registering
 - name: Build the Semaphore runner
   hosts: localhost
@@ -223,6 +224,82 @@
             remote_src: true
           notify: Restart the runner
 
+    # A token file means this runner is already registered in this layout
+    - name: Check for this layout's runner token
+      ansible.builtin.stat:
+        path: "{{ runner_token_file }}"
+      register: runner_token_existing
+
+    # Read before the unit below is replaced, so it still describes the service that is running now
+    - name: Find the config of an existing runner service
+      ansible.builtin.command:
+        argv: [systemctl, show, semaphore-runner, --property=ExecStart, --value]
+      register: runner_existing_exec
+      changed_when: false
+      failed_when: false
+      when: not runner_token_existing.stat.exists
+
+    # Only a runner set up some other way has a config somewhere else; runner_previous_config names it when systemd has already reloaded the new unit
+    - name: Note the existing runner's config
+      ansible.builtin.set_fact:
+        runner_existing_config: "{{ runner_previous_config | default(runner_existing_exec.stdout | default('') | regex_search('--config[ =](\\S+)', '\\1') | default([''], true) | first, true) }}"
+      when: not runner_token_existing.stat.exists
+
+    # Its runner token is reused, so the server keeps the same runner instead of gaining a second one
+    - name: Adopt an existing runner's registration
+      when:
+        - not runner_token_existing.stat.exists
+        - runner_existing_config | default('') | length > 0
+        - runner_existing_config != runner_config_dir ~ '/config.json'
+      block:
+        # Semaphore keeps the token either inline as runner.token or in the file runner.token_file names
+        - name: Read the existing runner config
+          ansible.builtin.slurp:
+            src: "{{ runner_existing_config }}"
+          register: runner_existing_raw
+          failed_when: false
+          no_log: true
+
+        # The config's own value, if it has one
+        - name: Read the inline token
+          ansible.builtin.set_fact:
+            runner_adopted_token: "{{ (runner_existing_doc.runner | default({})).token | default('') }}"
+            runner_adopted_token_file: "{{ (runner_existing_doc.runner | default({})).token_file | default('') }}"
+          vars:
+            runner_existing_doc: "{{ runner_existing_raw.content | default('') | b64decode | default('{}', true) | from_json }}"
+          no_log: true
+
+        # Only when the token lives in its own file
+        - name: Read the existing token file
+          ansible.builtin.slurp:
+            src: "{{ runner_adopted_token_file }}"
+          register: runner_existing_token_raw
+          failed_when: false
+          no_log: true
+          when:
+            - runner_adopted_token | length == 0
+            - runner_adopted_token_file | length > 0
+
+        # Written where this layout's config points, so the registration step below finds it and skips
+        - name: Carry the token over
+          ansible.builtin.copy:
+            dest: "{{ runner_token_file }}"
+            content: "{{ runner_adopted_token if runner_adopted_token | length > 0 else (runner_existing_token_raw.content | default('') | b64decode | trim) }}"
+            owner: "{{ runner_user }}"
+            group: "{{ runner_user }}"
+            mode: "0600"
+          when: (runner_adopted_token | length > 0) or (runner_existing_token_raw.content | default('') | length > 0)
+          no_log: true
+          notify: Restart the runner
+
+        # Says which registration was kept, or why a new one is coming
+        - name: Report the adoption
+          ansible.builtin.debug:
+            msg: >-
+              {{ 'Kept the existing registration from ' ~ runner_existing_config ~ ', so the server keeps this runner as it was'
+                 if (runner_adopted_token | length > 0) or (runner_existing_token_raw.content | default('') | length > 0)
+                 else 'No runner token found in ' ~ runner_existing_config ~ ', so this runner will be registered as a new one' }}
+
     # Semaphore passes jobs only PATH and env_vars, so the collections path goes here; the token lives in its own file
     - name: Write the runner config
       ansible.builtin.copy:
@@ -277,6 +354,17 @@
         - not runner_token_stat.stat.exists
         - not ansible_check_mode
       block:
+        # An unset VAULT_ADDR otherwise surfaces as a confusing URL error
+        - name: Require the Vault connection
+          ansible.builtin.assert:
+            that:
+              - lookup('ansible.builtin.env', 'VAULT_ADDR') is match('^https?://')
+              - lookup('ansible.builtin.env', 'VAULT_TOKEN') | length > 0
+            fail_msg: >-
+              A new runner needs its registration token from Vault, so export VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
+              and run with sudo -E so they reach the playbook.
+            quiet: true
+
         # Read over Vault's HTTP API, since var_lookup.yaml needs a collection this playbook is still installing
         - name: Read the registration token from Vault
           ansible.builtin.uri:
