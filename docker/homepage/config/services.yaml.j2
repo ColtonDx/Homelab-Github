@@ -92,21 +92,21 @@
             description: Kubernetes Management
             siteMonitor: https://rancher.{{ kube_domain }}
     - Compute:
-        - PVE1:
-            href: {{ host_url('PVE1') }}
+        - PVE-VM-1:
+            href: {{ host_url('PVE-VM-1') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: {{ host_url('PVE1') }}
-        - PVE2:
-            href: {{ host_url('PVE2') }}
+            siteMonitor: {{ host_url('PVE-VM-1') }}
+        - PVE-VM-2:
+            href: {{ host_url('PVE-VM-2') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: {{ host_url('PVE2') }}
-        - PVE3:
-            href: {{ host_url('PVE3') }}
+            siteMonitor: {{ host_url('PVE-VM-2') }}
+        - PVE-VM-3:
+            href: {{ host_url('PVE-VM-3') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: {{ host_url('PVE3') }}
+            siteMonitor: {{ host_url('PVE-VM-3') }}
     - Storage:
         - TrueNAS Scale:
             href: {{ host_url('truenas-scale') }}

@@ -62,7 +62,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Portainer \| Push Config | (none) | [portainer-push-config.yaml](templates/portainer-push-config.yaml) | `ansible/playbooks/portainer/push-config.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
-| Uptime Kuma \| Seed Monitors | (none) | [uptime-kuma-seed-monitors.yaml](templates/uptime-kuma-seed-monitors.yaml) | `ansible/playbooks/uptime-kuma/seed-monitors.yaml` |
+| Uptime Kuma \| Inventory Sync | (none) | [uptime-kuma-inventory-sync.yaml](templates/uptime-kuma-inventory-sync.yaml) | `ansible/playbooks/uptime-kuma/inventory-sync.yaml` |
 
 ## File format
 

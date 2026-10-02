@@ -1,5 +1,5 @@
 ---
-# Adds or updates Uptime Kuma monitors; called by install and deploy playbooks, and by uptime-kuma/seed-monitors.yaml for every inventory host with kuma_monitor
+# Adds or updates Uptime Kuma monitors; called by install and deploy playbooks, and by uptime-kuma/inventory-sync.yaml for every inventory host with kuma_monitor
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none

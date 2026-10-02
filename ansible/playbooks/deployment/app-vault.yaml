@@ -4,7 +4,6 @@
 # A restart seals Vault, so a new binary or config only takes effect when run with -e vault_restart=true; unseal it by hand afterwards
 # Never initialises or unseals Vault: a new Vault is left for vault operator init, since its unseal keys must not pass through Ansible
 # vault_config_overwrite=true replaces a vault.hcl that differs from the one below; without it the run stops so a hand-made config is never lost
-# Ends with an Uptime Kuma monitor on Vault's health endpoint once Vault is unsealed, through tasks/uptime_kuma_monitor.yaml
 - name: Install HashiCorp Vault on Debian/Ubuntu
   hosts: vault
   become: true
@@ -210,21 +209,3 @@
 - name: Configure Vault's TLS certificate
   ansible.builtin.import_playbook: ../tls/vault-tls.yaml
   when: vault_ready | default(false) | bool
-
-# Uses Vault's health endpoint, which reports a sealed Vault as down; skipped until Vault is unsealed, since Kuma's login lives in Vault
-- name: Monitor Vault in Uptime Kuma
-  hosts: vault
-  become: false
-  gather_facts: false
-
-  tasks:
-    # 429 is a healthy standby node, so it counts as up
-    - name: Add the Vault monitor
-      ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
-      vars:
-        kuma_monitors:
-          - name: HashiCorp Vault
-            url: "https://{{ vault_domain }}/v1/sys/health"
-            accepted_codes: ["200-299", "429"]
-        kuma_default_group: Core
-      when: vault_ready | default(false) | bool
