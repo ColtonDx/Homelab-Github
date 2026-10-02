@@ -1,0 +1,21 @@
+---
+# Semaphore task template SSH Key Rotation; see semaphore/README.md for the project resources it names
+name: SSH Key Rotation
+app: ansible
+playbook: ansible/playbooks/maintenance/rotate-ssh-keys.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: target_user
+    title: User
+    type: enum
+    required: true
+    values:
+      - name: admin
+        value: admin
+      - name: ansible
+        value: ansible
+  - name: ssh_public_key
+    title: Public key (optional; defaults to ssh_public_key_<user> in the inventory)

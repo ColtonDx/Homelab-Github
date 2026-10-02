@@ -1,0 +1,43 @@
+---
+# Semaphore task template Linux Updates; see semaphore/README.md for the project resources it names
+name: Linux Updates
+app: ansible
+playbook: ansible/playbooks/maintenance/update-linux.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Empty
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: Which Linux hosts to update, one at a time; add an entry per host or group as needed
+    type: enum
+    required: true
+    default_value: linux
+    values:
+      - name: All Linux
+        value: linux
+      - name: 'Group: ACME TLS hosts (gitlab, hashicorp-vault, kasm)'
+        value: acme
+      - name: 'Group: Docker hosts (Linux only)'
+        value: docker:&linux
+  - name: reboot
+    title: Reboot
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'true'
+        value: 'true'
+      - name: 'false'
+        value: 'false'
+  - name: distro_upgrade
+    title: Upgrade
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'true'
+        value: 'true'
+      - name: 'false'
+        value: 'false'

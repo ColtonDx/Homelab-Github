@@ -1,0 +1,35 @@
+---
+# Semaphore task template Portainer | Push Config; see semaphore/README.md for the project resources it names
+name: Portainer | Push Config
+description: Renders docker/<app>/config/*.j2 from the inventory and copies it into the running container through Portainer
+app: ansible
+playbook: ansible/playbooks/portainer/push-config.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: app_name
+    title: App
+    description: Stack with a config/ folder and a ConfigPath label
+    required: true
+    default_value: homepage
+  - name: portainer_endpoint
+    title: PortainerEndpoint
+    type: enum
+    required: true
+    default_value: TrueNAS-Scale
+    values:
+      - name: TrueNAS-Scale
+        value: TrueNAS-Scale
+  - name: push_config_restart
+    title: Restart container
+    description: Only for apps that read config at start; Homepage does not need it
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'false'
+        value: 'false'
+      - name: 'true'
+        value: 'true'

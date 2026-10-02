@@ -1,0 +1,62 @@
+---
+# Semaphore task template Portainer Stack Creation; see semaphore/README.md for the project resources it names
+name: Portainer Stack Creation
+app: ansible
+playbook: ansible/playbooks/portainer/deploy-stack.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: app_name
+    title: App
+    required: true
+  - name: npm_add_proxy
+    title: Add NPM Host
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'true'
+        value: 'true'
+      - name: 'false'
+        value: 'false'
+  - name: portainer_endpoint
+    title: PortainerEndpoint
+    type: enum
+    default_value: TrueNAS-Scale
+    values:
+      - name: TrueNAS-Scale
+        value: TrueNAS-Scale
+  - name: repo_url
+    title: REPO
+    type: enum
+    default_value: https://github.com/ColtonDx/Homelab-Github
+    values:
+      - name: GitHub
+        value: https://github.com/ColtonDx/Homelab-Github
+  - name: npm_domain
+    title: ProxyDomain
+    type: enum
+    default_value: apps.example.com
+    values:
+      - name: apps.example.com
+        value: apps.example.com
+  - name: npm_certificate_id
+    title: Certificate
+    type: enum
+    required: true
+    default_value: '1'
+    values:
+      - name: '*.apps.example.com'
+        value: '1'
+  - name: dvbm_job
+    title: DVBM Backup
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'true'
+        value: 'true'
+      - name: 'false'
+        value: 'false'

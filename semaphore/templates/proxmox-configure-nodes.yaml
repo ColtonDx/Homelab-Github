@@ -1,0 +1,66 @@
+---
+# Semaphore task template Proxmox | Configure Nodes; see semaphore/README.md for the project resources it names
+name: Proxmox | Configure Nodes
+description: Repositories, NTP, DNS, cluster, ZFS and backup storage, backup schedule and ACME certificates; use Dry Run and Diff to preview
+view: Proxmox
+app: ansible
+playbook: ansible/playbooks/proxmox/configure-proxmox.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+task_params:
+  allow_debug: true
+  allow_override_limit: true
+  allow_override_skip_tags: true
+  allow_override_tags: true
+allow_override_args_in_task: true
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: Creating a cluster only makes sense with all nodes
+    type: enum
+    required: true
+    default_value: proxmox
+    values:
+      - name: All Proxmox nodes
+        value: proxmox
+      - name: 'Host: PVE1'
+        value: PVE1
+      - name: 'Host: PVE2'
+        value: PVE2
+      - name: 'Host: PVE3'
+        value: PVE3
+  - name: proxmox_fix_hosts
+    title: Rewrite a wrong /etc/hosts entry
+    description: Otherwise a mismatch is only reported
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'
+  - name: proxmox_cluster_create
+    title: Create the cluster
+    description: One-way; only on a first node that is not clustered
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'
+  - name: proxmox_cluster_join
+    title: Join nodes to the cluster
+    description: One-way; only nodes with no guests
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'

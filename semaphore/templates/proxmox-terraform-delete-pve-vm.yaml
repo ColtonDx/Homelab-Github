@@ -1,0 +1,15 @@
+---
+# Semaphore task template Proxmox | Terraform - Delete PVE VM; see semaphore/README.md for the project resources it names
+name: Proxmox | Terraform - Delete PVE VM
+view: Proxmox
+app: ansible
+playbook: ansible/playbooks/terraform-adhoc-vm/delete-vm.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: vm_id
+    title: VMID
+    type: int
+    required: true

@@ -30,6 +30,16 @@ Every layer is backed up independently, so any application, VM or host can be re
 | Application | Kubernetes Apps | Persistent Volume Claims backed up via Longhorn |
 | Configuration | Appliances: devices whose state is defined by their configuration rather than by an operating system, whether physical or virtual (OPNsense, Brocade switches, TrueNAS) | Each appliance's native configuration export (planned) |
 | Hypervisor | Proxmox Virtual Machines | Proxmox VM backups |
+| Configuration in Git | Application configuration that is useful to others: Semaphore task templates, the Homepage dashboard | Kept in this repo with site values replaced by inventory variables or generic examples, so it doubles as a backup and as a reusable example |
+
+### Configuration in Git
+
+Some applications are configured mostly through their own UI or API, and that configuration is worth sharing on its own: anyone running the same tool can reuse it. Those configurations are kept in Git, PII-free, next to the code they run:
+
+- **Semaphore**: every task template, in `semaphore/templates/`, with the project resources they name described in `semaphore/README.md`
+- **Homepage**: the dashboard layout, in `docker/homepage/config/`, rendered from the inventory and pushed by `portainer/push-config.yaml`
+
+Git history makes these versioned backups as well, and a rebuilt application can be set up again from them.
 
 ## Replication
 
@@ -49,6 +59,10 @@ Every layer is backed up independently, so any application, VM or host can be re
 ### Schedule and retention
 
 Backups run daily.
+
+# Branching
+
+Changes are pushed to the `dev` branch. When every CI check passes on a `dev` commit, CI fast-forwards `main` to that commit, so `main` only ever holds commits that passed linting, validation and the PII scan. Semaphore and Flux follow `main`.
 
 # Terraform
 Terraform is used to provision resources. Where things are done dynamically, Ansible may call Terraform in order to inject secrets and variables at runtime.

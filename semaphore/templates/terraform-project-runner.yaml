@@ -1,0 +1,70 @@
+---
+# Semaphore task template Terraform | Project Runner; see semaphore/README.md for the project resources it names
+name: Terraform | Project Runner
+description: Plans or applies a Terraform project; after an apply it installs what runs on the VMs
+view: Proxmox
+app: ansible
+playbook: ansible/playbooks/terraform/build-project.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: tf_project
+    title: Project
+    type: enum
+    required: true
+    default_value: terraform/proxmox/gitlab
+    values:
+      - name: GitLab VM
+        value: terraform/proxmox/gitlab
+      - name: Kasm VM
+        value: terraform/proxmox/kasm
+      - name: Vault VM
+        value: terraform/proxmox/vault
+      - name: Talos cluster
+        value: terraform/proxmox/talos
+      - name: K3s nodes (legacy)
+        value: terraform/proxmox/k3s
+  - name: tf_action
+    title: Action
+    type: enum
+    required: true
+    default_value: plan
+    values:
+      - name: Plan (no changes)
+        value: plan
+      - name: Apply
+        value: apply
+  - name: tf_install
+    title: Install after apply
+    description: Runs the install playbook named in the project's sources.yaml
+    type: enum
+    required: true
+    default_value: 'true'
+    values:
+      - name: 'Yes'
+        value: 'true'
+      - name: No, Terraform only
+        value: 'false'
+  - name: tf_backend
+    title: State
+    type: enum
+    required: true
+    default_value: s3
+    values:
+      - name: Garage (normal)
+        value: s3
+      - name: Local (Garage is down)
+        value: local
+  - name: tf_migrate_state
+    title: Move local state into Garage
+    description: Only after a run with local state
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'

@@ -109,3 +109,30 @@ jobs:
         run: sh ci/pii-scan.sh
         env:
           PII_PATTERNS: ${{ secrets.PII_PATTERNS }}
+
+  # Fast-forwards main to a dev commit once every check above has passed; main never takes a commit CI has not seen
+  promote:
+    needs: [yamllint, ansible, terraform, kubernetes, pii]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Full history, so the fast-forward check can compare dev with main
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The PII scan passes when its secret is missing, which is fine for a check but not for publishing to main
+      - name: Require the PII scan to have run
+        env:
+          PII_PATTERNS: ${{ secrets.PII_PATTERNS }}
+        run: |
+          if [ -z "$PII_PATTERNS" ]; then
+            echo "::error::PII_PATTERNS is not set, so this commit was not scanned and main was not updated"
+            exit 1
+          fi
+
+      # Only a fast-forward, so a commit made straight to main is never overwritten; rebase dev onto main if this fails
+      - name: Fast-forward main
+        run: sh ci/promote.sh

@@ -1,0 +1,63 @@
+---
+# Semaphore task template Proxmox |  PACT Github; see semaphore/README.md for the project resources it names
+name: Proxmox |  PACT Github
+view: Proxmox
+app: bash
+playbook: Scripts/build.sh
+repository: Proxmox PACT Github
+environments:
+  - Proxmox-PACT-Variables
+survey_vars:
+  - name: --proxmox-host
+    title: Proxmox Host
+    required: true
+    default_value: pve1.example.com
+  - name: --proxmox-target-node
+    title: Target Node
+    type: enum
+    required: true
+    default_value: pve1
+    values:
+      - name: pve1
+        value: pve1
+      - name: pve2
+        value: pve2
+  - name: --proxmox-storage
+    title: Storage
+    type: enum
+    required: true
+    default_value: ZFS0
+    values:
+      - name: TrueNAS-Disks
+        value: TrueNAS-Disks
+      - name: ZFS0
+        value: ZFS0
+  - name: --run-packer
+    title: Packer
+    type: enum
+    required: true
+    default_value: 'true'
+    values:
+      - name: 'true'
+        value: 'true'
+      - name: 'false'
+        value: 'false'
+  - name: --build-distros
+    title: Build Templates
+    type: enum
+    default_value: all
+    values:
+      - name: debian
+        value: debian
+      - name: ubuntu
+        value: ubuntu
+      - name: fedora
+        value: fedora
+      - name: all
+        value: all
+      - name: ubuntu2504
+        value: ubuntu2504
+      - name: fedora43
+        value: fedora43
+      - name: debian13
+        value: debian13

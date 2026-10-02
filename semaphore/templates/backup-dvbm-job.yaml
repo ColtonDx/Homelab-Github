@@ -1,0 +1,21 @@
+---
+# Semaphore task template Backup | DVBM Job; see semaphore/README.md for the project resources it names
+name: Backup | DVBM Job
+description: Runs one DVBMv3 backup job now and waits for it to finish
+view: Backups
+app: ansible
+playbook: ansible/playbooks/backups/dvbm-backup.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: backup_job
+    title: DVBM job name
+    description: The stack's Backup label, e.g. bookstack
+    required: true
+  - name: dvbm_backup_timeout
+    title: Timeout (seconds)
+    description: How long to wait for the backup
+    type: int
+    default_value: '1800'

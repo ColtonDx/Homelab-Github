@@ -1,0 +1,60 @@
+---
+# Semaphore task template K3s | Terraform | Deployment; see semaphore/README.md for the project resources it names
+name: K3s | Terraform | Deployment
+description: Plans or applies the legacy K3s nodes through build-project.yaml; an apply then builds the cluster with k3s/initialize.yaml
+view: Kubernetes
+app: ansible
+playbook: ansible/playbooks/terraform/build-project.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+arguments:
+  - -e
+  - tf_project=terraform/proxmox/k3s
+task_params:
+  allow_auto_approve: true
+  auto_approve: true
+survey_vars:
+  - name: tf_action
+    title: Action
+    type: enum
+    required: true
+    default_value: plan
+    values:
+      - name: Plan (no changes)
+        value: plan
+      - name: Apply
+        value: apply
+  - name: tf_install
+    title: Install after apply
+    description: Runs the install playbook named in the project's sources.yaml
+    type: enum
+    required: true
+    default_value: 'true'
+    values:
+      - name: 'Yes'
+        value: 'true'
+      - name: No, Terraform only
+        value: 'false'
+  - name: tf_backend
+    title: State
+    type: enum
+    required: true
+    default_value: s3
+    values:
+      - name: Garage (normal)
+        value: s3
+      - name: Local (Garage is down)
+        value: local
+  - name: tf_migrate_state
+    title: Move local state into Garage
+    description: Only after a run with local state
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'

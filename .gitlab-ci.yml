@@ -11,8 +11,8 @@ workflow:
     - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
 
-# Every job is a check, so all run in one stage and a newer push cancels the older pipeline
-stages: [lint]
+# The checks run together in lint; promote runs only after all of them pass, and a newer push cancels the older pipeline
+stages: [lint, promote]
 
 default:
   interruptible: true
@@ -66,3 +66,25 @@ pii:
     entrypoint: [""]
   script:
     - sh ci/pii-scan.sh
+
+# Fast-forwards main to a dev commit once every check has passed; PROMOTE_TOKEN is a project access token with the write_repository scope
+promote:
+  stage: promote
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  variables:
+    GIT_DEPTH: "0"
+    PROMOTE_REMOTE: promote
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push"
+  script:
+    # The PII scan passes when its variable is missing, which is fine for a check but not for publishing to main
+    - '[ -n "${PII_PATTERNS:-}" ] || { echo "PII_PATTERNS is not set, so this commit was not scanned and main was not updated"; exit 1; }'
+    # The job token can only read, so pushing needs its own token
+    - '[ -n "${PROMOTE_TOKEN:-}" ] || { echo "PROMOTE_TOKEN is not set, so main was not updated"; exit 1; }'
+    # The checkout belongs to another user inside the container
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    # Same server and project as the checkout, with the promote token in place of the read-only job token
+    - git remote add promote "$(echo "$CI_REPOSITORY_URL" | sed -E "s#//[^@]+@#//promote:${PROMOTE_TOKEN}@#")"
+    - sh ci/promote.sh

@@ -1,0 +1,9 @@
+---
+# Semaphore task template App | Install KASM; see semaphore/README.md for the project resources it names
+name: App | Install KASM
+app: ansible
+playbook: ansible/playbooks/deployment/app-kasm.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

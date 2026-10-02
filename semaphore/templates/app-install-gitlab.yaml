@@ -1,0 +1,9 @@
+---
+# Semaphore task template App | Install Gitlab; see semaphore/README.md for the project resources it names
+name: App | Install Gitlab
+app: ansible
+playbook: ansible/playbooks/deployment/app-gitlab.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

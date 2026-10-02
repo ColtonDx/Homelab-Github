@@ -1,0 +1,10 @@
+---
+# Semaphore task template Backup | Gitlab; see semaphore/README.md for the project resources it names
+name: Backup | Gitlab
+view: Backups
+app: ansible
+playbook: ansible/playbooks/backups/gitlab-backup.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

@@ -1,0 +1,91 @@
+---
+# Semaphore task template Proxmox | Terraform - Build a PVE VM; see semaphore/README.md for the project resources it names
+name: Proxmox | Terraform - Build a PVE VM
+view: Proxmox
+app: ansible
+playbook: ansible/playbooks/terraform-adhoc-vm/build-vm.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: vm_id
+    title: VMID
+    description: VMID for Proxmox + S3
+    type: int
+    required: true
+    default_value: '9999'
+  - name: template_name
+    title: Template
+    description: The VM Template to use from Proxmox
+    type: enum
+    required: true
+    default_value: PACT-Debian-12
+    values:
+      - name: PACT-Debian-11
+        value: PACT-Debian-11
+      - name: PACT-Debian-12
+        value: PACT-Debian-12
+      - name: PACT-Debian-13
+        value: PACT-Debian-13
+      - name: Server 2025 CloudInit
+        value: WinSrv2025-CloudInit
+  - name: vm_name
+    title: VM Name
+    description: The name the VM will have.
+    required: true
+    default_value: NewVM
+  - name: osdisk_size
+    title: Disk Size
+    description: Disk Size for the OS in GB
+    type: int
+    default_value: '8'
+  - name: memory
+    title: RAM
+    description: RAM in MB for the VM
+    type: int
+    required: true
+    default_value: '1024'
+  - name: cores
+    title: Cores
+    description: '# of vCPU Cores'
+    type: int
+    default_value: '1'
+  - name: vm_tags
+    title: Tags
+    description: Tag for the VM in Proxmox
+  - name: vcpus
+    title: Sockets
+    description: Number of CPU Sockets
+    type: int
+    default_value: '1'
+  - name: ip_mode
+    title: ip_mode
+    type: enum
+    required: true
+    default_value: dhcp
+    values:
+      - name: dhcp
+        value: dhcp
+      - name: static
+        value: static
+  - name: static_ip
+    title: static_ip
+  - name: static_prefix
+    title: CIDR
+    type: int
+  - name: gateway
+    title: gateway
+  - name: data_disk_size
+    title: Data Disk Size (GB)
+    type: int
+  - name: data_storage_pool
+    title: Data Disk Pool
+  - name: target_node
+    title: Proxmox node
+    required: true
+    default_value: pve1
+  - name: storage_pool
+    title: Storage pool
+    required: true
+    default_value: ZFS0

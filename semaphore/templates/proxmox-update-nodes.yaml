@@ -1,0 +1,66 @@
+---
+# Semaphore task template Proxmox | Update Nodes; see semaphore/README.md for the project resources it names
+name: Proxmox | Update Nodes
+description: Updates the nodes one at a time; with Restart hosts on, each node is emptied first and guests are moved back at the end
+view: Proxmox
+app: ansible
+playbook: ansible/playbooks/proxmox/update-proxmox.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+task_params:
+  allow_debug: true
+  allow_override_limit: true
+  allow_override_skip_tags: true
+  allow_override_tags: true
+allow_override_args_in_task: true
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: Nodes to update, one at a time; guests from them can move to any node
+    type: enum
+    required: true
+    default_value: proxmox
+    values:
+      - name: All Proxmox nodes
+        value: proxmox
+      - name: 'Host: PVE1'
+        value: PVE1
+      - name: 'Host: PVE2'
+        value: PVE2
+      - name: 'Host: PVE3'
+        value: PVE3
+  - name: proxmox_reboot
+    title: Restart hosts
+    description: Empties each node by migrating its running guests, reboots it, then moves guests back
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'
+  - name: proxmox_reboot_always
+    title: Restart even without updates
+    description: Only with Restart hosts on
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'
+  - name: proxmox_rebalance
+    title: Move guests back afterwards
+    description: Returns every migrated guest to the node it started on
+    type: enum
+    required: true
+    default_value: 'true'
+    values:
+      - name: 'No'
+        value: 'false'
+      - name: 'Yes'
+        value: 'true'

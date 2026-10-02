@@ -1,0 +1,14 @@
+---
+# Semaphore task template Netbox | Sync Proxmox; see semaphore/README.md for the project resources it names
+name: Netbox | Sync Proxmox
+view: Netbox
+app: ansible
+playbook: ansible/playbooks/netbox/proxmox-vm-sync/proxmox-vm-sync.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: netbox_url
+    title: NETBOX_URL
+    description: Optional; defaults to netbox_url in the inventory

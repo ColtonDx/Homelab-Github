@@ -1,0 +1,10 @@
+---
+# Semaphore task template Backup | Plex; see semaphore/README.md for the project resources it names
+name: Backup | Plex
+view: Backups
+app: ansible
+playbook: ansible/playbooks/backups/plex-backup.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Empty

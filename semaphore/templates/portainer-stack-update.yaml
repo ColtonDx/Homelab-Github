@@ -1,0 +1,42 @@
+---
+# Semaphore task template Portainer Stack Update; see semaphore/README.md for the project resources it names
+name: Portainer Stack Update
+description: 'Updates a deployed Portainer stack: DVBM backup gate, redeploy pulling newer images, health poll, rollback on failure. First-time deploys use Portainer Stack Creation instead.'
+app: ansible
+playbook: ansible/playbooks/portainer/update-stack.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: app_name
+    title: App
+    description: Matches docker/<app_name>/
+    required: true
+  - name: portainer_endpoint
+    title: PortainerEndpoint
+    type: enum
+    required: true
+    default_value: TrueNAS-Scale
+    values:
+      - name: TrueNAS-Scale
+        value: TrueNAS-Scale
+  - name: skip_backup
+    title: Skip Backup Gate
+    description: Leave false. True removes the pre-upgrade backup.
+    type: enum
+    default_value: 'false'
+    values:
+      - name: 'false'
+        value: 'false'
+      - name: 'true'
+        value: 'true'
+  - name: rollback_ref
+    title: Rollback Ref
+    description: 'Git ref to roll back to. Default: previous commit.'
+  - name: health_timeout
+    title: Health Timeout (s)
+    default_value: '300'
+  - name: health_interval
+    title: Health Poll Interval (s)
+    default_value: '10'
