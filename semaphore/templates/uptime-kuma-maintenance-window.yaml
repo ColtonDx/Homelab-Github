@@ -1,0 +1,35 @@
+---
+# Semaphore task template Uptime Kuma | Maintenance Window; see semaphore/README.md for the project resources it names
+name: Uptime Kuma | Maintenance Window
+description: Silences Uptime Kuma monitors for planned work; the window ends by itself after the set minutes, or end it early by its title
+app: ansible
+playbook: ansible/playbooks/uptime-kuma/maintenance-window.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: maintenance_action
+    title: Action
+    type: enum
+    required: true
+    default_value: start
+    values:
+      - name: Start a window
+        value: start
+      - name: End a window early
+        value: end
+  - name: maintenance_hosts
+    title: Hosts
+    description: Inventory host or group, e.g. plex or proxmox; uses each host's kuma_monitor
+  - name: maintenance_monitors
+    title: Monitors
+    description: Extra Kuma monitor names, comma-separated
+  - name: maintenance_minutes
+    title: Minutes
+    description: How long the window lasts before it ends by itself
+    type: int
+    default_value: '60'
+  - name: maintenance_title
+    title: Title
+    description: Defaults to Maintenance plus the hosts or monitors; needed to end a window early

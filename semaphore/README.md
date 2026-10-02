@@ -63,6 +63,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
 | Uptime Kuma \| Inventory Sync | (none) | [uptime-kuma-inventory-sync.yaml](templates/uptime-kuma-inventory-sync.yaml) | `ansible/playbooks/uptime-kuma/inventory-sync.yaml` |
+| Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/maintenance-window.yaml` |
 
 ## File format
 

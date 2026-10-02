@@ -2,6 +2,7 @@
 # Updates packages on Linux hosts, one host at a time; hosts with update_stop_services in the inventory have those services stopped first and restored afterwards
 # Extra vars: target_hosts (default linux), distro_upgrade (default false), reboot (default false)
 # Inventory: update_stop_services on a host or group lists services to stop (bare names get .service); an extra var of the same name overrides it
+# Hosts with kuma_monitor get an Uptime Kuma maintenance window while services are stopped or the host reboots; patch_window_minutes (default 30) sets its length, skip_maintenance_window=true turns it off
 - hosts: "{{ target_hosts | default('linux') }}"
   serial: 1
   ignore_unreachable: true
@@ -51,6 +52,45 @@
           vars:
             running_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list }}"
             enabled_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list }}"
+
+        # Opened before anything stops, so stopped services and the reboot raise no alerts; a Kuma problem only warns, so patching never waits on monitoring
+        - name: Open an Uptime Kuma maintenance window
+          when:
+            - reboot_requested or service_list | length > 0
+            - not (skip_maintenance_window | default(false) | bool)
+          become: false
+          block:
+            # The same monitors the inventory sync creates for this host
+            - name: Find this host's monitors
+              ansible.builtin.include_tasks:
+                file: ../uptime-kuma/host_monitors.yaml
+                apply:
+                  become: false
+              vars:
+                kuma_hosts: ["{{ inventory_hostname }}"]
+
+            # Ends by itself after patch_window_minutes, so a run that dies here never leaves the host silenced
+            - name: Start the maintenance window
+              ansible.builtin.include_tasks:
+                file: ../uptime-kuma/maintenance.yaml
+                apply:
+                  become: false
+              vars:
+                kuma_maintenance_title: "Patching {{ inventory_hostname }}"
+                kuma_maintenance_monitors: "{{ kuma_host_monitors | map(attribute='name') | list }}"
+                kuma_maintenance_minutes: "{{ patch_window_minutes | default(30) }}"
+                kuma_maintenance_description: "Linux patching by update-linux.yaml"
+              when: kuma_host_monitors | length > 0
+
+            # Only a window that was really opened is closed at the end
+            - name: Record the open window
+              ansible.builtin.set_fact:
+                patch_window_open: "{{ (kuma_connected | default(false)) and (kuma_mw_found | default([]) | length > 0) }}"
+          rescue:
+            # Alerts may fire during the reboot, but the host still gets patched
+            - name: Warn that no window was opened
+              ansible.builtin.debug:
+                msg: "Could not open an Uptime Kuma maintenance window for {{ inventory_hostname }}, so its monitors may alert while it is patched."
 
         - name: Stop services, update and reboot if needed
           block:
@@ -121,3 +161,23 @@
                 name: "{{ item }}"
                 state: started
               loop: "{{ services_running | default([]) | reverse | list }}"
+
+            # The host and its services are back, so alerting resumes now rather than when the window would expire
+            - name: Close the Uptime Kuma maintenance window
+              when: patch_window_open | default(false) | bool
+              become: false
+              block:
+                # Removes the window by the title it was opened with
+                - name: End the maintenance window
+                  ansible.builtin.include_tasks:
+                    file: ../uptime-kuma/maintenance.yaml
+                    apply:
+                      become: false
+                  vars:
+                    kuma_maintenance_title: "Patching {{ inventory_hostname }}"
+                    kuma_maintenance_state: absent
+              rescue:
+                # Harmless, since the window expires by itself
+                - name: Warn that the window stays open
+                  ansible.builtin.debug:
+                    msg: "Could not end the Uptime Kuma window for {{ inventory_hostname }}; it ends by itself after {{ patch_window_minutes | default(30) }} minutes."

@@ -1,0 +1,97 @@
+---
+# Task file: starts or ends an Uptime Kuma maintenance window, so planned work such as a patching reboot raises no alerts
+# Needs kuma_maintenance_title, the window's name and the key that ends it; kuma_maintenance_state is present (default) to start it or absent to end it
+# Starting needs kuma_maintenance_monitors, a list of monitor names; optional kuma_maintenance_minutes (default 30) and kuma_maintenance_description
+# The window runs from now for that many minutes and then ends by itself, so a run that dies partway never leaves monitors silenced for good
+# Monitors not in Kuma are skipped with a note; connection and Vault settings are in connect.yaml
+
+# A window without a title could never be found again to end it
+- name: Validate the maintenance inputs
+  ansible.builtin.assert:
+    that:
+      - kuma_maintenance_title | default('') | length > 0
+      - kuma_maintenance_state | default('present') in ['present', 'absent']
+      - kuma_maintenance_state | default('present') == 'absent' or (kuma_maintenance_monitors | default([]) | length > 0)
+      - kuma_maintenance_minutes | default(30) | int > 0
+    fail_msg: "kuma_maintenance_title is required, kuma_maintenance_state must be present or absent, starting needs kuma_maintenance_monitors, and kuma_maintenance_minutes must be positive."
+    quiet: true
+
+# Sets kuma_connected, and stays quiet when Kuma is not configured
+- name: Connect to Uptime Kuma
+  ansible.builtin.include_tasks: connect.yaml
+
+# Everything below needs Kuma
+- name: Change the maintenance window
+  when: kuma_connected
+  block:
+    # The maintenance module fails on a name Kuma does not know, so the list is checked first
+    - name: List Kuma's monitors
+      lucasheld.uptime_kuma.monitor_info:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+      register: kuma_mw_info
+      delegate_to: localhost
+      become: false
+      no_log: true
+      when: kuma_maintenance_state | default('present') == 'present'
+
+    # Only names are kept, since monitor details can hold credentials
+    - name: Split the monitors into known and unknown
+      ansible.builtin.set_fact:
+        kuma_mw_found: "{{ kuma_maintenance_monitors | select('in', kuma_mw_names) | list }}"
+        kuma_mw_missing: "{{ kuma_maintenance_monitors | reject('in', kuma_mw_names) | list }}"
+      vars:
+        kuma_mw_names: "{{ kuma_mw_info.monitors | default([]) | map(attribute='name') | list }}"
+      when: kuma_maintenance_state | default('present') == 'present'
+
+    # Usually means the inventory sync has not run since the monitor was added
+    - name: Note monitors Kuma does not have
+      ansible.builtin.debug:
+        msg: "Not in Uptime Kuma, so not covered by the window: {{ kuma_mw_missing | join(', ') }}"
+      when:
+        - kuma_maintenance_state | default('present') == 'present'
+        - kuma_mw_missing | length > 0
+
+    # A single window in UTC from now, so it needs no clock agreement with the Kuma server beyond the time itself
+    - name: Start the maintenance window
+      lucasheld.uptime_kuma.maintenance:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+        title: "{{ kuma_maintenance_title }}"
+        description: "{{ kuma_maintenance_description | default('Started by Ansible') }}"
+        strategy: single
+        active: true
+        timezoneOption: UTC
+        dateRange:
+          - "{{ '%Y-%m-%d %H:%M:%S' | strftime(kuma_mw_start, utc=true) }}"
+          - "{{ '%Y-%m-%d %H:%M:%S' | strftime(kuma_mw_start + (kuma_maintenance_minutes | default(30) | int) * 60, utc=true) }}"
+        monitors: "{{ kuma_mw_found | map('community.general.dict_kv', 'name') | list }}"
+        state: present
+      vars:
+        # now() is local time, which timestamp() reads correctly; strftime then writes it out in UTC
+        kuma_mw_start: "{{ now().timestamp() | int }}"
+      delegate_to: localhost
+      become: false
+      when:
+        - kuma_maintenance_state | default('present') == 'present'
+        - kuma_mw_found | length > 0
+
+    # Ending early returns the monitors to normal alerting as soon as the work is done
+    - name: End the maintenance window
+      lucasheld.uptime_kuma.maintenance:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+        title: "{{ kuma_maintenance_title }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      when: kuma_maintenance_state | default('present') == 'absent'
+
+    # Shown so the run log says what was silenced and for how long
+    - name: Report the maintenance window
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Maintenance window ' ~ kuma_maintenance_title ~ ' ended'
+             if kuma_maintenance_state | default('present') == 'absent'
+             else ('Maintenance window ' ~ kuma_maintenance_title ~ ' covers ' ~ kuma_mw_found | join(', ') ~ ' for ' ~ kuma_maintenance_minutes | default(30) ~ ' minutes'
+                   if kuma_mw_found | length > 0 else 'No window started, since none of the monitors are in Uptime Kuma') }}

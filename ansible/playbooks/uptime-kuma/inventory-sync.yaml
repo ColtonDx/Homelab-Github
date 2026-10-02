@@ -1,10 +1,9 @@
 ---
 # Keeps Uptime Kuma in step with the inventory: adds or updates a monitor for every host with a kuma_monitor variable; meant to run on a schedule, and covers hosts no install playbook does, such as the firewall, NAS and hypervisors
-# kuma_monitor: true pings the host's ansible_host; a mapping is one monitor; a list is several, e.g. the firewall's web UI and its DNS
-# Each entry takes the fields listed in tasks/uptime_kuma_monitor.yaml; type defaults to http when url is set and ping otherwise, and ping and port default hostname to ansible_host
-# Names default to the host name, with the type added when a host has several; the Kuma group is the entry's group, else kuma_monitor_group on the host or its inventory group, else sync_group (default none)
+# The forms kuma_monitor takes and its defaults are in host_monitors.yaml; each entry's fields are in add_monitors.yaml
+# Hosts with no group set get none, unless sync_group names one
 # Monitors are matched by name, so re-runs update them; a host whose kuma_monitor is removed keeps its monitor until it is deleted in Kuma
-# Connection and Vault settings are listed in tasks/uptime_kuma_monitor.yaml
+# Connection and Vault settings are in connect.yaml
 - name: Sync Uptime Kuma monitors from the inventory
   hosts: localhost
   connection: local
@@ -14,48 +13,27 @@
     kuma_default_group: "{{ sync_group | default('') }}"
 
   tasks:
-    # true, a mapping or a list all become a list, each entry tagged with its host so defaults can be filled in next
-    - name: Collect the kuma_monitor entries
-      ansible.builtin.set_fact:
-        sync_raw: "{{ sync_raw | default([]) + (sync_entries | map('combine', {'_host': item, '_count': sync_entries | length}) | list) }}"
-      loop: "{{ groups['all'] | sort }}"
+    # Every host in the inventory, filtered to the ones with kuma_monitor
+    - name: Work out the inventory's monitors
+      ansible.builtin.include_tasks: host_monitors.yaml
       vars:
-        sync_value: "{{ hostvars[item].kuma_monitor }}"
-        sync_entries: "{{ [{}] if sync_value is sameas true else ([sync_value] if sync_value is mapping else sync_value) }}"
-      when:
-        - hostvars[item].kuma_monitor is defined
-        - hostvars[item].kuma_monitor is not sameas false
-
-    # Fills in type, name, hostname and the host's group, then drops the tags, leaving entries in the shape uptime_kuma_monitor.yaml takes
-    - name: Fill in the defaults
-      ansible.builtin.set_fact:
-        sync_monitors: "{{ sync_monitors | default([]) + [sync_final] }}"
-      loop: "{{ sync_raw | default([]) }}"
-      loop_control:
-        label: "{{ item._host }}"
-      vars:
-        sync_type: "{{ item.type | default('http' if item.url is defined else 'ping') }}"
-        sync_name: "{{ item.name | default(item._host if item._count == 1 else item._host ~ ' ' ~ sync_type | upper) }}"
-        sync_address: "{{ hostvars[item._host].ansible_host | default(item._host) }}"
-        sync_hostname: "{{ {'hostname': item.hostname | default(sync_address)} if sync_type in ['ping', 'port'] else {} }}"
-        sync_host_group: "{{ {'group': hostvars[item._host].kuma_monitor_group} if item.group is not defined and hostvars[item._host].kuma_monitor_group is defined else {} }}"
-        sync_final: "{{ item | combine({'type': sync_type, 'name': sync_name}, sync_hostname, sync_host_group) | dict2items | rejectattr('key', 'match', '^_') | items2dict }}"
+        kuma_hosts: "{{ groups['all'] }}"
 
     # A sync with nothing to do is almost always a missing inventory change, so it says so instead of passing silently
     - name: Require at least one monitor
       ansible.builtin.assert:
         that:
-          - sync_monitors | default([]) | length > 0
+          - kuma_host_monitors | length > 0
         fail_msg: "No inventory host sets kuma_monitor, so there is nothing to sync."
         quiet: true
 
     # Shown before any change, so the run log lists exactly what was asked for
     - name: Show the monitors to sync
       ansible.builtin.debug:
-        msg: "{{ sync_monitors | map(attribute='name') | zip(sync_monitors | map(attribute='type')) | map('join', ' (') | map('regex_replace', '$', ')') | list }}"
+        msg: "{{ kuma_host_monitors | map(attribute='name') | zip(kuma_host_monitors | map(attribute='type')) | map('join', ' (') | map('regex_replace', '$', ')') | list }}"
 
     # Validates every entry, logs in once and adds or updates each monitor
     - name: Add the monitors
-      ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
+      ansible.builtin.include_tasks: add_monitors.yaml
       vars:
-        kuma_monitors: "{{ sync_monitors }}"
+        kuma_monitors: "{{ kuma_host_monitors }}"

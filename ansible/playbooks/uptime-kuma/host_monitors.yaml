@@ -1,0 +1,38 @@
+---
+# Task file: turns the kuma_monitor variables of the inventory hosts in kuma_hosts into kuma_host_monitors, the list add_monitors.yaml takes
+# kuma_monitor: true pings the host's ansible_host; a mapping is one monitor; a list is several; false or unset is none
+# type defaults to http when url is set and ping otherwise; ping and port default hostname to ansible_host; names default to the host name, with the type added when a host has several
+# The group is the entry's own, else kuma_monitor_group on the host or its inventory group; anything else is left to add_monitors.yaml
+
+# Facts persist between includes, so a second call in the same play starts empty
+- name: Start an empty monitor list
+  ansible.builtin.set_fact:
+    kuma_hm_raw: []
+    kuma_host_monitors: []
+
+# true, a mapping or a list all become a list, each entry tagged with its host so defaults can be filled in next
+- name: Collect the kuma_monitor entries
+  ansible.builtin.set_fact:
+    kuma_hm_raw: "{{ kuma_hm_raw + (kuma_hm_entries | map('combine', {'_host': item, '_count': kuma_hm_entries | length}) | list) }}"
+  loop: "{{ kuma_hosts | sort }}"
+  vars:
+    kuma_hm_value: "{{ hostvars[item].kuma_monitor }}"
+    kuma_hm_entries: "{{ [{}] if kuma_hm_value is sameas true else ([kuma_hm_value] if kuma_hm_value is mapping else kuma_hm_value) }}"
+  when:
+    - hostvars[item].kuma_monitor is defined
+    - hostvars[item].kuma_monitor is not sameas false
+
+# Fills in type, name, hostname and the host's group, then drops the tags
+- name: Fill in the defaults
+  ansible.builtin.set_fact:
+    kuma_host_monitors: "{{ kuma_host_monitors + [kuma_hm_final] }}"
+  loop: "{{ kuma_hm_raw }}"
+  loop_control:
+    label: "{{ item._host }}"
+  vars:
+    kuma_hm_type: "{{ item.type | default('http' if item.url is defined else 'ping') }}"
+    kuma_hm_name: "{{ item.name | default(item._host if item._count == 1 else item._host ~ ' ' ~ kuma_hm_type | upper) }}"
+    kuma_hm_address: "{{ hostvars[item._host].ansible_host | default(item._host) }}"
+    kuma_hm_hostname: "{{ {'hostname': item.hostname | default(kuma_hm_address)} if kuma_hm_type in ['ping', 'port'] else {} }}"
+    kuma_hm_group: "{{ {'group': hostvars[item._host].kuma_monitor_group} if item.group is not defined and hostvars[item._host].kuma_monitor_group is defined else {} }}"
+    kuma_hm_final: "{{ item | combine({'type': kuma_hm_type, 'name': kuma_hm_name}, kuma_hm_hostname, kuma_hm_group) | dict2items | rejectattr('key', 'match', '^_') | items2dict }}"

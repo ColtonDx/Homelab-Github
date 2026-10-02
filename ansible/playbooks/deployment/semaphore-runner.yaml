@@ -24,7 +24,7 @@
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
       - hvac==2.4.0
       - uptime-kuma-api2==2.9.0
-    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the K3s data-disk mount, lucasheld.uptime_kuma for tasks/uptime_kuma_monitor.yaml, run on uptime-kuma-api2 above since the collection's own library stopped at Kuma 1.x
+    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the K3s data-disk mount, lucasheld.uptime_kuma for the uptime-kuma playbooks, run on uptime-kuma-api2 above since the collection's own library stopped at Kuma 1.x
     runner_collection_pins:
       - community.general:==13.4.0
       - community.hashi_vault:==7.1.0

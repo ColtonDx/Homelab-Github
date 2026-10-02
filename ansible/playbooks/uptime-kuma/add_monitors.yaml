@@ -1,97 +1,44 @@
 ---
-# Adds or updates Uptime Kuma monitors; called by install and deploy playbooks, and by uptime-kuma/inventory-sync.yaml for every inventory host with kuma_monitor
+# Task file: adds or updates Uptime Kuma monitors; used by inventory-sync.yaml and at the end of every Portainer stack deployment
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
-# Connection: uptime_kuma_url in the inventory, else UPTIME_KUMA_URL in the environment, else https://kuma.<docker_domain>; with none of those the monitors are skipped
-# Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); needs VAULT_ADDR and VAULT_TOKEN unless the calling play already set vault_addr and vault_token
-# Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
-# Every Kuma call runs from the controller, so this works from plays on any host; needs the lucasheld.uptime_kuma collection with the uptime-kuma-api2 package
+# Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor; connection and Vault settings are in connect.yaml
 
-# An explicit address wins; otherwise Kuma sits with the other Docker apps
-- name: Find the Uptime Kuma address
-  ansible.builtin.set_fact:
-    kuma_api_url: >-
-      {{ (uptime_kuma_url
-          | default(lookup('ansible.builtin.env', 'UPTIME_KUMA_URL'), true)
-          | default('https://kuma.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}
+# Catches a malformed entry before logging in, naming the entry
+- name: Validate the monitors
+  ansible.builtin.assert:
+    that:
+      - item.name | default('') | length > 0
+      - kuma_type in ['http', 'ping', 'port', 'dns']
+      - kuma_type != 'http' or (item.url | default('') is match('^https?://'))
+      - kuma_type == 'http' or (item.hostname | default('') | length > 0)
+      - kuma_type != 'port' or (item.port | default('') | string | length > 0)
+      - kuma_type != 'dns' or (item.dns_resolve_server | default('') | length > 0)
+    fail_msg: "Monitor {{ item.name | default('(no name)') }}: needs a name and a type of http (with an http(s) url), ping (hostname), port (hostname and port) or dns (hostname and dns_resolve_server)."
+    quiet: true
+  loop: "{{ kuma_monitors }}"
+  loop_control:
+    label: "{{ item.name | default('(no name)') }}"
+  vars:
+    kuma_type: "{{ item.type | default('http') }}"
 
-# Says why nothing happened rather than failing, since Kuma is optional
-- name: Skip the monitors when Uptime Kuma is not configured
-  ansible.builtin.debug:
-    msg: "No uptime_kuma_url, UPTIME_KUMA_URL or docker_domain is set, so these monitors were not added: {{ kuma_monitors | default([]) | map(attribute='name', default='(no name)') | join(', ') }}"
-  when: kuma_api_url | length == 0
+# Two entries with one name would overwrite each other in Kuma
+- name: Require unique monitor names
+  ansible.builtin.assert:
+    that:
+      - kuma_monitors | map(attribute='name') | unique | length == kuma_monitors | length
+    fail_msg: "Monitor names must be unique; repeated: {{ kuma_monitors | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ') }}"
+    quiet: true
+
+# Sets kuma_connected, and stays quiet when Kuma is not configured
+- name: Connect to Uptime Kuma
+  ansible.builtin.include_tasks: connect.yaml
 
 # Everything below needs Kuma
 - name: Add the Uptime Kuma monitors
-  when: kuma_api_url | length > 0
+  when: kuma_connected
   block:
-    # Catches a malformed entry before logging in, naming the entry
-    - name: Validate the monitors
-      ansible.builtin.assert:
-        that:
-          - item.name | default('') | length > 0
-          - kuma_type in ['http', 'ping', 'port', 'dns']
-          - kuma_type != 'http' or (item.url | default('') is match('^https?://'))
-          - kuma_type == 'http' or (item.hostname | default('') | length > 0)
-          - kuma_type != 'port' or (item.port | default('') | string | length > 0)
-          - kuma_type != 'dns' or (item.dns_resolve_server | default('') | length > 0)
-        fail_msg: "Monitor {{ item.name | default('(no name)') }}: needs a name and a type of http (with an http(s) url), ping (hostname), port (hostname and port) or dns (hostname and dns_resolve_server)."
-        quiet: true
-      loop: "{{ kuma_monitors }}"
-      loop_control:
-        label: "{{ item.name | default('(no name)') }}"
-      vars:
-        kuma_type: "{{ item.type | default('http') }}"
-
-    # Two entries with one name would overwrite each other in Kuma
-    - name: Require unique monitor names
-      ansible.builtin.assert:
-        that:
-          - kuma_monitors | map(attribute='name') | unique | length == kuma_monitors | length
-        fail_msg: "Monitor names must be unique; repeated: {{ kuma_monitors | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ') }}"
-        quiet: true
-
-    # Plays that never read Vault themselves still need the connection details for var_lookup.yaml
-    - name: Read the Vault connection settings
-      ansible.builtin.set_fact:
-        vault_addr: "{{ vault_addr | default(lookup('ansible.builtin.env', 'VAULT_ADDR'), true) }}"
-        vault_token: "{{ vault_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN'), true) }}"
-        vault_kv_mount: "{{ vault_kv_mount | default(lookup('ansible.builtin.env', 'VAULT_KV_MOUNT'), true) | default('secret', true) }}"
-      no_log: true
-
-    # Kuma's login, from its own Vault path
-    - name: Load the Uptime Kuma credentials
-      ansible.builtin.include_tasks: var_lookup.yaml
-      vars:
-        vault_secrets:
-          - path: "{{ vault_uptime_kuma_path | default('uptime-kuma') }}"
-            field: KUMA_USERNAME
-            var: kuma_username
-          - path: "{{ vault_uptime_kuma_path | default('uptime-kuma') }}"
-            field: KUMA_PASSWORD
-            var: kuma_password
-
-    # One login per run; the token is reused by the calls below
-    - name: Log in to Uptime Kuma
-      lucasheld.uptime_kuma.login:
-        api_url: "{{ kuma_api_url }}"
-        api_username: "{{ kuma_username }}"
-        api_password: "{{ kuma_password }}"
-      register: kuma_login
-      delegate_to: localhost
-      become: false
-      failed_when: false
-      no_log: true
-
-    # no_log above has to hide the whole result, since a successful one carries a long-lived token, so the likely causes are listed instead
-    - name: Require a successful Uptime Kuma login
-      ansible.builtin.assert:
-        that:
-          - kuma_login.token is defined
-        fail_msg: "Uptime Kuma login at {{ kuma_api_url }} failed. Check the runner can reach it, KUMA_USERNAME and KUMA_PASSWORD at {{ vault_uptime_kuma_path | default('uptime-kuma') }}, that 2FA is off for that user, and that the runner has uptime-kuma-api2 (the old uptime-kuma-api is 1.x only)."
-        quiet: true
-
     # Groups keep the dashboard sorted; each is created the first time a monitor uses it
     - name: Ensure the monitor groups exist
       lucasheld.uptime_kuma.monitor:

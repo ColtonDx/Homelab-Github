@@ -56,6 +56,16 @@ Git history makes these versioned backups as well, and a rebuilt application can
 
 - **Talos nodes** Hosting our Kubernetes, we consider Talos nodes to be replaceable. Restoring a single control-plane VM from an old image brings back a stale etcd member, which can break the cluster. Talos nodes are rebuilt from their machine configuration instead, and etcd snapshots restore the data.
 
+### Monitoring and Maintenance
+
+Uptime Kuma monitors services and hosts that do not have their own integrations for monitoring somewhere else. 
+
+I personally have everytihng configured for Discord notifications.
+
+the inventory defines the organizations and monitors of each app.
+
+DVBM supports Kuma natively for maintenance windows and ansible maintenance will call the maintenance playbook before rebooting services or hosts.
+
 ### Schedule and retention
 
 Backups run daily.

@@ -1,0 +1,52 @@
+---
+# Starts or ends an Uptime Kuma maintenance window by hand, for work Ansible does not already cover; update-linux.yaml opens its own around reboots
+# Pick what to silence with maintenance_hosts (an inventory pattern such as plex or proxmox, using each host's kuma_monitor) and/or maintenance_monitors (comma-separated Kuma monitor names)
+# Optional: maintenance_minutes (default 60), maintenance_title (default Maintenance plus the hosts or monitors), maintenance_action=end to end a window early by its title
+# The window ends by itself after maintenance_minutes, so forgetting to end it never leaves monitors silenced for good
+- name: Uptime Kuma maintenance window
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    mw_action: "{{ maintenance_action | default('start') }}"
+    mw_hosts: "{{ query('ansible.builtin.inventory_hostnames', maintenance_hosts) if maintenance_hosts | default('') | length > 0 else [] }}"
+    mw_named_raw: "{{ maintenance_monitors | default('') }}"
+    mw_named: "{{ mw_named_raw.split(',') | map('trim') | select | list if mw_named_raw is string else mw_named_raw | list }}"
+
+  tasks:
+    # Ending only needs the title; starting needs something to silence
+    - name: Validate the inputs
+      ansible.builtin.assert:
+        that:
+          - mw_action in ['start', 'end']
+          - mw_action == 'start' or maintenance_title | default('') | length > 0
+          - mw_action == 'end' or (mw_hosts | length > 0) or (mw_named | length > 0)
+        fail_msg: "maintenance_action is start or end; starting needs maintenance_hosts or maintenance_monitors, and ending needs the window's maintenance_title."
+        quiet: true
+
+    # Each host's monitors, worked out the same way the inventory sync names them
+    - name: Find the hosts' monitors
+      ansible.builtin.include_tasks: host_monitors.yaml
+      vars:
+        kuma_hosts: "{{ mw_hosts }}"
+      when: mw_action == 'start'
+
+    # A pattern that matched hosts without kuma_monitor would otherwise silence nothing without saying so
+    - name: Require something to silence
+      ansible.builtin.assert:
+        that:
+          - (kuma_host_monitors | default([]) | length > 0) or (mw_named | length > 0)
+        fail_msg: "{{ maintenance_hosts | default('') }} matched {{ mw_hosts | length }} host(s), none with kuma_monitor, and no maintenance_monitors were given."
+        quiet: true
+      when: mw_action == 'start'
+
+    # Starts the window, or ends it early by title
+    - name: Change the maintenance window
+      ansible.builtin.include_tasks: maintenance.yaml
+      vars:
+        kuma_maintenance_state: "{{ 'present' if mw_action == 'start' else 'absent' }}"
+        kuma_maintenance_title: "{{ maintenance_title | default('Maintenance ' ~ ((mw_hosts if mw_hosts | length > 0 else mw_named) | join(', ')), true) }}"
+        kuma_maintenance_monitors: "{{ (kuma_host_monitors | default([]) | map(attribute='name') | list + mw_named) | unique }}"
+        kuma_maintenance_minutes: "{{ maintenance_minutes | default(60) }}"
+        kuma_maintenance_description: "Started from Semaphore by maintenance-window.yaml"
