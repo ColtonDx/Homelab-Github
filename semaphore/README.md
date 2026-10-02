@@ -31,7 +31,7 @@ Only these environment variables reach a job, so everything else comes from the 
 | `NPM_URL` | No | Portainer Stack Creation, when adding a proxy host |
 | `DVBM_URL` | No | Portainer jobs and Backup \| DVBM Job |
 | `GARAGE_URL` | No | Terraform jobs, for the S3 state backend |
-| `UPTIME_KUMA_URL` | No | App installs and Portainer Stack Creation, to add Uptime Kuma monitors; without it the monitors are skipped |
+| `UPTIME_KUMA_URL` | No | App installs, Portainer Stack Creation and Uptime Kuma \| Seed Monitors, to add Uptime Kuma monitors; without it the monitors are skipped |
 
 Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, for the NetBox jobs and Terraform's NetBox lookups; `NETBOX_CLUSTER_NAME` does the same for Netbox | Sync Proxmox.
 
@@ -62,6 +62,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Portainer \| Push Config | (none) | [portainer-push-config.yaml](templates/portainer-push-config.yaml) | `ansible/playbooks/portainer/push-config.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
+| Uptime Kuma \| Seed Monitors | (none) | [uptime-kuma-seed-monitors.yaml](templates/uptime-kuma-seed-monitors.yaml) | `ansible/playbooks/uptime-kuma/seed-monitors.yaml` |
 
 ## File format
 

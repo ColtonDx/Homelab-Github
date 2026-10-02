@@ -15,7 +15,7 @@ variable "proxmox_api_token_secret" {
 }
 
 variable "nodes" {
-  description = "The cluster's nodes, from terraform_k3s.nodes in the inventory; use an odd number, at least three, for etcd"
+  description = "The cluster's nodes, built by build-project.yaml from the k3s_nodes inventory group; use an odd number, at least three, for etcd"
   type = list(object({
     name           = string
     vm_id          = number

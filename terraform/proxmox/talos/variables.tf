@@ -16,7 +16,7 @@ variable "proxmox_api_token_secret" {
 
 # The same list the Talos playbooks read; address, gateway and the other network fields are used by the machine config, not here
 variable "nodes" {
-  description = "The cluster's nodes, from talos_cluster.nodes in the inventory"
+  description = "The cluster's nodes, built by build-project.yaml from the talos_cluster inventory group"
   type = list(object({
     name           = string
     vm_id          = number

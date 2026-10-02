@@ -1,8 +1,8 @@
 ---
 # Builds a Semaphore remote runner on the machine it runs on: Ansible in a venv with this repo's collections, Terraform, talosctl, kubectl, and the runner service
-# Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml -e semaphore_url=<url>
+# Run on the runner itself, from a checkout of this repo: sudo -E ansible-playbook ansible/playbooks/deployment/semaphore-runner.yaml -i <inventory> (or -e semaphore_url=<url> without one)
 # Bootstrap needs only git and ansible-core from the distribution, since this playbook uses no collections
-# Inventory or extra vars: semaphore_url (required); semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
+# Inventory or extra vars: semaphore_url, defaulting to https://semaphore.<docker_domain> when the inventory sets docker_domain; semaphore_runner_name (default hostname), semaphore_runner_tags, semaphore_runner_max_parallel_tasks (4)
 # Optional: semaphore_runner_docker=true also installs Docker, for runners that build images
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; Vault: SEMAPHORE_REGISTRATION_TOKEN at semaphore (vault_semaphore_path renames it), read only when registering
 - name: Build the Semaphore runner
@@ -29,6 +29,8 @@
       - community.hashi_vault:==7.1.0
       - ansible.posix:==2.2.2
       - lucasheld.uptime_kuma:==1.2.0
+    # An explicit semaphore_url wins; otherwise Semaphore sits with the other Docker apps
+    runner_semaphore_url: "{{ (semaphore_url | default('https://semaphore.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}"
     runner_user: semaphore
     runner_home: /var/lib/semaphore-runner
     runner_config_dir: /etc/semaphore-runner
@@ -54,11 +56,11 @@
     - name: Validate the inputs
       ansible.builtin.assert:
         that:
-          - semaphore_url | default('') | length > 0
+          - runner_semaphore_url | length > 0
           - ansible_facts.os_family in runner_packages
           - runner_arch | length > 0
         fail_msg: >-
-          Set semaphore_url in the inventory's all group (localhost only sees those) or with -e;
+          Pass the inventory with -i so semaphore_url can default from docker_domain, or set semaphore_url with -e;
           the runner supports Debian and Red Hat families on x86_64 or aarch64.
 
     # Tools the runner's jobs call directly; setuptools is for older ansible-core's pip module, e.g. Debian 12's
@@ -229,7 +231,7 @@
         group: "{{ runner_user }}"
         mode: "0640"
         content: >-
-          {{ {'web_host': semaphore_url | regex_replace('/+$', ''),
+          {{ {'web_host': runner_semaphore_url,
               'tmp_path': runner_home ~ '/tmp',
               'env_vars': {'ANSIBLE_COLLECTIONS_PATH': runner_collections},
               'runner': {'token_file': runner_token_file,
@@ -367,4 +369,4 @@
       ansible.builtin.debug:
         msg: >-
           Runner '{{ semaphore_runner_name | default(ansible_facts.hostname) }}' is running Semaphore {{ runner_semaphore_version }}
-          against {{ semaphore_url }}, with {{ runner_venv }}/bin/ansible-playbook, Terraform {{ runner_terraform_version }}, talosctl {{ runner_talosctl_version }} and kubectl {{ runner_kubectl_version }}.
+          against {{ runner_semaphore_url }}, with {{ runner_venv }}/bin/ansible-playbook, Terraform {{ runner_terraform_version }}, talosctl {{ runner_talosctl_version }} and kubectl {{ runner_kubectl_version }}.

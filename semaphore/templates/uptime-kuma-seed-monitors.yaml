@@ -1,0 +1,15 @@
+---
+# Semaphore task template Uptime Kuma | Seed Monitors; see semaphore/README.md for the project resources it names
+name: Uptime Kuma | Seed Monitors
+description: Adds or updates an Uptime Kuma monitor for every inventory host with a kuma_monitor variable; re-runs update, nothing is deleted
+app: ansible
+playbook: ansible/playbooks/uptime-kuma/seed-monitors.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: seed_group
+    title: Default group
+    description: Kuma group for entries that do not set their own
+    default_value: Core
