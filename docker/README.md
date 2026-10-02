@@ -21,7 +21,8 @@ Other conventions:
 
 Stacks are deployed by Semaphore, which runs the playbooks in `ansible/playbooks/portainer/`:
 
-- **deploy-stack.yaml** creates or redeploys the stack in Portainer as a Git stack. It can also add the Nginx Proxy Manager host and register the backup job.
+- **deploy-stack.yaml** creates or redeploys the stack in Portainer as a Git stack. It can also add the Nginx Proxy Manager host and register the backup job, and it pushes any `config/` folder into the running container.
+  At the end it adds an Uptime Kuma monitor for stacks with an `AppPort` label, on `https://<container>.<npm_domain>`, the same address the proxy host serves. The monitor is named after the stack and goes in the `Applications` group; `-e skip_kuma_monitor=true` skips it. See `ansible/playbooks/uptime-kuma/` for the Kuma connection and its Vault login.
 - **update-stack.yaml** backs the stack up, pulls newer images, and checks the containers come back healthy.
 
 Portainer pulls the compose file from this repo, so every change goes through Git. Don't edit stacks in the Portainer UI.
@@ -50,7 +51,7 @@ If a name is set in more than one place, Vault wins over `docker_app_vars`, whic
 | Label | Used for |
 |---|---|
 | `Backup=<app>` | The DVBM backup job that covers this container's volumes |
-| `AppPort=<port>` | The port Nginx Proxy Manager forwards to; set it on the one container that serves the app |
+| `AppPort=<port>` | The port Nginx Proxy Manager forwards to; set it on the one container that serves the app. Its stack also gets an Uptime Kuma monitor on deploy |
 | `AppScheme=https` | Optional, on the same container as `AppPort`: forward over HTTPS instead of the default HTTP, for apps that only serve TLS |
 | `ConfigPath=<path>` | Optional: where `docker/<app>/config/*.j2`, rendered from the inventory, is copied into this container by `deploy-stack.yaml` or `push-config.yaml` |
 
