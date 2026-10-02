@@ -3,8 +3,8 @@ services:
     container_name: aerofoil
     image: luketanti/aerofoil:latest
     environment:
-     - USER_ADMIN_NAME=${USERNAME}
-     - USER_ADMIN_PASSWORD=${AEROFOIL_ADMIN_PASSWORD}
+      - USER_ADMIN_NAME=${USERNAME}
+      - USER_ADMIN_PASSWORD=${AEROFOIL_ADMIN_PASSWORD}
     volumes:
       - games:/games
       - config:/app/config

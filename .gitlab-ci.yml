@@ -1,0 +1,68 @@
+---
+# Checks every push and merge request: YAML style, Ansible syntax, Terraform formatting and validity, Kubernetes manifests, and a PII scan; the GitHub workflow runs the same ci/ scripts
+# Needs a runner with the Docker executor that accepts untagged jobs; versions match the GitHub workflow and the Semaphore runner
+
+# Merge request pipelines for merge requests, branch pipelines otherwise, so one push never runs both
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# Every job is a check, so all run in one stage and a newer push cancels the older pipeline
+stages: [lint]
+
+default:
+  interruptible: true
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  KUSTOMIZE_VERSION: 5.8.1
+  KUBECONFORM_VERSION: 0.8.0
+
+# Style and syntax for every YAML file, using the rules in .yamllint
+yamllint:
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - pip install yamllint==1.38.0
+    - yamllint -s .
+
+# Parses every playbook with the same Ansible and collections the Semaphore runner uses
+ansible:
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - pip install ansible-core==2.21.4 hvac
+    - ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2
+    - sh ci/ansible-syntax.sh
+
+# Formatting and validity of each Terraform project, without a backend or provider credentials
+terraform:
+  stage: lint
+  image:
+    name: hashicorp/terraform:1.16.4
+    entrypoint: [""]
+  script:
+    - sh ci/terraform-validate.sh
+
+# Builds every kustomization and checks the result against the Kubernetes and CRD schemas
+kubernetes:
+  stage: lint
+  image: alpine:3.22
+  script:
+    - apk add --no-cache curl
+    - curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin
+    - curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /usr/local/bin kubeconform
+    - sh ci/kubernetes-validate.sh
+
+# Fails when a tracked file matches a private pattern; PII_PATTERNS is a File-type CI/CD variable, one regex per line
+pii:
+  stage: lint
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  script:
+    - sh ci/pii-scan.sh

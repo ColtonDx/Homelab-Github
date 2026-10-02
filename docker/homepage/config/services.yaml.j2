@@ -1,15 +1,16 @@
 ---
-# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+# Rendered by ansible/playbooks/portainer/push-config.yaml; apps are built from domain, and hosts and devices use the homepage_url set on that inventory host
 {% set docker_domain = docker_subdomain ~ '.' ~ domain %}
 {% set kube_domain = (homepage.kubernetes_subdomain | default('k3s')) ~ '.' ~ domain %}
+{% macro host_url(host) %}{{ (hostvars[host] | default({})).homepage_url | default(undefined) | mandatory('Set homepage_url on inventory host ' ~ host) }}{% endmacro %}
 #
 - Column 1:
     - CI/CD:
         - Gitlab:
-            href: https://gitlab.{{ domain }}
+            href: {{ host_url('gitlab') }}
             icon: gitlab.png
             description: Git Repository and CI/CD
-            siteMonitor: https://{{ homepage_addresses.gitlab }}
+            siteMonitor: {{ host_url('gitlab') }}
         - Semaphore:
             href: https://semaphore.{{ docker_domain }}
             icon: semaphore.png
@@ -17,10 +18,10 @@
             server: my-docker
             container: semaphore
         - Hashicorp Vault:
-            href: https://vault.{{ domain }}/
+            href: {{ host_url('hashicorp-vault') }}
             icon: hashicorp-vault.png
             description: Secrets Management
-            siteMonitor: https://{{ homepage_addresses.vault }}
+            siteMonitor: {{ host_url('hashicorp-vault') }}
         - Nginx Proxy Manager:
             href: https://nginx.{{ docker_domain }}
             icon: nginx-proxy-manager.svg
@@ -81,10 +82,10 @@
             container: ix-portainer-portainer-1
             description: Container Management Interface
         - KASM:
-            href: https://kasm.{{ domain }}
+            href: {{ host_url('kasm') }}
             icon: kasm.png
             description: Containerized Workspaces
-            siteMonitor: https://kasm.{{ domain }}
+            siteMonitor: {{ host_url('kasm') }}
         - Rancher:
             href: https://rancher.{{ kube_domain }}
             icon: rancher.png
@@ -92,36 +93,36 @@
             siteMonitor: https://rancher.{{ kube_domain }}
     - Compute:
         - PVE1:
-            href: https://pve-vm-1.{{ domain }}:8006
+            href: {{ host_url('PVE1') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: https://{{ homepage_addresses.pve1 }}:8006
+            siteMonitor: {{ host_url('PVE1') }}
         - PVE2:
-            href: https://pve-vm-2.{{ domain }}:8006
+            href: {{ host_url('PVE2') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: https://pve-vm-2.{{ domain }}:8006
+            siteMonitor: {{ host_url('PVE2') }}
         - PVE3:
-            href: https://pve-vm-3.{{ domain }}:8006
+            href: {{ host_url('PVE3') }}
             icon: proxmox.png
             description: Proxmox Hypervisor
-            siteMonitor: https://pve-vm-3.{{ domain }}:8006
+            siteMonitor: {{ host_url('PVE3') }}
     - Storage:
         - TrueNAS Scale:
-            href: https://scale.{{ domain }}:9443
+            href: {{ host_url('truenas-scale') }}
             icon: truenas.png
             description: TrueNAS Scale primary node.
-            siteMonitor: https://scale.{{ domain }}:9443
+            siteMonitor: {{ host_url('truenas-scale') }}
         - TrueNAS Claw:
-            href: https://claw.{{ domain }}:9443
+            href: {{ host_url('truenas-claw') }}
             icon: truenas.png
             description: TrueNAS Scale offsite ZFS replication node.
-            siteMonitor: https://claw.{{ domain }}:9443
+            siteMonitor: {{ host_url('truenas-claw') }}
         - Unraid:
-            href: http://unraid.{{ domain }}
+            href: {{ host_url('unraid') }}
             icon: unraid.png
             description: Shared Media Network Attached Storage
-            siteMonitor: http://{{ homepage_addresses.unraid }}:6080
+            siteMonitor: {{ host_url('unraid') }}
         - NextCloud:
             href: https://nextcloud.{{ docker_domain }}
             icon: nextcloud.png
@@ -154,34 +155,34 @@
             container: netbox
             description: Network Topology and Source of Truth
         - Citadel:
-            href: https://citadel.{{ domain }}
+            href: {{ host_url('citadel') }}
             icon: opnsense.png
             description: Opnsense Network Security Appliance
-            siteMonitor: https://citadel.{{ domain }}
+            siteMonitor: {{ host_url('citadel') }}
         - ICX 7450-32ZP:
-            href: http://{{ homepage_addresses.switch }}/
+            href: {{ host_url('core-switch-1') }}
             icon: brocade.svg
             description: Core Switch
 
     - Power:
         - APC AP7752:
-            href: http://{{ homepage_addresses.apc }}
+            href: {{ host_url('apc-pdu') }}
             icon: apc
             description: Automatic Transfer Switch
-            ping: {{ homepage_addresses.apc }}
+            ping: {{ host_url('apc-pdu') | urlsplit('hostname') }}
         - Eaton 9130:
-            href: http://{{ homepage_addresses.eaton }}/
+            href: {{ host_url('eaton-ups') }}
             icon: mdi-power-plug-battery
             description: Primary UPS
-            ping: {{ homepage_addresses.eaton }}
+            ping: {{ host_url('eaton-ups') | urlsplit('hostname') }}
 
 - Column 3:
     - Automation and Monitoring:
         - Home Assistant:
-            href: https://hassio.{{ domain }}
+            href: {{ host_url('home-assistant') }}
             icon: home-assistant.svg
             description: Home Automation Platform
-            siteMonitor: http://{{ homepage_addresses.home_assistant }}:8123
+            siteMonitor: {{ host_url('home-assistant') }}
         - Malcolm:
             href: https://malcolm.{{ docker_domain }}
             icon: splunk.png
@@ -196,7 +197,7 @@
             href: https://kuma.{{ docker_domain }}
             icon: uptime-kuma.svg
             description: Uptime Monitoring
-            siteMonitor: http://{{ homepage_addresses.home_assistant }}:3001
+            siteMonitor: https://kuma.{{ docker_domain }}
         - Crowdsec:
             href: https://app.crowdsec.net/
             icon: crowdsec.svg
@@ -207,16 +208,16 @@
             server: my-docker
             container: changedetection
         - Avocent KVM:
-            href: https://{{ homepage_addresses.kvm }}
+            href: {{ host_url('kvm') }}
             icon: sh-jetkvm
             description: Mergepoint Unity KVM
-            siteMonitor: https://{{ homepage_addresses.kvm }}
+            siteMonitor: {{ host_url('kvm') }}
         - KonnectedAlarm Panel:
-            href: http://{{ homepage_addresses.alarm_panel }}
+            href: {{ host_url('alarm-panel') }}
             icon: sh-konnected
             description: Smart Home Alarm Panel
         - SLZB06:
-            href: http://{{ homepage_addresses.zigbee }}
+            href: {{ host_url('slzb06') }}
             description: Zigbee Gateway
             icon: sh-slzb06
     - Productivity:
@@ -260,7 +261,7 @@
         href: https://app.plex.tv/desktop/#!/
         icon: plex.png
         description: Media Server
-        siteMonitor: https://{{ homepage_addresses.plex }}:32400
+        siteMonitor: {{ host_url('plex') }}
         widget:
           type: tautulli
           url: https://web.{{ domain }}/tautulli

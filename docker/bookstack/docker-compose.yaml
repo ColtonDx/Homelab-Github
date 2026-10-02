@@ -50,4 +50,4 @@ networks:
     external: true
 
 volumes:
-    data:
+  data:

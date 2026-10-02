@@ -1,0 +1,32 @@
+---
+# Lint rules for every YAML file in the repo, based on ansible-lint's recommended yamllint settings
+extends: default
+
+ignore: |
+  *.j2
+  .terraform/
+  kubernetes/clusters/*/flux-system/gotk-components.yaml
+
+rules:
+  # Room for the one-line comment style; still catches runaway lines
+  line-length:
+    max: 300
+  # Allows the { key: value } flow style used in the inventory and task files
+  braces:
+    max-spaces-inside: 1
+  # One space before an inline comment, matching ansible-lint
+  comments:
+    min-spaces-from-content: 1
+  # Commented-out settings in compose files sit at column one
+  comments-indentation: false
+  # Compose files conventionally start without a document marker
+  document-start:
+    ignore: |
+      docker/
+  # Keys such as on: in GitHub workflows are not booleans
+  truthy:
+    check-keys: false
+  # Unquoted leading-zero numbers are a common YAML 1.1 surprise
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

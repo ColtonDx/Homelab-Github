@@ -4,12 +4,12 @@ services:
     restart: unless-stopped
     image: coltondx/docker-volume-backup-manager-v3:latest
     networks:
-       - reverseproxy-nw
+      - reverseproxy-nw
     environment:
-       - APP_PASSWORD=${DVBM3_PASSWORD}
-       - JWT_SECRET=${DVBM3_JWT}
-       - DB_ENCRYPTION_KEY=${DVBM3_ENCRYPTION_KEY}
-       - MIGRATE_ENCRYPTED_DB=true
+      - APP_PASSWORD=${DVBM3_PASSWORD}
+      - JWT_SECRET=${DVBM3_JWT}
+      - DB_ENCRYPTION_KEY=${DVBM3_ENCRYPTION_KEY}
+      - MIGRATE_ENCRYPTED_DB=true
 
       # ── Allowed hosts / CORS ──────────────────────────────────────────────
       # Restrict which Host header values are accepted (default: any).

@@ -1,10 +1,10 @@
 ---
-# Rendered by ansible/playbooks/portainer/push-config.yaml from inventory values; the URLs and addresses live in the inventory, never here
+# Rendered by ansible/playbooks/portainer/push-config.yaml; the Unraid address comes from the homepage_url on its inventory host
 # For configuration options and examples, please see:
 # https://gethomepage.dev/latest/configs/docker/
 
 my-unraid:
-  host: {{ homepage_addresses.unraid }}
+  host: {{ (hostvars['unraid'] | default({})).homepage_url | default(undefined) | mandatory('Set homepage_url on inventory host unraid') | urlsplit('hostname') }}
   port: 2375
 
 my-docker:

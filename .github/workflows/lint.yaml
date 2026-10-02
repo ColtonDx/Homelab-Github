@@ -1,0 +1,111 @@
+---
+# Checks every push and pull request: YAML style, Ansible syntax, Terraform formatting and validity, Kubernetes manifests, and a PII scan; .gitlab-ci.yml runs the same ci/ scripts on GitLab
+name: Lint
+
+on:
+  push:
+  pull_request:
+
+# Read-only, since no job writes back to the repo
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Style and syntax for every YAML file, using the rules in .yamllint
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      # The repo at the pushed commit
+      - uses: actions/checkout@v4
+
+      # The runner image's system Python refuses pip installs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Pinned so a new release cannot fail an unchanged repo
+      - name: Install yamllint
+        run: pip install yamllint==1.38.0
+
+      # GitHub annotations point at the offending line in the diff view
+      - name: Run yamllint
+        run: yamllint -s -f github .
+
+  # Parses every playbook with the same Ansible and collections the Semaphore runner uses
+  ansible:
+    runs-on: ubuntu-latest
+    steps:
+      # The repo at the pushed commit
+      - uses: actions/checkout@v4
+
+      # Same Python the runner playbook targets
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Versions match runner_python_packages and runner_collection_pins in semaphore-runner.yaml
+      - name: Install Ansible and collections
+        run: |
+          pip install ansible-core==2.21.4 hvac
+          ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2
+
+      # Every file under ansible/ whose top level is a list of plays
+      - name: Run syntax checks
+        run: sh ci/ansible-syntax.sh
+
+  # Formatting and validity of each Terraform project, without a backend or provider credentials
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      # The repo at the pushed commit
+      - uses: actions/checkout@v4
+
+      # Same version the runner installs
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      # fmt for the whole tree, then init and validate per project
+      - name: Check and validate
+        run: sh ci/terraform-validate.sh
+
+  # Builds every kustomization and checks the result against the Kubernetes and CRD schemas
+  kubernetes:
+    runs-on: ubuntu-latest
+    env:
+      KUSTOMIZE_VERSION: 5.8.1
+      KUBECONFORM_VERSION: 0.8.0
+    steps:
+      # The repo at the pushed commit
+      - uses: actions/checkout@v4
+
+      # Release binaries, pinned to the versions tested locally
+      - name: Install kustomize and kubeconform
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$HOME/bin"
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C "$HOME/bin" kubeconform
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      # Flux, External Secrets and other CRDs come from the community CRD catalog
+      - name: Build and validate
+        run: sh ci/kubernetes-validate.sh
+
+  # Fails when a tracked file matches a private pattern; the patterns live in the PII_PATTERNS secret, one regex per line
+  pii:
+    runs-on: ubuntu-latest
+    steps:
+      # The repo at the pushed commit
+      - uses: actions/checkout@v4
+
+      # Prints only file and line, never the match
+      - name: Scan for private values
+        run: sh ci/pii-scan.sh
+        env:
+          PII_PATTERNS: ${{ secrets.PII_PATTERNS }}

@@ -10,7 +10,7 @@ services:
       - '443:443' # Public HTTPS Port
       - '81:81' # Admin Web Port
     environment:
-       DISABLE_IPV6: 'true'
+      DISABLE_IPV6: 'true'
     volumes:
       - data:/data
       - data:/etc/letsencrypt

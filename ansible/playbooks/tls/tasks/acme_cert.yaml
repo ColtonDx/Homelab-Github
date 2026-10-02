@@ -88,7 +88,7 @@
   unarchive:
     src: /root/.acme.sh/acme.tar.gz
     dest: /root/.acme.sh
-    remote_src: yes
+    remote_src: true
     extra_opts: [--strip-components=1]
   when: not acme_sh_stat.stat.exists
 
