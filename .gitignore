@@ -18,5 +18,4 @@ talos/talosconfig
 talos/_out/
 
 # Local tooling
-.claude/
 id_rsa
