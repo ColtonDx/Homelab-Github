@@ -2,7 +2,7 @@
 # Adds or updates Uptime Kuma monitors; called by install and deploy playbooks, and by uptime-kuma/seed-monitors.yaml for every inventory host with kuma_monitor
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
-# Every type: optional group (default kuma_monitor_group, else Applications; empty for none) and interval (default 60 seconds)
+# Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
 # Connection: uptime_kuma_url in the inventory, else UPTIME_KUMA_URL in the environment, else https://kuma.<docker_domain>; with none of those the monitors are skipped
 # Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); needs VAULT_ADDR and VAULT_TOKEN unless the calling play already set vault_addr and vault_token
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
@@ -100,7 +100,7 @@
         name: "{{ item }}"
         type: group
         state: present
-      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default('Applications')) | select | unique | list }}"
+      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
       delegate_to: localhost
       become: false
 
@@ -128,7 +128,7 @@
         label: "{{ item.name }}"
       vars:
         kuma_type: "{{ item.type | default('http') }}"
-        kuma_group: "{{ item.group | default(kuma_monitor_group | default('Applications')) }}"
+        kuma_group: "{{ item.group | default(kuma_monitor_group | default(kuma_default_group | default('Applications'))) }}"
       delegate_to: localhost
       become: false
 

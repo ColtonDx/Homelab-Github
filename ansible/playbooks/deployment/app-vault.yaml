@@ -225,6 +225,6 @@
         kuma_monitors:
           - name: HashiCorp Vault
             url: "https://{{ vault_domain }}/v1/sys/health"
-            group: Core
             accepted_codes: ["200-299", "429"]
+        kuma_default_group: Core
       when: vault_ready | default(false) | bool
