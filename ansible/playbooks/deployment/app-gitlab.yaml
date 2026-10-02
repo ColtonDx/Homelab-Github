@@ -4,6 +4,7 @@
 # Without gitlab_version an installed GitLab is left alone; upgrades must follow GitLab's upgrade path, so step through its required stops
 # Also needs what tls/gitlab-tls.yaml needs: the Vault connection and the Cloudflare fields; gitlab_rb_path and gitlab_ssl_dir override the default locations
 # The first install writes a random root password to /etc/gitlab/initial_root_password, which GitLab deletes after 24 hours
+# Ends with an Uptime Kuma monitor for the HTTPS address, through tasks/uptime_kuma_monitor.yaml
 - name: Install GitLab on Debian/Ubuntu
   hosts: gitlab
   become: true
@@ -127,3 +128,18 @@
 # Finish the install on HTTPS; gitlab-tls.yaml can also be run on its own for renewals
 - name: Switch GitLab to HTTPS
   ansible.builtin.import_playbook: ../tls/gitlab-tls.yaml
+
+# Watches the HTTPS address the TLS playbook just set up
+- name: Monitor GitLab in Uptime Kuma
+  hosts: gitlab
+  become: false
+  gather_facts: false
+
+  tasks:
+    # Skipped with a note when Uptime Kuma is not configured
+    - name: Add the GitLab monitor
+      ansible.builtin.include_tasks: ../../tasks/uptime_kuma_monitor.yaml
+      vars:
+        kuma_monitor_name: GitLab
+        kuma_monitor_url: "https://{{ gitlab_domain }}"
+        kuma_monitor_group: Core

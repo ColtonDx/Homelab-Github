@@ -31,6 +31,7 @@ Only these environment variables reach a job, so everything else comes from the 
 | `NPM_URL` | No | Portainer Stack Creation, when adding a proxy host |
 | `DVBM_URL` | No | Portainer jobs and Backup \| DVBM Job |
 | `GARAGE_URL` | No | Terraform jobs, for the S3 state backend |
+| `UPTIME_KUMA_URL` | No | App installs and Portainer Stack Creation, to add Uptime Kuma monitors; without it the monitors are skipped |
 
 Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, for the NetBox jobs and Terraform's NetBox lookups; `NETBOX_CLUSTER_NAME` does the same for Netbox | Sync Proxmox.
 
