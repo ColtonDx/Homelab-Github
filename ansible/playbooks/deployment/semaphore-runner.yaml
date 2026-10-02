@@ -114,8 +114,36 @@
     - name: Install the collections
       ansible.builtin.command:
         argv: "{{ [runner_venv ~ '/bin/ansible-galaxy', 'collection', 'install', '--upgrade', '-p', runner_collections] + runner_collection_pins }}"
+      # Otherwise a copy in root's own collection paths counts as installed and is skipped, though jobs never see it
+      environment:
+        ANSIBLE_COLLECTIONS_PATH: "{{ runner_collections }}"
       register: runner_galaxy
       changed_when: "'was installed successfully' in runner_galaxy.stdout"
+
+    # ansible-galaxy can exit 0 without installing everything, so read back what is really there
+    - name: List the installed collections
+      ansible.builtin.command:
+        argv: ["{{ runner_venv }}/bin/ansible-galaxy", collection, list, -p, "{{ runner_collections }}", --format, json]
+      environment:
+        ANSIBLE_COLLECTIONS_PATH: "{{ runner_collections }}"
+      register: runner_galaxy_list
+      changed_when: false
+
+    # Names each pin that is missing or at another version, with what ansible-galaxy printed
+    - name: Require every pinned collection
+      ansible.builtin.assert:
+        that:
+          - runner_galaxy_missing | length == 0
+        fail_msg: >-
+          Not installed at the pinned version: {{ runner_galaxy_missing | join(', ') }}.
+          ansible-galaxy said: {{ (runner_galaxy.stdout ~ ' ' ~ runner_galaxy.stderr) | trim | truncate(800) }}
+        quiet: true
+      vars:
+        runner_galaxy_found: "{{ runner_galaxy_list.stdout | from_json | dict2items | map(attribute='value') | combine }}"
+        runner_galaxy_missing: >-
+          {{ runner_collection_pins | reject('in', runner_galaxy_found | dict2items
+             | map(attribute='key') | zip(runner_galaxy_found | dict2items | map(attribute='value.version'))
+             | map('join', ':==') | list) | list }}
 
     # Compare before downloading, so a re-run is quick and only a version change replaces the binary
     - name: Read the installed Terraform version

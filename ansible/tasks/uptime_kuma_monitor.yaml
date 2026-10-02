@@ -3,20 +3,23 @@
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
 # Every type: optional group (default kuma_monitor_group, else Applications; empty for none) and interval (default 60 seconds)
-# Connection: uptime_kuma_url in the inventory or UPTIME_KUMA_URL in the environment; when neither is set the monitors are skipped, so Kuma stays optional
+# Connection: uptime_kuma_url in the inventory, else UPTIME_KUMA_URL in the environment, else https://kuma.<docker_domain>; with none of those the monitors are skipped
 # Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); needs VAULT_ADDR and VAULT_TOKEN unless the calling play already set vault_addr and vault_token
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
 # Every Kuma call runs from the controller, so this works from plays on any host; needs the lucasheld.uptime_kuma collection with the uptime-kuma-api2 package
 
-# The inventory wins over the environment, the same as the other service URLs
+# An explicit address wins; otherwise Kuma sits with the other Docker apps
 - name: Find the Uptime Kuma address
   ansible.builtin.set_fact:
-    kuma_api_url: "{{ (uptime_kuma_url | default(lookup('ansible.builtin.env', 'UPTIME_KUMA_URL'), true) | default('', true)) | regex_replace('/+$', '') }}"
+    kuma_api_url: >-
+      {{ (uptime_kuma_url
+          | default(lookup('ansible.builtin.env', 'UPTIME_KUMA_URL'), true)
+          | default('https://kuma.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}
 
 # Says why nothing happened rather than failing, since Kuma is optional
 - name: Skip the monitors when Uptime Kuma is not configured
   ansible.builtin.debug:
-    msg: "No uptime_kuma_url or UPTIME_KUMA_URL is set, so these monitors were not added: {{ kuma_monitors | default([]) | map(attribute='name', default='(no name)') | join(', ') }}"
+    msg: "No uptime_kuma_url, UPTIME_KUMA_URL or docker_domain is set, so these monitors were not added: {{ kuma_monitors | default([]) | map(attribute='name', default='(no name)') | join(', ') }}"
   when: kuma_api_url | length == 0
 
 # Everything below needs Kuma
