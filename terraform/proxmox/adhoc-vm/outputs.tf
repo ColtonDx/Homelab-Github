@@ -46,3 +46,12 @@ output "ipconfig0" {
 output "tags" {
   value = var.tags
 }
+
+output "dns_reservations" {
+  description = "Name, address and MAC of the VM when it has a static address, which build-vm.yaml reserves in OPNsense Dnsmasq; empty for DHCP"
+  value = can(regex("ip=([0-9.]+)/", var.ipconfig0)) ? [{
+    name = proxmox_vm_qemu.clone.name
+    ip   = regex("ip=([0-9.]+)/", var.ipconfig0)[0]
+    mac  = proxmox_vm_qemu.clone.network[0].macaddr
+  }] : []
+}

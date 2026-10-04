@@ -23,6 +23,9 @@
 # Everything below needs Kuma
 - name: Change the maintenance window
   when: kuma_connected
+  # Every call in here runs from the controller without privilege escalation
+  delegate_to: localhost
+  become: false
   block:
     # The maintenance module fails on a name Kuma does not know, so the list is checked first
     - name: List Kuma's monitors
@@ -30,8 +33,6 @@
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
       register: kuma_mw_info
-      delegate_to: localhost
-      become: false
       no_log: true
       when: kuma_maintenance_state | default('present') == 'present'
 
@@ -70,8 +71,6 @@
       vars:
         # now() is local time, which timestamp() reads correctly; strftime then writes it out in UTC
         kuma_mw_start: "{{ now().timestamp() | int }}"
-      delegate_to: localhost
-      become: false
       when:
         - kuma_maintenance_state | default('present') == 'present'
         - kuma_mw_found | length > 0
@@ -83,8 +82,6 @@
         api_token: "{{ kuma_login.token }}"
         title: "{{ kuma_maintenance_title }}"
         state: absent
-      delegate_to: localhost
-      become: false
       when: kuma_maintenance_state | default('present') == 'absent'
 
     # Shown so the run log says what was silenced and for how long

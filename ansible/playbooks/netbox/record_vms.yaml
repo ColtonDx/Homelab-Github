@@ -1,0 +1,73 @@
+---
+# Task file: records Terraform-built VMs in NetBox from the Terraform output alone, so it works for any provider: the VM, its eth0 with the MAC, and its address with a DNS name as primary
+# Needs netbox_vm_records, a list of {name, ip, mac} (the dns_reservations output); an empty list does nothing
+# Cluster: netbox_vm_cluster (from the project's sources.yaml), else NETBOX_CLUSTER_NAME or netbox_cluster_name from the inventory, else PVE-Cluster, the same default as the Proxmox sync
+# Existing objects are updated rather than duplicated; provider syncs such as proxmox-vm-sync add their own details, like disks, on their next run
+# Connection: netbox_url in the inventory or NETBOX_URL in the environment; Vault: NETBOX_TOKEN at netbox (vault_netbox_path renames it), unless netbox_token is set
+
+# Everything below needs at least one record
+- name: Record the VMs in NetBox
+  when: netbox_vm_records | default([]) | length > 0
+  block:
+    # The same address and cluster setting the Proxmox sync uses
+    - name: Find NetBox and the cluster
+      ansible.builtin.set_fact:
+        nbr_url: "{{ (netbox_url | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | default('', true)) | regex_replace('/+$', '') }}"
+        nbr_cluster_name: >-
+          {{ netbox_vm_cluster | default(lookup('ansible.builtin.env', 'NETBOX_CLUSTER_NAME'), true)
+             | default(netbox_cluster_name | default(''), true) | default('PVE-Cluster', true) }}
+        nbr_domain: "{{ opnsense_domain | default(domain) }}"
+
+    # Nothing can be recorded without it
+    - name: Require the NetBox address
+      ansible.builtin.assert:
+        that:
+          - nbr_url | length > 0
+        fail_msg: "Set netbox_url in the inventory or NETBOX_URL in the environment."
+        quiet: true
+
+
+    # The token the other NetBox tasks use
+    - name: Load the NetBox token
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - { path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: netbox_token }
+      when: netbox_token is not defined
+
+    # Every call below sends the same headers
+    - name: Set the NetBox headers
+      ansible.builtin.set_fact:
+        nbr_headers: { Authorization: "Token {{ netbox_token }}", Accept: application/json }
+      no_log: true
+
+    # VMs are created inside this cluster, so it has to exist already
+    - name: Look up the cluster
+      ansible.builtin.uri:
+        url: "{{ nbr_url }}/api/virtualization/clusters/?name={{ nbr_cluster_name | urlencode }}"
+        headers: "{{ nbr_headers }}"
+      register: nbr_cluster
+      delegate_to: localhost
+      become: false
+
+    # A missing cluster is a NetBox setup step, not something to create silently
+    - name: Require the cluster
+      ansible.builtin.assert:
+        that:
+          - nbr_cluster.json.count == 1
+        fail_msg: "NetBox has no cluster named {{ nbr_cluster_name }}; create it, or set netbox_cluster in the project's sources.yaml."
+        quiet: true
+
+    # One VM at a time, since each step needs the IDs the one before it created
+    - name: Record each VM
+      ansible.builtin.include_tasks:
+        file: record_vm.yaml
+        apply:
+          delegate_to: localhost
+          become: false
+      loop: "{{ netbox_vm_records }}"
+      loop_control:
+        loop_var: nbr_vm
+        label: "{{ nbr_vm.name }}"
+      vars:
+        nbr_cluster_id: "{{ nbr_cluster.json.results[0].id }}"

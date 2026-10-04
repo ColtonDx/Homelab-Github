@@ -11,9 +11,6 @@
     # Read the connection settings and the job once, so the checks below can name what is missing
     - name: Read the connection settings from the environment
       ansible.builtin.set_fact:
-        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
         dvbm_url: "{{ lookup('ansible.builtin.env', 'DVBM_URL') | regex_replace('/+$', '') }}"
       no_log: true
 
@@ -22,10 +19,8 @@
       ansible.builtin.assert:
         that:
           - backup_job | default('') | length > 0
-          - vault_addr | length > 0
-          - vault_token | length > 0
           - dvbm_url | length > 0
-        fail_msg: "Pass backup_job, and set VAULT_ADDR, VAULT_TOKEN and DVBM_URL in the environment."
+        fail_msg: "Pass backup_job, and set DVBM_URL in the environment."
 
     # The app password DVBMv3 logs in with
     - name: Request the DVBMv3 password

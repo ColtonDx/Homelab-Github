@@ -10,9 +10,6 @@
   gather_facts: true
 
   vars:
-    vault_addr: "{{ lookup('env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
     vault_secrets:
       - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_API

@@ -4,7 +4,9 @@
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
 # Inventory: sources.yaml's host (one VM) or group (a cluster) supplies values from terraform_defaults, ansible_host and each host's terraform dict
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
-# After an apply it waits for the VM and runs the install playbook named by sources.yaml's install entry, which then runs its own TLS; tf_install=false skips that
+# After an apply it reserves each VM's address in OPNsense Dnsmasq from the project's dns_reservations output (tf_reserve_ip=false skips it)
+# It then records each VM in NetBox: the VM in sources.yaml's netbox_cluster, its eth0 and MAC, and its address with a DNS name (tf_netbox=false skips it)
+# It then waits for the VM and runs the install playbook named by sources.yaml's install entry, which then runs its own TLS; tf_install=false skips that
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL (or garage_url) for the s3 backend; NETBOX_URL only when a lookup needs NetBox
 # Vault: GARAGE_ACCESS_KEY and GARAGE_SECRET_KEY at garage for the s3 backend (vault_garage_path renames it), NETBOX_TOKEN at netbox when a lookup runs
 - name: Build a Terraform project
@@ -69,14 +71,6 @@
       loop: "{{ query('ansible.builtin.fileglob', tf_dir ~ '/*.tf') }}"
       loop_control:
         label: "{{ item | basename }}"
-
-    # Vault connection for every secret this project needs
-    - name: Read the Vault connection from the environment
-      ansible.builtin.set_fact:
-        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-      no_log: true
 
     # Secrets an override supplies are not fetched, so a bootstrap run can work without them in Vault
     - name: List the secrets to fetch
@@ -315,6 +309,20 @@
       ansible.builtin.debug:
         msg: "{{ tf_result.stdout_lines | default([]) }}"
 
+    # Static VMs get their DNS name and DHCP reservation before anything connects to them; projects without a dns_reservations output reserve nothing
+    - name: Reserve the VMs' addresses in OPNsense
+      ansible.builtin.include_tasks: ../opnsense/dnsmasq_reserve_ip.yaml
+      vars:
+        opnsense_reservations: "{{ tf_result.outputs.dns_reservations.value | default([]) }}"
+      when:
+        - tf_action_resolved == 'apply'
+        - tf_reserve_ip | default(true) | bool
+
+    # Read by the NetBox plays below, which only run after an apply
+    - name: Hand the built VMs over to NetBox
+      ansible.builtin.set_fact:
+        tf_netbox_records: "{{ tf_result.outputs.dns_reservations.value | default([]) if tf_action_resolved == 'apply' and tf_netbox | default(true) | bool else [] }}"
+
     # A reminder that local state has to be moved into Garage once it is running
     - name: Remind to migrate local state
       ansible.builtin.debug:
@@ -329,6 +337,20 @@
         tf_install_hosts: >-
           {{ tf_sources.install.hosts if tf_action_resolved == 'apply' and tf_sources.install is defined
              and tf_install | default(true) | bool else '' }}
+
+# Straight from the Terraform output, so it works for any provider; provider syncs such as the hourly Proxmox one add their own details later
+- name: Record the built VMs in NetBox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # The VM, its eth0 and MAC, and its address with a DNS name; skipped unless an apply produced static addresses
+    - name: Record the VMs
+      ansible.builtin.include_tasks: ../netbox/record_vms.yaml
+      vars:
+        netbox_vm_records: "{{ tf_netbox_records | default([]) }}"
+        netbox_vm_cluster: "{{ tf_sources.netbox_cluster | default('') }}"
 
 # A new VM needs time to boot and run cloud-init before SSH answers; matches no hosts unless an install follows
 - name: Wait for the built VM

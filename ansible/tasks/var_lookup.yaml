@@ -3,7 +3,7 @@
 # Each vault_secrets entry needs var (the fact to set) and path (the Vault secret), plus optionally field (omit for the whole document)
 # inventory names an inventory variable used before Vault; an entry with only inventory never reads Vault
 # required defaults to true; default is the value used when an optional entry is missing
-# Needs facts vault_addr and vault_token; vault_kv_mount sets the KV2 mount (default secret)
+# Vault connection: vault_addr, vault_token and vault_kv_mount when the caller sets them, else VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT from the environment (mount default secret)
 
 # Check the caller passed a usable list of entries
 - name: Ensure Vault secret list is provided
@@ -46,18 +46,32 @@
     - item.var not in vault_from_inventory
     - item.path is defined
 
-# Work out which Vault paths to read, each only once
+# Work out which Vault paths to read, each only once, and where Vault is; separate names, so a caller's own vault_addr is never redefined here
 - name: List the distinct Vault paths to fetch
   set_fact:
     vault_paths: "{{ vault_needed | map(attribute='path') | unique | list }}"
+    vault_lookup_addr: "{{ (vault_addr | default(lookup('ansible.builtin.env', 'VAULT_ADDR'), true) | default('', true)) | regex_replace('/+$', '') }}"
+    vault_lookup_token: "{{ vault_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN'), true) | default('', true) }}"
+    vault_lookup_mount: "{{ vault_kv_mount | default(lookup('ansible.builtin.env', 'VAULT_KV_MOUNT'), true) | default('secret', true) }}"
+  no_log: true
+
+# Names the missing setting instead of failing inside the Vault module
+- name: Require the Vault connection
+  assert:
+    that:
+      - vault_lookup_addr is match('^https?://')
+      - vault_lookup_token | length > 0
+    fail_msg: "Reading Vault needs VAULT_ADDR and VAULT_TOKEN in the environment (or vault_addr and vault_token set by the playbook)."
+    quiet: true
+  when: vault_paths | length > 0
 
 # A missing path is tolerated here and reported below only if a required entry needs it; other failures still retry and fail
 - name: Fetch secrets from HashiCorp Vault
   community.hashi_vault.vault_kv2_get:
-    url: "{{ vault_addr | regex_replace('/+$', '') }}"
+    url: "{{ vault_lookup_addr }}"
     auth_method: token
-    token: "{{ vault_token }}"
-    engine_mount_point: "{{ vault_kv_mount | default('secret') }}"
+    token: "{{ vault_lookup_token }}"
+    engine_mount_point: "{{ vault_lookup_mount }}"
     path: "{{ item }}"
   register: vault_results
   retries: 5
@@ -69,6 +83,7 @@
   loop: "{{ vault_paths }}"
   no_log: true
   delegate_to: localhost
+  become: false
 
 # Store each fetched Vault document under its path
 - name: Index the fetched documents by path
@@ -104,7 +119,7 @@
       - vault_missing | length == 0
     fail_msg: >-
       {{ vault_missing | unique | length }} required entr{{ 'y is' if vault_missing | unique | length == 1 else 'ies are' }}
-      missing (Vault mount '{{ vault_kv_mount | default('secret') }}'): {{ vault_missing | unique | join(', ') }}.
+      missing (Vault mount '{{ vault_lookup_mount }}'): {{ vault_missing | unique | join(', ') }}.
       Add them and re-run.
 
 # Whole documents default to {}, single fields to ''; an entry's own default overrides either

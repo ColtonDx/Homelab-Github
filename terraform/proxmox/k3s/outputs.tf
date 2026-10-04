@@ -8,3 +8,12 @@ output "node_addresses" {
   description = "Node name to IPv4 address"
   value       = { for k, v in local.nodes : k => v.address }
 }
+
+output "dns_reservations" {
+  description = "Name, address and MAC of each node, which build-project.yaml reserves in OPNsense Dnsmasq after an apply"
+  value = [for k, v in proxmox_vm_qemu.k3s_node : {
+    name = k
+    ip   = local.nodes[k].address
+    mac  = v.network[0].macaddr
+  }]
+}

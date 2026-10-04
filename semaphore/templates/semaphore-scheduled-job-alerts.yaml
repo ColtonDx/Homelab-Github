@@ -1,0 +1,10 @@
+---
+# Semaphore task template Semaphore | Scheduled Job Alerts; see semaphore/README.md for the project resources it names
+name: Semaphore | Scheduled Job Alerts
+description: Posts to Discord when a scheduled job starts failing or recovers, once per change; runs every 15 minutes, matching its alert window
+app: ansible
+playbook: ansible/playbooks/semaphore/scheduled-job-alerts.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

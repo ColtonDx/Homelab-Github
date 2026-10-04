@@ -8,9 +8,6 @@
 # Read the connection settings once, so every playbook uses the same names
 - name: Read the connection settings from the environment
   ansible.builtin.set_fact:
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
     portainer_url: "{{ lookup('ansible.builtin.env', 'PORTAINER_URL') | regex_replace('/+$', '') }}"
     npm_url: "{{ lookup('ansible.builtin.env', 'NPM_URL') | regex_replace('/+$', '') }}"
     dvbm_url: "{{ lookup('ansible.builtin.env', 'DVBM_URL') | regex_replace('/+$', '') }}"
@@ -23,13 +20,11 @@
 - name: Validate the shared inputs
   ansible.builtin.assert:
     that:
-      - vault_addr | length > 0
-      - vault_token | length > 0
       - portainer_url | length > 0
       - app_name | default('') | length > 0
       - portainer_endpoint | default('') | length > 0
     fail_msg: >-
-      Set VAULT_ADDR, VAULT_TOKEN and PORTAINER_URL in the environment,
+      Set PORTAINER_URL in the environment,
       and pass app_name and portainer_endpoint.
 
 # Both playbooks need the compose file's variables and labels

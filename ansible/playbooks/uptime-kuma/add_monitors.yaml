@@ -38,6 +38,9 @@
 # Everything below needs Kuma
 - name: Add the Uptime Kuma monitors
   when: kuma_connected
+  # Every call in here runs from the controller without privilege escalation
+  delegate_to: localhost
+  become: false
   block:
     # Groups keep the dashboard sorted; each is created the first time a monitor uses it
     - name: Ensure the monitor groups exist
@@ -48,8 +51,6 @@
         type: group
         state: present
       loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
-      delegate_to: localhost
-      become: false
 
     # Fields that do not apply to a monitor's type are left out, so Kuma keeps its own defaults for them
     - name: Add or update the monitors
@@ -76,8 +77,6 @@
       vars:
         kuma_type: "{{ item.type | default('http') }}"
         kuma_group: "{{ item.group | default(kuma_monitor_group | default(kuma_default_group | default('Applications'))) }}"
-      delegate_to: localhost
-      become: false
 
     # Shown so the run log says what is being watched
     - name: Report the monitors

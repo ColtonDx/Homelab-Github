@@ -10,9 +10,6 @@
   any_errors_fatal: true
 
   vars:
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
     vault_secrets:
       - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_API, var: cloudflare_api_token }
       - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_EMAIL, var: acme_email }

@@ -3,6 +3,7 @@
 # Required for a new VM: vm_id, vm_name, template_name, target_node, storage_pool
 # Optional: cores, vcpus (sockets), memory (MB), osdisk_size, data_disk_size, data_storage_pool, vm_tags, ip_mode (dhcp or static) with static_ip, static_prefix, gateway
 # On a re-run, blank fields keep the value from the last run; disks can grow but never shrink, and a changed template_name is ignored
+# A static VM's address is reserved in OPNsense Dnsmasq under vm_name after the apply (reserve_ip=false skips it) and the VM is recorded in NetBox (record_netbox=false skips it)
 - name: Build or update an ad-hoc Proxmox VM
   hosts: localhost
   connection: local
@@ -81,6 +82,20 @@
         variables: "{{ adhoc_vars }}"
       environment: "{{ adhoc_tf_env }}"
       register: adhoc_apply
+
+    # A static VM gets its DNS name and DHCP reservation; a DHCP VM's output is empty, so nothing is reserved
+    - name: Reserve the VM's address in OPNsense
+      ansible.builtin.include_tasks: ../opnsense/dnsmasq_reserve_ip.yaml
+      vars:
+        opnsense_reservations: "{{ adhoc_apply.outputs.dns_reservations.value | default([]) }}"
+      when: reserve_ip | default(true) | bool
+
+    # The VM, its eth0 and MAC, and its address in NetBox; a DHCP VM's output is empty, so nothing is recorded
+    - name: Record the VM in NetBox
+      ansible.builtin.include_tasks: ../netbox/record_vms.yaml
+      vars:
+        netbox_vm_records: "{{ adhoc_apply.outputs.dns_reservations.value | default([]) }}"
+      when: record_netbox | default(true) | bool
 
     # Report the outcome without any secret values
     - name: Summarise the result

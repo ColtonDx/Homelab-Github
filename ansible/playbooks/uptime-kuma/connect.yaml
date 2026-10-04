@@ -1,7 +1,7 @@
 ---
 # Task file: finds Uptime Kuma and logs in once, setting kuma_connected, kuma_api_url and kuma_login.token for the other task files here
 # Address: uptime_kuma_url in the inventory, else UPTIME_KUMA_URL in the environment, else https://kuma.<docker_domain>; with none of those kuma_connected is false and nothing fails
-# Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); needs VAULT_ADDR and VAULT_TOKEN unless the calling play already set vault_addr and vault_token
+# Vault: KUMA_USERNAME and KUMA_PASSWORD at uptime-kuma (vault_uptime_kuma_path renames it); reads Vault through VAULT_ADDR and VAULT_TOKEN
 # Every Kuma call runs from the controller, so this works from plays on any host; needs the lucasheld.uptime_kuma collection with the uptime-kuma-api2 package
 
 # An explicit address wins; otherwise Kuma sits with the other Docker apps
@@ -23,13 +23,6 @@
 - name: Log in to Uptime Kuma
   when: kuma_api_url | length > 0
   block:
-    # Plays that never read Vault themselves still need the connection details for var_lookup.yaml
-    - name: Read the Vault connection settings
-      ansible.builtin.set_fact:
-        vault_addr: "{{ vault_addr | default(lookup('ansible.builtin.env', 'VAULT_ADDR'), true) }}"
-        vault_token: "{{ vault_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN'), true) }}"
-        vault_kv_mount: "{{ vault_kv_mount | default(lookup('ansible.builtin.env', 'VAULT_KV_MOUNT'), true) | default('secret', true) }}"
-      no_log: true
 
     # Kuma's login, from its own Vault path
     - name: Load the Uptime Kuma credentials

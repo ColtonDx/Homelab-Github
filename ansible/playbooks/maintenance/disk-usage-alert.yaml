@@ -87,14 +87,6 @@
         - name: Post to Discord
           when: disk_post | bool
           block:
-            # Vault connection for the webhook
-            - name: Read the Vault connection from the environment
-              ansible.builtin.set_fact:
-                vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-                vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-                vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-              no_log: true
-
             # The webhook URL carries its own token, so it is a secret
             - name: Request the Discord webhook
               ansible.builtin.set_fact:

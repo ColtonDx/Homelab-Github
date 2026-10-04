@@ -60,6 +60,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |
 | Portainer Stack Update | (none) | [portainer-stack-update.yaml](templates/portainer-stack-update.yaml) | `ansible/playbooks/portainer/update-stack.yaml` |
 | Portainer \| Push Config | (none) | [portainer-push-config.yaml](templates/portainer-push-config.yaml) | `ansible/playbooks/portainer/push-config.yaml` |
+| Semaphore \| Scheduled Job Alerts | (none) | [semaphore-scheduled-job-alerts.yaml](templates/semaphore-scheduled-job-alerts.yaml) | `ansible/playbooks/semaphore/scheduled-job-alerts.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
 | Uptime Kuma \| Inventory Sync | (none) | [uptime-kuma-inventory-sync.yaml](templates/uptime-kuma-inventory-sync.yaml) | `ansible/playbooks/uptime-kuma/inventory-sync.yaml` |

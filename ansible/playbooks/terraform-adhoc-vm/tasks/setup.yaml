@@ -4,13 +4,7 @@
 # Vault: GARAGE_ACCESS_KEY and GARAGE_SECRET_KEY at garage; PROXMOX_API_URL, PROXMOX_API_TOKEN_ID and PROXMOX_API_TOKEN_SECRET at proxmox
 # State file: vm-{vm_id}.tfstate by default; state_key_format (or STATE_KEY_FORMAT) changes it and must contain {vm_id}
 
-- name: Set the Vault connection
-  ansible.builtin.set_fact:
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-  no_log: true
-
+# Garage for the state backend and Proxmox for the provider
 - name: List the secrets this flow needs
   ansible.builtin.set_fact:
     vault_secrets:

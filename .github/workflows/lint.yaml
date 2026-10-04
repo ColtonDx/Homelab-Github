@@ -52,7 +52,7 @@ jobs:
       - name: Install Ansible and collections
         run: |
           pip install ansible-core==2.21.4 hvac
-          ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2 lucasheld.uptime_kuma:==1.2.0
+          ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2 lucasheld.uptime_kuma:==1.2.0 oxlorg.opnsense:==26.1.11
 
       # Every file under ansible/ whose top level is a list of plays
       - name: Run syntax checks

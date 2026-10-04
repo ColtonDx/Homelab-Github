@@ -17,12 +17,9 @@
         proxmox_acme_plugin: "{{ (proxmox_acme | default({})).plugin | default('cloudflare') }}"
         proxmox_acme_directory: "{{ (proxmox_acme | default({})).directory | default('https://acme-v02.api.letsencrypt.org/directory') }}"
 
-    # Vault connection for the Cloudflare credentials
-    - name: Read the Vault connection from the environment
+    # The Cloudflare credentials the DNS challenge needs
+    - name: List the Cloudflare credentials
       ansible.builtin.set_fact:
-        vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-        vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-        vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
         vault_secrets:
           - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_API, var: cloudflare_api_token }
           - { path: "{{ vault_cloudflare_path | default('cloudflare') }}", field: CF_EMAIL, var: acme_email }

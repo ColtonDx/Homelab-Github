@@ -18,14 +18,6 @@
       {{ hostvars[inventory_hostname]['netbox_cluster_name']
          if 'netbox_cluster_name' in hostvars[inventory_hostname] else '' }}
 
-# Vault connection for the credentials below
-- name: Set Vault connection vars
-  ansible.builtin.set_fact:
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
-  no_log: true
-
 # Proxmox's API token from the proxmox path and NetBox's token from the netbox path; vault_proxmox_path and vault_netbox_path rename them
 - name: Set the secrets to pull from Vault
   ansible.builtin.set_fact:

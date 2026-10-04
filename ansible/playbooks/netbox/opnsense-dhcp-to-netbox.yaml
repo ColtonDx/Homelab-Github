@@ -11,9 +11,6 @@
 
   vars:
     firewall_host: "{{ ansible_host }}"
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-    vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
-    vault_kv_mount: "{{ lookup('ansible.builtin.env', 'VAULT_KV_MOUNT') | default('secret', true) }}"
     vault_secrets:
       - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_KEY, var: firewall_key }
       - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_SECRET, var: firewall_secret }
@@ -26,15 +23,6 @@
         netbox_url: >-
           {{ (hostvars[inventory_hostname]['netbox_url'] if 'netbox_url' in hostvars[inventory_hostname] else '')
              | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | regex_replace('/+$', '') }}
-
-    # Separate from the check below, since each failure has a different fix
-    - name: Validate the Vault connection is configured
-      ansible.builtin.assert:
-        that:
-          - vault_addr | length > 0
-          - vault_token | length > 0
-        fail_msg: "Set VAULT_ADDR and VAULT_TOKEN in the environment."
-      no_log: true
 
     # The firewall's address and NetBox's URL are site facts, not secrets
     - name: Validate the NetBox URL and firewall address

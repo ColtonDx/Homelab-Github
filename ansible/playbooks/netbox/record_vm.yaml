@@ -1,0 +1,173 @@
+---
+# Task file, looped by record_vms.yaml over each VM in nbr_vm ({name, ip, mac}): finds or creates the VM, its eth0, the MAC and the address, then links them
+# Existing objects are reused and only the fields this owns are changed, so it never fights a provider sync over curated fields
+# Every call runs from the controller without privilege escalation; record_vms.yaml applies that to the whole file when it includes it
+
+# NetBox names VMs uniquely within a cluster
+- name: Look up the VM
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/virtual-machines/?name={{ nbr_vm.name | urlencode }}&cluster_id={{ nbr_cluster_id }}"
+    headers: "{{ nbr_headers }}"
+  register: nbr_vm_found
+
+# Created active and marked as Terraform's, so it is clear where it came from
+- name: Create the VM
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/virtual-machines/"
+    method: POST
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: { name: "{{ nbr_vm.name }}", cluster: "{{ nbr_cluster_id | int }}", status: active, comments: "Built by Terraform; recorded by build-project.yaml." }
+    status_code: [201]
+  register: nbr_vm_new
+  when: nbr_vm_found.json.count == 0
+
+# The ID whichever way the VM was found
+- name: Note the VM
+  ansible.builtin.set_fact:
+    nbr_vm_id: "{{ (nbr_vm_new.json if nbr_vm_found.json.count == 0 else nbr_vm_found.json.results[0]).id }}"
+
+# The first NIC, named eth0 as the Proxmox sync names it
+- name: Look up eth0
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/interfaces/?virtual_machine_id={{ nbr_vm_id }}&name=eth0"
+    headers: "{{ nbr_headers }}"
+  register: nbr_if_found
+
+# Only when the VM has no eth0 yet
+- name: Create eth0
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/interfaces/"
+    method: POST
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: { virtual_machine: "{{ nbr_vm_id | int }}", name: eth0 }
+    status_code: [201]
+  register: nbr_if_new
+  when: nbr_if_found.json.count == 0
+
+# The ID whichever way the interface was found
+- name: Note eth0
+  ansible.builtin.set_fact:
+    nbr_if: "{{ nbr_if_new.json if nbr_if_found.json.count == 0 else nbr_if_found.json.results[0] }}"
+
+# Since NetBox 4.2 a MAC is its own object, stored upper-case as the Proxmox sync stores it
+- name: Look up the MAC
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/dcim/mac-addresses/?mac_address={{ nbr_mac | urlencode }}"
+    headers: "{{ nbr_headers }}"
+  register: nbr_mac_found
+  vars:
+    nbr_mac: "{{ nbr_vm.mac | upper | replace('-', ':') }}"
+
+# A MAC not yet known is created on eth0
+- name: Create the MAC
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/dcim/mac-addresses/"
+    method: POST
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: { mac_address: "{{ nbr_vm.mac | upper | replace('-', ':') }}", assigned_object_type: virtualization.vminterface, assigned_object_id: "{{ nbr_if.id | int }}" }
+    status_code: [201]
+  register: nbr_mac_new
+  when: nbr_mac_found.json.count == 0
+
+# Linking makes it show as eth0's MAC; skipped when it already is
+- name: Link the MAC to eth0
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/interfaces/{{ nbr_if.id }}/"
+    method: PATCH
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: { primary_mac_address: "{{ nbr_mac_id | int }}" }
+  vars:
+    nbr_mac_id: "{{ (nbr_mac_new.json if nbr_mac_found.json.count == 0 else nbr_mac_found.json.results[0]).id }}"
+  when: (nbr_if.primary_mac_address.id | default(none)) != nbr_mac_id | int
+  changed_when: true
+
+# NetBox matches an address here whatever its mask
+- name: Look up the address
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/ipam/ip-addresses/?address={{ nbr_vm.ip }}"
+    headers: "{{ nbr_headers }}"
+  register: nbr_ip_found
+
+# The narrowest prefix holding the address gives a new address its mask
+- name: Look up the address's prefix
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/ipam/prefixes/?contains={{ nbr_vm.ip }}"
+    headers: "{{ nbr_headers }}"
+  register: nbr_prefix
+  when: nbr_ip_found.json.count == 0
+
+# A new address goes straight onto eth0 with its DNS name
+- name: Create the address
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/ipam/ip-addresses/"
+    method: POST
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body:
+      address: "{{ nbr_vm.ip }}/{{ nbr_prefix.json.results | map(attribute='prefix') | map('regex_replace', '^.*/', '') | map('int') | max | default(32) }}"
+      status: active
+      dns_name: "{{ nbr_vm.name }}.{{ nbr_domain }}"
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ nbr_if.id | int }}"
+    status_code: [201]
+  register: nbr_ip_new
+  when: nbr_ip_found.json.count == 0
+
+# An address is ours when it is new, unassigned, or already on this eth0; anything else belongs to another object
+- name: Check who owns the address
+  ansible.builtin.set_fact:
+    nbr_ip: "{{ nbr_ip_new.json if nbr_ip_found.json.count == 0 else nbr_ip_found.json.results[0] }}"
+    nbr_ip_ours: >-
+      {{ nbr_ip_found.json.count == 0 or nbr_ip_found.json.results[0].assigned_object_id is none
+         or nbr_ip_found.json.results[0].assigned_object_id == nbr_if.id }}
+
+# Left alone rather than renamed, since two things claiming one address needs a person to sort out
+- name: Warn about an address used elsewhere
+  ansible.builtin.debug:
+    msg: "{{ nbr_vm.ip }} is assigned to another object in NetBox, so it was left as it is; check whether {{ nbr_vm.name }} or that object has the wrong address."
+  when: not nbr_ip_ours | bool
+
+# An existing address gets the DNS name, active status and eth0, sending only what differs
+- name: Update the address
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/ipam/ip-addresses/{{ nbr_ip.id }}/"
+    method: PATCH
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: "{{ nbr_ip_wanted }}"
+  vars:
+    nbr_ip_wanted:
+      dns_name: "{{ nbr_vm.name }}.{{ nbr_domain }}"
+      status: active
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ nbr_if.id | int }}"
+  when:
+    - nbr_ip_found.json.count > 0
+    - nbr_ip_ours | bool
+    - nbr_ip.dns_name != nbr_ip_wanted.dns_name or nbr_ip.status.value != 'active' or nbr_ip.assigned_object_id != nbr_if.id
+  changed_when: true
+
+# Re-read so the comparison below sees the VM's current primary
+- name: Read the VM's primary address
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/virtual-machines/{{ nbr_vm_id }}/"
+    headers: "{{ nbr_headers }}"
+  register: nbr_vm_now
+  when: nbr_ip_ours | bool
+
+# The address becomes the VM's primary, as the Proxmox sync does for eth0; skipped when it already is
+- name: Make the address the VM's primary
+  ansible.builtin.uri:
+    url: "{{ nbr_url }}/api/virtualization/virtual-machines/{{ nbr_vm_id }}/"
+    method: PATCH
+    headers: "{{ nbr_headers }}"
+    body_format: json
+    body: { primary_ip4: "{{ nbr_ip.id | int }}" }
+  when:
+    - nbr_ip_ours | bool
+    - (nbr_vm_now.json.primary_ip4.id | default(nbr_vm_now.json.primary_ip4) | default(none)) != nbr_ip.id
+  changed_when: true

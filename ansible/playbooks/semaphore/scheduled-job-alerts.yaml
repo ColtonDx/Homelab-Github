@@ -1,0 +1,139 @@
+---
+# Posts to Discord when a scheduled Semaphore job starts failing or recovers, once per change rather than once per failed run; meant to run on its own schedule
+# Watches every template with an active schedule in every project; a run counts once, in the alert_window_minutes (default 15) after it finished, so that must match this job's schedule
+# A failed run alerts only when the run before it succeeded (or there was none); a successful run after a failure posts a recovery; anything else stays quiet
+# Address: semaphore_url, else https://semaphore.<docker_domain>; Vault: SEMAPHORE_API_TOKEN at semaphore and DISCORD_WEBHOOK_URL at discord (vault_semaphore_path and vault_discord_path rename them)
+- name: Alert on scheduled job failures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    sj_url: "{{ (semaphore_url | default('https://semaphore.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}"
+    sj_window: "{{ (alert_window_minutes | default(15) | int) * 60 }}"
+
+  tasks:
+    # Semaphore's address comes from the inventory, so a missing one is a setup problem
+    - name: Require the Semaphore address
+      ansible.builtin.assert:
+        that:
+          - sj_url is match('^https?://')
+        fail_msg: "Set semaphore_url, or docker_domain so it defaults to https://semaphore.<docker_domain>."
+        quiet: true
+
+    # An API token for reading schedules and runs, and the webhook to post to
+    - name: Load the Semaphore token and Discord webhook
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - { path: "{{ vault_semaphore_path | default('semaphore') }}", field: SEMAPHORE_API_TOKEN, var: sj_token }
+          - { path: "{{ vault_discord_path | default('discord') }}", field: DISCORD_WEBHOOK_URL, var: sj_webhook }
+
+    # Every project, so schedules added to a new project are watched too
+    - name: List the projects
+      ansible.builtin.uri:
+        url: "{{ sj_url }}/api/projects"
+        headers: { Authorization: "Bearer {{ sj_token }}" }
+      register: sj_projects
+
+    # Each project's schedules, to find which templates run on their own
+    - name: List each project's schedules
+      ansible.builtin.uri:
+        url: "{{ sj_url }}/api/project/{{ item.id }}/schedules"
+        headers: { Authorization: "Bearer {{ sj_token }}" }
+      loop: "{{ sj_projects.json }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: sj_schedules
+
+    # One entry per scheduled template, even when several schedules run it
+    - name: List the scheduled templates
+      ansible.builtin.set_fact:
+        sj_templates: "{{ sj_templates | default([]) + [{'project': item.0.item.id, 'template': item.1.template_id}] }}"
+      loop: "{{ sj_schedules.results | subelements('json') }}"
+      loop_control:
+        label: "{{ item.1.name }}"
+      when:
+        - item.1.active
+        - "{'project': item.0.item.id, 'template': item.1.template_id} not in (sj_templates | default([]))"
+
+    # The template's name, for a readable message
+    - name: Read each scheduled template
+      ansible.builtin.uri:
+        url: "{{ sj_url }}/api/project/{{ item.project }}/templates/{{ item.template }}"
+        headers: { Authorization: "Bearer {{ sj_token }}" }
+      loop: "{{ sj_templates | default([]) }}"
+      loop_control:
+        label: "{{ item.project }}/{{ item.template }}"
+      register: sj_template_info
+
+    # The newest runs first; only these few matter
+    - name: Read each template's recent runs
+      ansible.builtin.uri:
+        url: "{{ sj_url }}/api/project/{{ item.project }}/templates/{{ item.template }}/tasks/last"
+        headers: { Authorization: "Bearer {{ sj_token }}" }
+      loop: "{{ sj_templates | default([]) }}"
+      loop_control:
+        label: "{{ item.project }}/{{ item.template }}"
+      register: sj_runs
+
+    # Each finished run paired with the one before it; stopped, waiting and running tasks are left out
+    - name: Pair each run with the one before it
+      ansible.builtin.set_fact:
+        sj_pairs: "{{ sj_pairs | default([]) + (sj_finished | zip(sj_finished[1:] + [{}], [sj_meta] * (sj_finished | length)) | list) }}"
+      loop: "{{ sj_runs.results }}"
+      loop_control:
+        index_var: sj_i
+        label: "{{ sj_meta.name }}"
+      vars:
+        sj_finished: "{{ (item.json | selectattr('status', 'in', ['success', 'error']) | list)[:20] }}"
+        sj_meta:
+          name: "{{ sj_template_info.results[sj_i].json.name }}"
+          project: "{{ item.item.project }}"
+          template: "{{ item.item.template }}"
+
+    # A change of state among runs that finished inside the window: first failure after a success, or first success after a failure
+    - name: Find the changes worth posting
+      ansible.builtin.set_fact:
+        sj_events: "{{ sj_events | default([]) + [{'name': item.2.name, 'project': item.2.project, 'template': item.2.template, 'task': item.0.id, 'failed': item.0.status == 'error'}] }}"
+      loop: "{{ sj_pairs | default([]) }}"
+      loop_control:
+        label: "{{ item.2.name }} #{{ item.0.id }}"
+      vars:
+        sj_age: "{{ (now(utc=true) - (item.0.end | regex_replace('(\\.[0-9]+)?Z$', '') | to_datetime('%Y-%m-%dT%H:%M:%S'))).total_seconds() }}"
+        sj_prev: "{{ item.1.status | default('none') }}"
+      when:
+        - item.0.end is string
+        - sj_age | float <= sj_window | float
+        - (item.0.status == 'error' and sj_prev != 'error') or (item.0.status == 'success' and sj_prev == 'error')
+
+    # Nothing changed is the usual result, so it is only noted in the log
+    - name: Report the result
+      ansible.builtin.debug:
+        msg: "{{ (sj_events | default([]) | length) ~ ' change(s) to post across ' ~ (sj_templates | default([]) | length) ~ ' scheduled template(s)' }}"
+
+    # Red for a new failure, green for a recovery, each linking to the template's run history
+    - name: Build a message per change
+      ansible.builtin.set_fact:
+        sj_embeds: >-
+          {{ sj_embeds | default([]) + [{
+               'title': ('🔴 Failing: ' if item.failed else '🟢 Recovered: ') ~ item.name,
+               'description': 'Run #' ~ item.task ~ (' failed. Later failures stay quiet until it recovers.' if item.failed else ' succeeded after failing.'),
+               'url': sj_url ~ '/project/' ~ item.project ~ '/templates/' ~ item.template,
+               'color': 15158332 if item.failed else 3066993}] }}
+      loop: "{{ sj_events | default([]) }}"
+      loop_control:
+        label: "{{ item.name }} #{{ item.task }}"
+
+    # One post for the batch; Discord allows ten embeds per message
+    - name: Post the changes to Discord
+      ansible.builtin.uri:
+        url: "{{ sj_webhook }}"
+        method: POST
+        body_format: json
+        body:
+          username: Semaphore
+          embeds: "{{ sj_embeds[:10] }}"
+        status_code: [200, 204]
+      when: sj_embeds | default([]) | length > 0
+      no_log: true
