@@ -26,11 +26,11 @@
   vars:
     kuma_type: "{{ item.type | default('http') }}"
 
-# Two entries with one name would overwrite each other in Kuma
+# Two entries with one name would overwrite each other in Kuma; case counts, as it does in Kuma, so Homepage and homepage are different monitors
 - name: Require unique monitor names
   ansible.builtin.assert:
     that:
-      - kuma_monitors | map(attribute='name') | unique | length == kuma_monitors | length
+      - kuma_monitors | map(attribute='name') | unique(case_sensitive=true) | length == kuma_monitors | length
     fail_msg: "Monitor names must be unique; repeated: {{ kuma_monitors | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ') }}"
     quiet: true
 

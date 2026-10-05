@@ -18,6 +18,7 @@ services:
       - "AppPort=443" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Nextcloud" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "AppScheme=https" # Sets the Reverse Proxy Job to forward over HTTPS
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   default:

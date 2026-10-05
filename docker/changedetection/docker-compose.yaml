@@ -16,6 +16,7 @@ services:
       - "AppPort=5000" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=ChangeDetection.io" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "Kuma.Subdomain=detect" # Address checked: https://detect.<docker_domain>
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

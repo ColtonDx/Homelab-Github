@@ -20,6 +20,7 @@ services:
       - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Vaultwarden" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "Kuma.Subdomain=vault" # Address checked: https://vault.<docker_domain>
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   data:

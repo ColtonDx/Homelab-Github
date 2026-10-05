@@ -12,3 +12,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro # The host's Docker API, read through the proxy only
     ports:
       - "2375:2375" # Uptime Kuma connects here; the one stack besides Nginx Proxy Manager that publishes a port, since Kuma runs on another host
+    labels:
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)

@@ -13,6 +13,7 @@ services:
       - etc:/etc
     labels:
       - "Backup=garage" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
   webui:
     container_name: garage-webui
@@ -31,6 +32,7 @@ services:
       - "AppPort=3909" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Garage" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "Kuma.Subdomain=garageui" # Address checked: https://garageui.<docker_domain>
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 
 networks:

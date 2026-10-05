@@ -12,6 +12,7 @@ services:
       - "Backup=kiwix" # Sets the DVBM Backup Job Label
       - "AppPort=8080" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Kiwix" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

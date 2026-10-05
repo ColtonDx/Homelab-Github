@@ -17,6 +17,7 @@ services:
       - "Backup=worksuite" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Worksuite" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   data:

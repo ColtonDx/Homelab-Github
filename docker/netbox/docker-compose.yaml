@@ -26,6 +26,7 @@ services:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=NetBox" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 
   postgres:
@@ -42,6 +43,7 @@ services:
       - db:/var/lib/postgresql/18/docker
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
   redis:
     container_name: netbox-redis
@@ -53,6 +55,7 @@ services:
       - redis:/data
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   data:

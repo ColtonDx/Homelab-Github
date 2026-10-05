@@ -22,6 +22,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock # The Docker executor starts each job in its own container on this host
     labels:
       - "Backup=gitlab-runner" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   data:

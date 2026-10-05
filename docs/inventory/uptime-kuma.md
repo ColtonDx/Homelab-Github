@@ -33,7 +33,6 @@ myserver:
 | Option | Where | Meaning |
 |---|---|---|
 | `kuma_docker_name` | A Docker host | Its name in Uptime Kuma, and its group under `Containers` (default the inventory name) |
-| `kuma_default_docker_host` | `all: vars:` | The Docker host the compose stacks run on, for apps without a `Kuma.DockerHost` label |
 | `kuma_monitor_group` | Host or group | Group for all of a host's monitors, when an entry has no `group` |
 | `uptime_kuma_url` | `all: vars:` | Kuma's address (default `https://kuma.<docker_domain>`) |
 | `uptime_kuma_notifications` | `all: vars:` | Kuma notifications to attach to every monitor, e.g. `[Discord]` |

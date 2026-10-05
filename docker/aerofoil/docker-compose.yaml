@@ -15,6 +15,7 @@ services:
       - "Backup=aerofoil"
       - "AppPort=8465"
       - "Kuma.Name=Aerofoil" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   config:

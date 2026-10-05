@@ -1,22 +1,24 @@
 # Uptime Kuma
 
-A container gets an Uptime Kuma monitor when its compose service has a `Kuma.Name` label. The **Uptime Kuma | GitOps** job reads the labels from every compose file in `docker/` and creates or updates the monitors on its schedule.
+The **Uptime Kuma | GitOps** job reads the labels in every compose file in `docker/` and creates or updates two kinds of monitor:
+
+| Monitor | Comes from | Name | Group |
+|---|---|---|---|
+| Application URL (HTTP) | A service with `Kuma.Name` and `AppPort` | The `Kuma.Name` value | `Applications` |
+| Container (Docker socket) | A service with `Kuma.DockerHost` | The container name | `Containers > <Docker host>` |
 
 ## Labels
 
 | Label | What it does |
 |---|---|
-| `Kuma.Name` | Turns the monitor on, with this name. Without it, the container is not monitored |
-| `Kuma.Subdomain` | The address's subdomain (default the container name) |
+| `Kuma.Name` | With `AppPort`: turns on the application URL check, with this name |
+| `Kuma.Subdomain` | The URL's subdomain (default the container name), giving `https://<subdomain>.<docker_domain>` |
 | `Kuma.Path` | A path to check, e.g. `/health` (default none) |
-| `Kuma.Group` | The Kuma group (default `Containers > <Docker host>`); use `>` to nest groups |
 | `Kuma.AcceptedCodes` | Status codes that count as up, comma-separated (default `200-299`) |
-| `Kuma.DockerHost` | Container checks only: which Docker host (default `kuma_default_docker_host` in the inventory) |
+| `Kuma.Group` | Moves the URL check out of `Applications` |
+| `Kuma.DockerHost` | Turns on the container check, on this Docker host (its inventory name, e.g. `truenas-scale`) |
 
-## Which check you get
-
-- **With `AppPort`:** an HTTP check on `https://<Kuma.Subdomain>.<docker_domain><Kuma.Path>`, the address users reach the app at.
-- **Without `AppPort`:** a container check, for databases and workers with no web page. It needs the Docker host set up by **Uptime Kuma | Configure**.
+The Docker host's name in Kuma, and its group under `Containers`, is `kuma_docker_name` on its inventory host, e.g. `TrueNAS`. **Uptime Kuma | Configure** registers every host these labels name.
 
 ## Example
 
@@ -28,15 +30,13 @@ services:
       - "AppPort=8080"
       - "Kuma.Name=My App"
       - "Kuma.Path=/health"
+      - "Kuma.DockerHost=truenas-scale"
   db:
     container_name: myapp-db
     labels:
-      - "Kuma.Name=My App Database"
-      - "Kuma.Group=Databases"
+      - "Kuma.DockerHost=truenas-scale"
 ```
 
-This gives an HTTP check on `https://myapp.<docker_domain>/health` and a container check on `myapp-db`, both in the `Containers > <Docker host>` group, except the database, which goes in its own `Databases` group.
+This gives `My App` checking `https://myapp.<docker_domain>/health` in `Applications`, and container checks `myapp` and `myapp-db` in `Containers > TrueNAS`.
 
-The Docker host's name in Kuma, and its group under `Containers`, is `kuma_docker_name` on its inventory host, e.g. `TrueNAS`, else the inventory name.
-
-Monitor names must be unique, and removing a label does not delete the monitor; delete it in Kuma.
+Monitor names must be unique (case counts), and removing a label does not delete the monitor; delete it in Kuma.

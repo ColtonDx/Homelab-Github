@@ -25,6 +25,7 @@ services:
       - "Backup=karakeep" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Karakeep" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
   chrome:
     container_name: karakeep-chrome
@@ -42,6 +43,7 @@ services:
       - --hide-scrollbars
     labels:
       - "Backup=karakeep" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
   meilisearch:
     container_name: karakeep-meilisearch
@@ -60,6 +62,7 @@ services:
       - meilisearch:/meili_data
     labels:
       - "Backup=karakeep" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

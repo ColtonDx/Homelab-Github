@@ -18,6 +18,7 @@ services:
       - /mnt/.ix-apps/docker/volumes/nginx_data/_data/98-themepark:/etc/cont-init.d/99-themepark
     labels:
       - "Backup=nginx" # Sets the DVBM Backup Job Label
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

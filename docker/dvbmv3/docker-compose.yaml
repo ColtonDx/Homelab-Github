@@ -47,6 +47,7 @@ services:
       - "Kuma.Name=DVBMv3" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "Kuma.Subdomain=dvbm3" # Address checked: https://dvbm3.<docker_domain>
       - "AppScheme=https" # Sets the Reverse Proxy Job to forward over HTTPS
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 volumes:
   data:

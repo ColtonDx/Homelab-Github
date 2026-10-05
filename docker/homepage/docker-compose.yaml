@@ -24,6 +24,7 @@ services:
       - "Kuma.Name=Homepage" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "Kuma.Subdomain=home" # Address checked: https://home.<docker_domain>
       - "ConfigPath=/app/config" # Sets where push-config.yaml writes docker/homepage/config
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

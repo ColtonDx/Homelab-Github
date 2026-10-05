@@ -9,3 +9,5 @@ services:
     volumes:
       # Watchtower needs full Docker API access to pull images and recreate containers; :ro would not restrict it
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
