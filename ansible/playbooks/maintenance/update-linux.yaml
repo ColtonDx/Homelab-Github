@@ -1,5 +1,6 @@
 ---
 # Updates packages on Linux hosts, one host at a time; hosts with update_stop_services in the inventory have those services stopped first and restored afterwards
+# A host with nothing to install, and no pending reboot when reboot=true, is only checked: no services stop and no maintenance window opens
 # Extra vars: target_hosts (default linux), distro_upgrade (default false), reboot (default false)
 # Inventory: update_stop_services on a host or group lists services to stop (bare names get .service); an extra var of the same name overrides it
 # Hosts with kuma_monitor get an Uptime Kuma maintenance window while services are stopped or the host reboots; patch_window_minutes (default 30) sets its length, skip_maintenance_window=true turns it off
@@ -172,20 +173,7 @@
                 enabled: false
               loop: "{{ services_enabled }}"
 
-            # Refreshed with apt-get rather than the apt module, whose cache errors come back empty; any source that fails stops the host with apt's own message
-            - name: Refresh the package index (Debian-based)
-              ansible.builtin.command: apt-get update -q
-              register: apt_refresh
-              changed_when: false
-              failed_when: apt_refresh.rc != 0 or apt_refresh_problems | length > 0
-              retries: 3
-              delay: 10
-              until: apt_refresh is not failed
-              vars:
-                apt_refresh_problems: "{{ (apt_refresh.stdout_lines | default([]) + apt_refresh.stderr_lines | default([])) | select('match', '^(E:|Err:|W: (Failed to fetch|Some index files failed))') | list }}"
-              when: ansible_facts['os_family'] == "Debian"
-
-            # Upgrade everything on Debian-family hosts from the index just refreshed
+            # Upgrade everything on Debian-family hosts from the index refreshed above
             - name: Upgrade packages (Debian-based)
               ansible.builtin.apt:
                 upgrade: "{{ 'dist' if distro_upgrade_requested else 'yes' }}"
