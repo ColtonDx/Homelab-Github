@@ -90,9 +90,11 @@ Each Application, and each shared service credential such as Proxmox, Garage or 
 
 ```mermaid
 flowchart LR
-    semaphore[Semaphore] --> ansible[Ansible]
-    vault[(HashiCorp Vault)] -->|secrets| ansible
-    gitlab[GitLab] -->|playbooks and code| ansible
+    semaphore[Semaphore] --> gitlab[GitLab]
+    semaphore --> vault[(HashiCorp Vault)]
+    gitlab -->|playbooks and code| ansible[Ansible]
+    vault -->|secrets| ansible
+    inventory[(Inventory repo)] -->|hosts and settings| ansible
     ansible --> terraform[Terraform]
     terraform -->|state files| s3[(S3)]
     terraform -->|builds| vm[VM]
@@ -106,5 +108,4 @@ flowchart LR
     s3 --> zfs[(TrueNAS ZFS)]
     zfs --> replication[Replication]
     s3 --> replication
-
 ```

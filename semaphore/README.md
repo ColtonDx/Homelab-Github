@@ -12,7 +12,7 @@ Each template names these by their Semaphore name. Create them first when rebuil
 |---|---|---|
 | Repository | Github-Homelab | This repo, branch `main` |
 | Repository | Proxmox PACT Github | [Proxmox-P.A.C.T.](https://github.com/ColtonDx/Proxmox-P.A.C.T.), which builds the VM templates the Terraform projects clone |
-| Inventory | Gitlab Ansible Inventory | The private inventory repo's `inventory.yaml`, type File |
+| Inventory | Gitlab Ansible Inventory | The private inventory repo's `inventory/` folder, type File |
 | Environment | Hashicorp Secrets | Vault access and service URLs, listed below |
 | Environment | Proxmox-PACT-Variables | Variables for the PACT build script; see that repo for what it reads |
 | Environment | Empty | No variables, for jobs that need nothing from Vault |
