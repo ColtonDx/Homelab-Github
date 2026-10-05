@@ -59,12 +59,19 @@
     - item in stack_inventory_vars
     - item in stack_app_secrets
 
-# The stack would start with these empty
-- name: Warn about compose vars not found anywhere
-  ansible.builtin.debug:
-    msg: "WARNING: '{{ item }}' is referenced in compose but not set in the inventory or at '{{ stack_app_kv_path }}' in Vault"
-  loop: "{{ compose_vars }}"
-  when: item not in stack_values
+# Compose would start the stack with these empty, which surfaces later as an unhelpful error such as "invalid reference format"; allow_missing_vars=true deploys anyway
+- name: Require every compose variable
+  ansible.builtin.assert:
+    that:
+      - stack_missing | length == 0
+    fail_msg: >-
+      {{ stack_missing | join(', ') }} in the compose file {{ 'has' if stack_missing | length == 1 else 'have' }} no value.
+      Set {{ 'it' if stack_missing | length == 1 else 'them' }} in docker_app_vars.{{ app_name }} or docker_stack_vars in the inventory,
+      or at {{ stack_app_kv_path }} in Vault if secret, or give a default in the compose file as ${NAME:-value}.
+    quiet: true
+  vars:
+    stack_missing: "{{ compose_vars | reject('in', stack_values) | list }}"
+  when: not (allow_missing_vars | default(false) | bool)
 
 # Portainer takes the env as a list of name and value pairs
 - name: Build Portainer env list

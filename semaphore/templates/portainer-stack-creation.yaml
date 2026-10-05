@@ -29,7 +29,8 @@ survey_vars:
       - name: TrueNAS-Scale
         value: TrueNAS-Scale
   - name: repo_url
-    title: REPO
+    title: Repository
+    description: The repo Portainer clones the stack from
     type: enum
     default_value: https://github.com/ColtonDx/Homelab-Github
     values:
