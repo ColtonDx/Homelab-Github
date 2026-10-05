@@ -50,8 +50,8 @@
             services_running: "{{ service_list | select('in', running_names) | list }}"
             services_enabled: "{{ service_list | select('in', enabled_names) | list }}"
           vars:
-            running_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list }}"
-            enabled_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list }}"
+            running_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'defined') | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list }}"
+            enabled_names: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'defined') | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list }}"
 
         # Opened before anything stops, so stopped services and the reboot raise no alerts; a Kuma problem only warns, so patching never waits on monitoring
         - name: Open an Uptime Kuma maintenance window
