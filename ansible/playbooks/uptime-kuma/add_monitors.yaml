@@ -82,6 +82,7 @@
         kuma_segments: "{{ item.split('>') | map('trim') | select | list }}"
 
     # Groups keep the dashboard sorted; each is created the first time a monitor uses it, inside its parent when it has one
+    # No notifications on groups, so an outage alerts once from the service itself; this also clears any a default-enabled Kuma notification added
     - name: Ensure the monitor groups exist
       lucasheld.uptime_kuma.monitor:
         api_url: "{{ kuma_api_url }}"
@@ -89,6 +90,7 @@
         name: "{{ item.split('|')[0] }}"
         type: group
         parent_name: "{{ item.split('|')[1] if item.split('|')[1] | length > 0 else omit }}"
+        notificationIDList: []
         state: present
       loop: "{{ kuma_group_pairs | default([]) | unique }}"
       loop_control:
