@@ -108,10 +108,22 @@
                 enabled: false
               loop: "{{ services_enabled }}"
 
-            # Refresh the package index and upgrade everything on Debian-family hosts
+            # Refreshed with apt-get rather than the apt module, whose cache errors come back empty; any source that fails stops the host with apt's own message
+            - name: Refresh the package index (Debian-based)
+              ansible.builtin.command: apt-get update -q
+              register: apt_refresh
+              changed_when: false
+              failed_when: apt_refresh.rc != 0 or apt_refresh_problems | length > 0
+              retries: 3
+              delay: 10
+              until: apt_refresh is not failed
+              vars:
+                apt_refresh_problems: "{{ (apt_refresh.stdout_lines | default([]) + apt_refresh.stderr_lines | default([])) | select('match', '^(E:|Err:|W: (Failed to fetch|Some index files failed))') | list }}"
+              when: ansible_facts['os_family'] == "Debian"
+
+            # Upgrade everything on Debian-family hosts from the index just refreshed
             - name: Upgrade packages (Debian-based)
               ansible.builtin.apt:
-                update_cache: true
                 upgrade: "{{ 'dist' if distro_upgrade_requested else 'yes' }}"
               when: ansible_facts['os_family'] == "Debian"
 
