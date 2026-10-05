@@ -72,7 +72,7 @@
     label: "{{ item.name }} (vmid {{ item.vmid }})"
 
 # Records from runs before the tag existed are found by the comment marker and tagged once
-- name: Backfill the Dynamic tag onto VMs this playbook created earlier
+- name: Backfill the Dynamic tag onto VMs the Proxmox sync created earlier
   ansible.builtin.uri:
     url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.id }}/"
     method: PATCH

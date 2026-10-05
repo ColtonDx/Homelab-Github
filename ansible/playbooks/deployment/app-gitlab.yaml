@@ -1,8 +1,8 @@
 ---
-# Installs GitLab from GitLab's apt repository, or updates it to gitlab_version, starts it, then runs tls/gitlab-tls.yaml to switch it to HTTPS; safe to re-run
+# Installs GitLab from GitLab's apt repository, or updates it to gitlab_version, starts it, then issues its certificate and switches it to HTTPS; safe to re-run
 # Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce), gitlab_version (e.g. 18.4.1) to install or move to that release
 # Without gitlab_version an installed GitLab is left alone; upgrades must follow GitLab's upgrade path, so step through its required stops
-# Also needs what tls/gitlab-tls.yaml needs: the Vault connection and the Cloudflare fields; gitlab_rb_path and gitlab_ssl_dir override the default locations
+# The certificate needs the Vault connection and Vault fields CF_API and CF_EMAIL at cloudflare; gitlab_rb_path and gitlab_ssl_dir override the default locations
 # The first install writes a random root password to /etc/gitlab/initial_root_password, which GitLab deletes after 24 hours
 - name: Install GitLab on Debian/Ubuntu
   hosts: gitlab
@@ -75,20 +75,20 @@
         name: "{{ gitlab_pkg_name ~ '=' ~ gitlab_version ~ '-' ~ gitlab_ed ~ '.0' if gitlab_version | default('') | length > 0 else gitlab_pkg_name }}"
         state: present
 
-    # A fresh host needs a URL before GitLab can start; once gitlab-tls.yaml has run, it owns the URL
+    # A fresh host needs a URL before GitLab can start; once the HTTPS play below has run, it owns the URL
     - name: Check whether the URL is already managed
       ansible.builtin.command: grep -q "BEGIN ANSIBLE MANAGED URL AND TLS CONFIG" {{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}
       register: gitlab_url_managed
       changed_when: false
       failed_when: gitlab_url_managed.rc not in [0, 1]
 
-    # An existing certificate means gitlab-tls.yaml will write HTTPS, so install must not write HTTP over it
+    # An existing certificate means the HTTPS play below will write HTTPS, so install must not write HTTP over it
     - name: Check whether a GitLab certificate exists
       ansible.builtin.stat:
         path: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.crt"
       register: gitlab_install_cert
 
-    # Plain HTTP only on a fresh host; gitlab-tls.yaml replaces it with HTTPS at the end of this run
+    # Plain HTTP only on a fresh host; the HTTPS play below replaces it at the end of this run
     - name: Set the initial HTTP URL on a fresh host
       ansible.builtin.blockinfile:
         path: "{{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}"
@@ -124,6 +124,74 @@
       ansible.builtin.command: gitlab-ctl reconfigure
       changed_when: true
 
-# Finish the install on HTTPS; gitlab-tls.yaml can also be run on its own for renewals
+# Finish the install on HTTPS: issue the certificate, then point gitlab.rb at it; renewals are tls/renew-certificates.yaml's job
 - name: Switch GitLab to HTTPS
-  ansible.builtin.import_playbook: ../tls/gitlab-tls.yaml
+  hosts: gitlab
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_secrets:
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_EMAIL
+        var: acme_email
+
+  tasks:
+    # The Cloudflare credentials the DNS challenge needs
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # One place for every path, so the certificate lands where the URL block points
+    - name: Set GitLab config and certificate paths
+      ansible.builtin.set_fact:
+        gitlab_rb_file: "{{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}"
+        gitlab_cert_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.crt"
+        gitlab_key_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.key"
+
+    # Installed at the paths the URL block expects; every renewal reloads nginx only, so GitLab stays up
+    - name: Issue and install GitLab's certificate
+      ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+      vars:
+        acme_domain: "{{ gitlab_domain }}"
+        acme_ssl_dir: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}"
+        acme_key_path: "{{ gitlab_key_file }}"
+        acme_fullchain_path: "{{ gitlab_cert_file }}"
+        acme_reloadcmd: "gitlab-ctl hup nginx"
+
+    # Earlier versions wrote TLS settings in a separate block, which the managed block below replaces
+    - name: Remove the TLS block written by earlier versions
+      ansible.builtin.blockinfile:
+        path: "{{ gitlab_rb_file }}"
+        marker: "# {mark} ANSIBLE MANAGED SSL CONFIG"
+        state: absent
+      notify: Reconfigure GitLab
+
+    # This play owns the URL once it has run; written at the end of gitlab.rb so it overrides any earlier external_url
+    - name: Point GitLab at the certificate
+      ansible.builtin.blockinfile:
+        path: "{{ gitlab_rb_file }}"
+        marker: "# {mark} ANSIBLE MANAGED URL AND TLS CONFIG"
+        block: |
+          external_url "https://{{ gitlab_domain }}"
+          letsencrypt['enable'] = false
+          nginx['ssl_certificate'] = "{{ gitlab_cert_file }}"
+          nginx['ssl_certificate_key'] = "{{ gitlab_key_file }}"
+      notify: Reconfigure GitLab
+
+    # Comment out any other external_url so gitlab.rb has exactly one; the before match keeps the managed block untouched
+    - name: Disable external_url lines outside the managed block
+      ansible.builtin.replace:
+        path: "{{ gitlab_rb_file }}"
+        regexp: '^(external_url\s.*)$'
+        replace: '# \1  # superseded by the managed block below'
+        before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+      notify: Reconfigure GitLab
+
+  handlers:
+    # Applies gitlab.rb changes; runs once at the end of the play if anything changed
+    - name: Reconfigure GitLab
+      ansible.builtin.command: gitlab-ctl reconfigure
+      changed_when: true

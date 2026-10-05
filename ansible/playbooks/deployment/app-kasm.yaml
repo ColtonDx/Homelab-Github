@@ -1,6 +1,6 @@
 ---
-# Installs Kasm Workspaces, or upgrades it when kasm_version is newer than what is installed, then runs tls/kasm-tls.yaml for its certificate
-# Also needs what tls/kasm-tls.yaml needs: kasm_domain, the Vault connection and the Cloudflare fields
+# Installs Kasm Workspaces, or upgrades it when kasm_version is newer than what is installed, then issues its TLS certificate
+# The certificate needs kasm_domain, the Vault connection and Vault fields CF_API and CF_EMAIL at cloudflare
 # Extra vars: kasm_version to pick another release, which also needs its sha256 added to kasm_release_checksums
 # A first install shows the generated credentials in the run output, which Semaphore keeps, so change them after first login
 # Logs under /var/log are root-only, and upgrade output is never shown in the run
@@ -166,6 +166,32 @@
             path: "{{ kasm_work_dir }}"
             state: absent
 
-# Finish with the certificate; kasm-tls.yaml can also be run on its own
+# Finish with the certificate in Kasm's nginx; renewals are tls/renew-certificates.yaml's job
 - name: Configure Kasm's TLS certificate
-  ansible.builtin.import_playbook: ../tls/kasm-tls.yaml
+  hosts: kasm
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_secrets:
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_EMAIL
+        var: acme_email
+
+  tasks:
+    # The Cloudflare credentials the DNS challenge needs
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # Kasm's nginx reads these fixed names, and the current path follows upgrades through its symlink; Kasm has no reload, so renewals restart it briefly
+    - name: Issue and install Kasm's certificate
+      ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+      vars:
+        acme_domain: "{{ kasm_domain }}"
+        acme_ssl_dir: /opt/kasm/current/certs
+        acme_key_path: /opt/kasm/current/certs/kasm_nginx.key
+        acme_fullchain_path: /opt/kasm/current/certs/kasm_nginx.crt
+        acme_reloadcmd: "/opt/kasm/bin/stop && /opt/kasm/bin/start"

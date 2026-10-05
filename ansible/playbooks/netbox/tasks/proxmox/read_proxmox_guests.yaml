@@ -44,7 +44,7 @@
 - name: Drop LXC containers when they are not wanted
   ansible.builtin.set_fact:
     proxmox_guests: "{{ proxmox_guests | rejectattr('type', 'equalto', 'lxc') | list }}"
-  when: not (include_lxc | bool)
+  when: not (include_lxc | default(true) | bool)
 
 # NetBox identifies VMs by name, so a guest without one is set aside and reported
 - name: Separate guests that have no usable name

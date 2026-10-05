@@ -33,7 +33,7 @@ Only these environment variables reach a job, so everything else comes from the 
 | `GARAGE_URL` | No | Terraform jobs, for the S3 state backend |
 | `UPTIME_KUMA_URL` | No | Optional; overrides the default `https://kuma.<docker_domain>` for Uptime Kuma monitors, and is itself overridden by `uptime_kuma_url` in the inventory |
 
-Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, for the NetBox jobs and Terraform's NetBox lookups; `NETBOX_CLUSTER_NAME` does the same for Netbox | Sync Proxmox.
+Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, for the NetBox jobs and Terraform's NetBox lookups; `NETBOX_CLUSTER_NAME` overrides the cluster name for Netbox | Sync.
 
 ## Templates
 
@@ -48,10 +48,8 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | K3s \| Ansible \| Configure Cluster | Kubernetes | [k3s-ansible-configure-cluster.yaml](templates/k3s-ansible-configure-cluster.yaml) | `ansible/playbooks/k3s/configure-cluster.yaml` |
 | K3s \| Ansible \| Initialize | Kubernetes | [k3s-ansible-initialize.yaml](templates/k3s-ansible-initialize.yaml) | `ansible/playbooks/k3s/initialize.yaml` |
 | K3s \| Terraform \| Deployment | Kubernetes | [k3s-terraform-deployment.yaml](templates/k3s-terraform-deployment.yaml) | `ansible/playbooks/terraform/build-project.yaml` |
-| Netbox \| Opnsense Sync | Netbox | [netbox-opnsense-sync.yaml](templates/netbox-opnsense-sync.yaml) | `ansible/playbooks/netbox/opnsense-dhcp-to-netbox.yaml` |
-| Netbox \| Inventory Sync | Netbox | [netbox-inventory-sync.yaml](templates/netbox-inventory-sync.yaml) | `ansible/playbooks/netbox/inventory-sync.yaml` |
 | Netbox \| Seed | Netbox | [netbox-seed.yaml](templates/netbox-seed.yaml) | `ansible/playbooks/netbox/seed.yaml` |
-| Netbox \| Sync Proxmox | Netbox | [netbox-sync-proxmox.yaml](templates/netbox-sync-proxmox.yaml) | `ansible/playbooks/netbox/proxmox-vm-sync/proxmox-vm-sync.yaml` |
+| Netbox \| Sync | Netbox | [netbox-sync.yaml](templates/netbox-sync.yaml) | `ansible/playbooks/netbox/sync-netbox.yaml` |
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
@@ -64,7 +62,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Portainer \| Push Config | (none) | [portainer-push-config.yaml](templates/portainer-push-config.yaml) | `ansible/playbooks/portainer/push-config.yaml` |
 | Semaphore \| Scheduled Job Alerts | (none) | [semaphore-scheduled-job-alerts.yaml](templates/semaphore-scheduled-job-alerts.yaml) | `ansible/playbooks/semaphore/scheduled-job-alerts.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
-| TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
+| TLS \| Renew Certificates | (none) | [tls-renew-certificates.yaml](templates/tls-renew-certificates.yaml) | `ansible/playbooks/tls/renew-certificates.yaml` |
 | Uptime Kuma \| Sync Monitors | (none) | [uptime-kuma-sync-monitors.yaml](templates/uptime-kuma-sync-monitors.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` |
 | Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/set-maintenance-window.yaml` |
 

@@ -30,7 +30,7 @@
 # Only linking makes it show as the interface's MAC
 - name: Link each MAC as its interface's primary
   ansible.builtin.uri:
-    url: "{{ netbox_url }}/api/virtualization/interfaces/{{ item.invocation.module_args.body.assigned_object_id }}/"
+    url: "{{ netbox_url }}/api/virtualization/interfaces/{{ item.json.assigned_object_id }}/"
     method: PATCH
     headers: "{{ netbox_headers }}"
     body_format: json

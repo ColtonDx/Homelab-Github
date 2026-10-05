@@ -1,0 +1,49 @@
+---
+# Task file: syncs Proxmox VMs and LXCs into NetBox (VMs, interfaces, MACs, IPs and disks), then removes Dynamic-tagged records for guests Proxmox no longer reports; needs connect_netbox.yaml first
+# Cluster: NETBOX_CLUSTER_NAME in the environment, else netbox_cluster_name in the inventory, else PVE-Cluster
+# Vault: PROXMOX_API_URL, PROXMOX_API_TOKEN_ID and PROXMOX_API_TOKEN_SECRET at proxmox (vault_proxmox_path renames it)
+# Extra vars: include_lxc (default true), validate_certs for the Proxmox API (default true); each step is a file in tasks/proxmox/
+
+# Cluster name and Proxmox API credentials
+- name: Load the Proxmox settings
+  ansible.builtin.include_tasks: proxmox/load_proxmox_settings.yaml
+
+# Cluster, VM type, Dynamic tag, devices and the VMs NetBox already holds
+- name: Read the NetBox objects every VM refers to
+  ansible.builtin.include_tasks: proxmox/read_netbox_objects.yaml
+
+# Guests on an offline node are skipped and never treated as deleted
+- name: Check which Proxmox nodes are online
+  ansible.builtin.include_tasks: proxmox/check_proxmox_nodes.yaml
+
+# Every guest and its config, filtered to what should be in NetBox
+- name: Read the Proxmox guests
+  ansible.builtin.include_tasks: proxmox/read_proxmox_guests.yaml
+
+# Creates new VMs and updates the fields Proxmox owns
+- name: Sync the virtual machines
+  ansible.builtin.include_tasks: proxmox/sync_vms.yaml
+
+# One interface per virtual NIC
+- name: Sync the interfaces
+  ansible.builtin.include_tasks: proxmox/sync_interfaces.yaml
+
+# One MAC per NIC, linked as the interface's primary
+- name: Sync the MAC addresses
+  ansible.builtin.include_tasks: proxmox/sync_macs.yaml
+
+# cloud-init static addresses only; DHCP addresses are left to the OPNsense step
+- name: Sync the static IP addresses
+  ansible.builtin.include_tasks: proxmox/sync_ips.yaml
+
+# One virtual disk per attached disk
+- name: Sync the virtual disks
+  ansible.builtin.include_tasks: proxmox/sync_disks.yaml
+
+# The only step that deletes, and only Dynamic-tagged records
+- name: Remove records for guests that are gone
+  ansible.builtin.include_tasks: proxmox/remove_stale_records.yaml
+
+# Counts and anything a person should check
+- name: Report the Proxmox sync
+  ansible.builtin.include_tasks: proxmox/report_proxmox.yaml

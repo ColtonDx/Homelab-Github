@@ -1,0 +1,88 @@
+---
+# Binds each lease to the VM holding it: the Proxmox step records each VM NIC's MAC, so a lease's MAC leads to an interface and its VM; bare metal and appliances stay unbound
+
+# The relationships the binding follows
+- name: Read NetBox MAC addresses, VM interfaces and VMs
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/{{ item }}?limit=0"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: netbox_binding_lookups
+  loop:
+    - dcim/mac-addresses/
+    - virtualization/interfaces/
+    - virtualization/virtual-machines/
+  loop_control:
+    label: "{{ item }}"
+  no_log: true
+
+# MAC to interface, interface to VM, VM to its current primary address, and address to its DHCP record
+- name: Index the MAC, interface and VM relationships
+  ansible.builtin.set_fact:
+    mac_to_iface: "{{ dict(vm_macs | map(attribute='mac_address') | map('upper') | list | zip(vm_macs | map(attribute='assigned_object_id') | list)) }}"
+    iface_to_vm: "{{ dict(ifaces | map(attribute='id') | map('string') | list | zip(ifaces | map(attribute='virtual_machine.id') | list)) }}"
+    vm_primary_ip: "{{ dict(vms | map(attribute='id') | map('string') | list | zip(vms | map(attribute='primary_ip4.id', default=0) | list)) }}"
+    dhcp_ip_by_host: "{{ dict(dhcp_ips | map(attribute='address') | map('regex_replace', '/.*$', '') | list | zip(dhcp_ips | list)) }}"
+  vars:
+    vm_macs: >-
+      {{ netbox_binding_lookups.results[0].json.results | default([])
+         | selectattr('assigned_object_type', 'equalto', 'virtualization.vminterface')
+         | selectattr('assigned_object_id') | list }}
+    ifaces: "{{ netbox_binding_lookups.results[1].json.results | default([]) }}"
+    vms: "{{ netbox_binding_lookups.results[2].json.results | default([]) }}"
+    dhcp_ips: "{{ netbox_dhcp_ips.json.results | default([]) }}"
+
+# One record per lease that resolves to a VM, with both writes decided here so the tasks below stay plain filters
+- name: Work out which leases belong to a VM
+  ansible.builtin.set_fact:
+    lease_bindings: >-
+      {{ (lease_bindings | default([]))
+         + [{'address': item.address,
+             'ip_id': ip_record.id,
+             'iface_id': iface_id | int,
+             'vm_id': vm_id | int,
+             'needs_assign': (ip_record.assigned_object_id | default(0, true) | int) != (iface_id | int),
+             'needs_primary': (vm_primary_ip[vm_id | string] | default(0, true) | int) != (ip_record.id | int)}] }}
+  vars:
+    iface_id: "{{ mac_to_iface[item.hwaddr | upper] }}"
+    vm_id: "{{ iface_to_vm[iface_id | string] }}"
+    ip_record: "{{ dhcp_ip_by_host[item.address] }}"
+  loop: "{{ active_leases }}"
+  loop_control:
+    label: "{{ item.address }} ({{ item.hwaddr }})"
+  when:
+    - (item.hwaddr | upper) in mac_to_iface
+    - (mac_to_iface[item.hwaddr | upper] | string) in iface_to_vm
+    - item.address in dhcp_ip_by_host
+
+# Ties the address to the interface holding it, so NetBox knows which VM it belongs to
+- name: Attach leased addresses to the VM interface holding them
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.ip_id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ item.iface_id | int }}"
+    status_code: 200
+  loop: "{{ lease_bindings | default([]) | selectattr('needs_assign') | list }}"
+  loop_control:
+    label: "{{ item.address }} -> interface {{ item.iface_id }}"
+  register: lease_assign_results
+
+# Only where it differs, so a stable lease is not rewritten every run and the count means changed rather than seen
+- name: Update primary IPv4 where the lease no longer matches it
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.vm_id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      primary_ip4: "{{ item.ip_id | int }}"
+    status_code: 200
+  loop: "{{ lease_bindings | default([]) | selectattr('needs_primary') | list }}"
+  loop_control:
+    label: "VM {{ item.vm_id }} -> {{ item.address }}"
+  register: lease_primary_results

@@ -1,0 +1,71 @@
+---
+# Creates NetBox addresses for new leases and refreshes the lease records this step owns; records the inventory, Proxmox or a person made are left alone
+# Owned means created by this step (its comment marker) or still in dhcp status; reserved and deprecated keep their status either way
+
+# A lease on an address set aside as unprovisioned is a real conflict, so it is reported and left for a person
+- name: Report addresses whose reserved/deprecated status blocks an update
+  ansible.builtin.debug:
+    msg: >-
+      CONFLICT: {{ item }} is marked '{{ lease_records[item].status.value }}' in NetBox but has an active DHCP lease.
+      An address set aside as unprovisioned is in use. Status left unchanged - resolve deliberately.
+  loop: "{{ active_leases | map(attribute='address') | select('in', lease_records) | list }}"
+  when: lease_records[item].status.value in ['reserved', 'deprecated']
+
+# New lease addresses, active when inventory-backed or reserved, otherwise dhcp; the comment marks them as this step's to refresh later
+- name: Create new IP address entries in NetBox
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/"
+    method: POST
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body:
+      address: "{{ item.address }}/32"
+      status: "{{ 'active' if item.address in inventory_addresses or item.is_reserved | default('') | length > 0 else 'dhcp' }}"
+      dns_name: "{{ item.hostname | default('') }}"
+      description: "DHCP lease — MAC: {{ item.hwaddr }}"
+      comments: "Auto-synced from OPNsense DHCP leases"
+    status_code: 201
+  loop: "{{ active_leases }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when: item.address not in lease_records
+  register: create_results
+  no_log: true
+
+# Only the fields that differ, so a stable lease is not rewritten every run; reserved and deprecated records keep their status
+- name: Work out which owned lease records need refreshing
+  ansible.builtin.set_fact:
+    lease_updates: "{{ lease_updates | default([]) + ([{'address': item.address, 'id': record.id, 'body': changed}] if changed | length > 0 else []) }}"
+  vars:
+    record: "{{ lease_records[item.address] }}"
+    status_now: "{{ record.status.value }}"
+    wanted:
+      status: "{{ status_now if status_now in ['reserved', 'deprecated'] else ('active' if item.address in inventory_addresses or item.is_reserved | default('') | length > 0 else 'dhcp') }}"
+      dns_name: "{{ item.hostname | default('') }}"
+      description: "DHCP lease — MAC: {{ item.hwaddr }}"
+    current:
+      status: "{{ status_now }}"
+      dns_name: "{{ record.dns_name | default('') }}"
+      description: "{{ record.description | default('') }}"
+    changed: "{{ wanted | dict2items | reject('in', current | dict2items) | items2dict }}"
+  loop: "{{ active_leases }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when:
+    - item.address in lease_records
+    - lease_records[item.address].status.value == 'dhcp' or 'Auto-synced from OPNsense DHCP leases' in (lease_records[item.address].comments | default(''))
+
+# Owned records only, with just the changed fields
+- name: Refresh the owned lease records
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.id }}/"
+    method: PATCH
+    headers: "{{ netbox_headers }}"
+    body_format: json
+    body: "{{ item.body }}"
+    status_code: 200
+  loop: "{{ lease_updates | default([]) }}"
+  loop_control:
+    label: "{{ item.address }} {{ item.body | list | join(',') }}"
+  register: update_results
+  no_log: true

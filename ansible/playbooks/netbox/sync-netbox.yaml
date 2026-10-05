@@ -1,0 +1,68 @@
+---
+# The one NetBox sync: makes NetBox match the inventory, Proxmox and OPNsense in that order, so later sources build on earlier ones; meant to run on a schedule
+# Each source only updates the records it owns: inventory addresses, Proxmox VMs and their NICs, MACs, IPs and disks, and OPNsense DHCP leases
+# A source that fails is reported and the others still run; the job then fails at the end so the schedule still alerts
+# Extra vars: netbox_sources (default inventory, proxmox, opnsense; a list or comma-separated) to run only some; settings for each are in its tasks/sync_<source>.yaml
+- name: Sync NetBox from the inventory, Proxmox and OPNsense
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    netbox_all_sources: [inventory, proxmox, opnsense]
+    netbox_run_sources: >-
+      {{ (netbox_sources.split(',') if netbox_sources is string else netbox_sources) | map('trim') | reject('equalto', '') | list
+         if netbox_sources is defined else netbox_all_sources }}
+
+  tasks:
+    # A misspelled source would otherwise be skipped silently
+    - name: Require known sources
+      ansible.builtin.assert:
+        that:
+          - netbox_run_sources | length > 0
+          - netbox_run_sources | difference(netbox_all_sources) | length == 0
+        fail_msg: "netbox_sources must name one or more of: {{ netbox_all_sources | join(', ') }}."
+        quiet: true
+
+    # Auth: netbox_url and netbox_headers for every step below
+    - name: Connect to NetBox
+      ansible.builtin.include_tasks: tasks/connect_netbox.yaml
+
+    # Run first, so the addresses declared by hand are in place before discovery
+    - name: Sync the inventory
+      when: "'inventory' in netbox_run_sources"
+      block:
+        - name: Record the inventory's addresses
+          ansible.builtin.include_tasks: tasks/sync_inventory.yaml
+      rescue:
+        - name: Note that the inventory sync failed
+          ansible.builtin.set_fact:
+            netbox_failed_sources: "{{ netbox_failed_sources | default([]) + ['inventory: ' ~ (ansible_failed_result.msg | default('failed'))] }}"
+
+    # Before OPNsense, so its leases can be bound to the VMs and MACs recorded here
+    - name: Sync Proxmox
+      when: "'proxmox' in netbox_run_sources"
+      block:
+        - name: Record Proxmox's guests
+          ansible.builtin.include_tasks: tasks/sync_proxmox.yaml
+      rescue:
+        - name: Note that the Proxmox sync failed
+          ansible.builtin.set_fact:
+            netbox_failed_sources: "{{ netbox_failed_sources | default([]) + ['proxmox: ' ~ (ansible_failed_result.msg | default('failed'))] }}"
+
+    # Last, so leases fill in only what the inventory and Proxmox have not already recorded
+    - name: Sync OPNsense
+      when: "'opnsense' in netbox_run_sources"
+      block:
+        - name: Record OPNsense's DHCP leases
+          ansible.builtin.include_tasks: tasks/sync_opnsense.yaml
+      rescue:
+        - name: Note that the OPNsense sync failed
+          ansible.builtin.set_fact:
+            netbox_failed_sources: "{{ netbox_failed_sources | default([]) + ['opnsense: ' ~ (ansible_failed_result.msg | default('failed'))] }}"
+
+    # Fails only after every source has had its turn
+    - name: Fail when any source failed
+      ansible.builtin.fail:
+        msg: "{{ netbox_failed_sources }}"
+      when: netbox_failed_sources | default([]) | length > 0

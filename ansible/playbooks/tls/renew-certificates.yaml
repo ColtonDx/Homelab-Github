@@ -1,0 +1,94 @@
+---
+# Renews the acme.sh certificates on the ACME hosts that expire within acme_renew_days, or all of them with acme_force=true; certificates are first issued by each service's app playbook
+# acme.sh reuses the Cloudflare token, install paths and reload command it saved at issue, so the service reloads on its own and nothing comes from Vault
+# Extra vars: target_hosts (default acme), acme_renew_days (default 30), acme_force=true to renew now whatever the expiry
+# Forced renewals count toward Let's Encrypt's limit of 5 identical certificates a week, so avoid repeated forced runs
+- name: Renew ACME certificates
+  hosts: "{{ target_hosts | default('acme') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    acme_sh: /root/.acme.sh/acme.sh
+
+  tasks:
+    # A host without acme.sh has never had a certificate issued, so it is reported rather than failed
+    - name: Check acme.sh is installed
+      ansible.builtin.stat:
+        path: "{{ acme_sh }}"
+      register: renew_acme_sh
+
+    # Every certificate acme.sh manages here, as a header line plus one pipe-separated line each
+    - name: List the certificates on the host
+      ansible.builtin.command:
+        argv: ["{{ acme_sh }}", --list, --listraw]
+      register: renew_list
+      changed_when: false
+      check_mode: false
+      when: renew_acme_sh.stat.exists
+
+    # Columns are matched by header name, since newer acme.sh versions add columns
+    - name: Read the certificate list
+      ansible.builtin.set_fact:
+        renew_certs: "{{ renew_certs | default([]) + [dict(renew_header | zip(item.split('|')))] }}"
+      loop: "{{ renew_list.stdout_lines[1:] | default([]) | select | list }}"
+      vars:
+        renew_header: "{{ renew_list.stdout_lines[0].split('|') }}"
+      when: renew_acme_sh.stat.exists
+
+    # Points at the playbook that issues the certificate, then ends this host's run only
+    - name: Report hosts with no certificate
+      when: renew_certs | default([]) | length == 0
+      block:
+        - name: Note that the host has no certificate
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }} has no acme.sh certificate yet; run its app playbook under deployment/ to issue one."
+
+        - name: Stop for hosts with no certificate
+          ansible.builtin.meta: end_host
+
+    # Exits 1 when a certificate expires within acme_renew_days, which includes one already expired
+    - name: Check each certificate's expiry
+      ansible.builtin.command:
+        argv: [openssl, x509, -noout, -in, "{{ acme_sh | dirname }}/{{ item.Main_Domain }}{{ '_ecc' if 'ec' in item.KeyLength else '' }}/fullchain.cer", -checkend, "{{ (acme_renew_days | default(30) | int) * 86400 }}"]
+      loop: "{{ renew_certs }}"
+      loop_control:
+        label: "{{ item.Main_Domain }}"
+      register: renew_expiry
+      changed_when: false
+      check_mode: false
+      failed_when: renew_expiry.rc not in [0, 1]
+
+    # acme.sh then installs the new certificate and runs the reload command it saved at issue
+    - name: Renew the certificates that are due
+      ansible.builtin.command:
+        argv: "{{ [acme_sh, '--renew', '--force', '-d', item.item.Main_Domain] + (['--ecc'] if 'ec' in item.item.KeyLength else []) }}"
+      loop: "{{ renew_expiry.results }}"
+      loop_control:
+        label: "{{ item.item.Main_Domain }}"
+      register: renew_result
+      when: (acme_force | default(false) | bool) or item.rc == 1
+
+    # The certificate the service now serves, for the report
+    - name: Read the expiry dates
+      ansible.builtin.command:
+        argv: [openssl, x509, -noout, -enddate, -in, "{{ acme_sh | dirname }}/{{ item.Main_Domain }}{{ '_ecc' if 'ec' in item.KeyLength else '' }}/fullchain.cer"]
+      loop: "{{ renew_certs }}"
+      loop_control:
+        label: "{{ item.Main_Domain }}"
+      register: renew_enddate
+      changed_when: false
+      check_mode: false
+
+    # One line per certificate in the run log
+    - name: Report the certificates
+      ansible.builtin.debug:
+        msg: "{{ item.0.item.item.Main_Domain }}: {{ renew_action }}; expires {{ item.1.stdout | regex_replace('^notAfter=', '') }}"
+      loop: "{{ renew_result.results | zip(renew_enddate.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item.item.Main_Domain }}"
+      vars:
+        renew_action: >-
+          {{ 'renewed (forced)' if item.0 is changed and acme_force | default(false) | bool
+             else 'renewed (expiring within ' ~ (acme_renew_days | default(30)) ~ ' days)' if item.0 is changed
+             else 'current' }}

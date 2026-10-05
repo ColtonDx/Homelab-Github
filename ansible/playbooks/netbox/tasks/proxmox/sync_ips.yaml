@@ -29,7 +29,9 @@
              'cidr': cidr,
              'description': item._vm ~ ' ' ~ iface_name,
              'existing_id': existing.id | default(0) | int,
-             'disposition': disposition}] }}
+             'disposition': disposition,
+             'needs_update': (existing_assigned | int) != (nbi_iface_id_by_key[iface_key] | int) or existing.address | default('') != cidr or existing.description | default('') == '',
+             'has_description': existing.description | default('') != ''}] }}
   vars:
     idx: "{{ item.key | regex_replace('^net', '') }}"
     iface_name: "eth{{ idx }}"
@@ -75,20 +77,18 @@
   register: nbi_created_ips
   failed_when: false
 
-# Adopts the existing record instead of adding a second, without the Dynamic tag, so curated data never becomes deletable
+# Adopts the existing record instead of adding a second, without the Dynamic tag, so curated data never becomes deletable; a description set elsewhere, such as from the inventory, is kept
 - name: Adopt and update addresses NetBox already holds
   ansible.builtin.uri:
     url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.existing_id }}/"
     method: PATCH
     headers: "{{ netbox_headers }}"
     body_format: json
-    body:
-      address: "{{ item.cidr }}"
-      assigned_object_type: virtualization.vminterface
-      assigned_object_id: "{{ item.iface_id | int }}"
-      description: "{{ item.description }}"
+    body: >-
+      {{ {'address': item.cidr, 'assigned_object_type': 'virtualization.vminterface', 'assigned_object_id': item.iface_id | int}
+         | combine({} if item.has_description else {'description': item.description}) }}
     status_code: [200]
-  loop: "{{ vm_ip_targets | default([]) | selectattr('disposition', 'equalto', 'update') | list }}"
+  loop: "{{ vm_ip_targets | default([]) | selectattr('disposition', 'equalto', 'update') | selectattr('needs_update') | list }}"
   loop_control:
     label: "{{ item.description }} -> {{ item.cidr }}"
   register: nbi_updated_ips

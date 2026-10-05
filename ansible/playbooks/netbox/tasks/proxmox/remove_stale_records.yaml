@@ -1,5 +1,5 @@
 ---
-# Deletes the Dynamic-tagged objects this playbook created that Proxmox no longer reports; the only place this playbook deletes
+# Deletes the Dynamic-tagged objects the Proxmox sync created that Proxmox no longer reports; the only place the sync deletes Proxmox records
 # Records made by hand carry no tag and are never reached, and a guest's children are only reclaimed when its config was read
 
 # A run that found no guests at all never deletes, since that means the API or token failed, not an empty cluster

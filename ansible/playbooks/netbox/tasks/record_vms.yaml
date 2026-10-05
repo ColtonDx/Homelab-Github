@@ -1,8 +1,8 @@
 ---
 # Task file: records Terraform-built VMs in NetBox from the Terraform output alone, so it works for any provider: the VM, its eth0 with the MAC, and its address with a DNS name as primary
 # Needs netbox_vm_records, a list of {name, ip, mac} (the dns_reservations output); an empty list does nothing
-# Cluster: netbox_vm_cluster (from the project's sources.yaml), else NETBOX_CLUSTER_NAME or netbox_cluster_name from the inventory, else PVE-Cluster, the same default as the Proxmox sync
-# Existing objects are updated rather than duplicated; provider syncs such as proxmox-vm-sync add their own details, like disks, on their next run
+# Cluster: netbox_vm_cluster (from the project's sources.yaml), else NETBOX_CLUSTER_NAME or netbox_cluster_name from the inventory, else PVE-Cluster, the same default as the Proxmox step of sync-netbox.yaml
+# Existing objects are updated rather than duplicated; provider syncs such as the Proxmox step of sync-netbox.yaml add their own details, like disks, on their next run
 # Connection: netbox_url in the inventory or NETBOX_URL in the environment; Vault: NETBOX_TOKEN at netbox (vault_netbox_path renames it), unless netbox_token is set
 
 # Everything below needs at least one record

@@ -1,0 +1,33 @@
+---
+# Task file: finds NetBox and loads its token once, setting netbox_url and netbox_headers for every sync step
+# Address: netbox_url in the inventory, else NETBOX_URL in the environment; Vault: NETBOX_TOKEN at netbox (vault_netbox_path renames it)
+
+# Read through hostvars, since a bare netbox_url here would refer to the fact being set; the inventory wins over the environment
+- name: Find NetBox
+  ansible.builtin.set_fact:
+    netbox_url: >-
+      {{ (hostvars[inventory_hostname]['netbox_url'] if 'netbox_url' in hostvars[inventory_hostname] else '')
+         | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | default('', true) | regex_replace('/+$', '') }}
+
+# Nothing can be synced without it
+- name: Require the NetBox address
+  ansible.builtin.assert:
+    that:
+      - netbox_url is match('^https?://')
+    fail_msg: "Set netbox_url in the inventory or NETBOX_URL in the environment."
+    quiet: true
+
+# Fails naming the missing path or field
+- name: Load the NetBox token
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+  vars:
+    vault_secrets:
+      - { path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: netbox_token }
+
+# Every NetBox call sends these
+- name: Set the NetBox headers
+  ansible.builtin.set_fact:
+    netbox_headers:
+      Authorization: "Token {{ netbox_token }}"
+      Accept: application/json
+  no_log: true

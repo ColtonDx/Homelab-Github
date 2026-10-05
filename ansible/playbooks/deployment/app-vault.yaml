@@ -1,5 +1,5 @@
 ---
-# Installs HashiCorp Vault from HashiCorp's apt repository, or updates it to vault_version, then runs tls/vault-tls.yaml once Vault is unsealed; safe to re-run
+# Installs HashiCorp Vault from HashiCorp's apt repository, or updates it to vault_version, then issues its TLS certificate once Vault is unsealed; safe to re-run
 # Inventory: vault_domain (required); vault_version (e.g. 2.1.1) to install or move to that release, otherwise an installed version is left alone
 # A restart seals Vault, so a new binary or config only takes effect when run with -e vault_restart=true; unseal it by hand afterwards
 # Never initialises or unseals Vault: a new Vault is left for vault operator init, since its unseal keys must not pass through Ansible
@@ -16,7 +16,7 @@
     vault_local_env:
       VAULT_ADDR: https://127.0.0.1:8200
       VAULT_SKIP_VERIFY: "true"
-    # The package's own layout, which tls/vault-tls.yaml installs certificates into
+    # The package's own layout, which the TLS play below installs certificates into
     vault_config: |
       # Managed by ansible/playbooks/deployment/app-vault.yaml
       ui = true
@@ -213,7 +213,57 @@
           '. A new binary or config is waiting for a restart; re-run with -e vault_restart=true when you can unseal it straight after'
              if (vault_restart_needed | bool) and not (vault_restart | default(false) | bool) else '' }}
 
-# Issues or renews the certificate; skipped until Vault is unsealed, since the Cloudflare token lives in Vault
+# Issues the certificate once Vault is unsealed, since the Cloudflare token lives in Vault; renewals are tls/renew-certificates.yaml's job
 - name: Configure Vault's TLS certificate
-  ansible.builtin.import_playbook: ../tls/vault-tls.yaml
-  when: vault_ready | default(false) | bool
+  hosts: vault
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_secrets:
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_EMAIL
+        var: acme_email
+
+  tasks:
+    # vault_ready comes from the play above on the same host
+    - name: Issue the certificate on an unsealed Vault
+      when: vault_ready | default(false) | bool
+      block:
+        # The Cloudflare credentials the DNS challenge needs
+        - name: Load Vault secrets
+          ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+        # A reload re-reads the certificate through SIGHUP, but only if the service defines it; a restart would seal Vault
+        - name: Read how the Vault service handles reload
+          ansible.builtin.command: systemctl show vault --property=ExecReload --value
+          register: vault_exec_reload
+          changed_when: false
+          check_mode: false
+
+        # Refuse to install a reload command that would do nothing on this host
+        - name: Check the Vault service supports reload
+          ansible.builtin.assert:
+            that:
+              - vault_exec_reload.stdout | trim | length > 0
+            fail_msg: >-
+              The vault service has no ExecReload, so systemctl reload vault would not load a renewed certificate.
+              Add ExecReload=/bin/kill --signal HUP $MAINPID to the unit, as HashiCorp's packaged unit does.
+
+        # acme.sh writes as root, so the reload command hands the files back to Vault on every install and renewal before reloading
+        - name: Issue and install Vault's certificate
+          ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+          vars:
+            acme_domain: "{{ vault_domain }}"
+            acme_ssl_dir: /opt/vault/tls
+            acme_key_path: /opt/vault/tls/tls.key
+            acme_fullchain_path: /opt/vault/tls/tls.crt
+            acme_reloadcmd: >-
+              chown vault:vault /opt/vault/tls/tls.key /opt/vault/tls/tls.crt
+              && chmod 0600 /opt/vault/tls/tls.key
+              && systemctl reload vault
+            acme_ssl_owner: vault
+            acme_ssl_group: vault

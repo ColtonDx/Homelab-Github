@@ -1,0 +1,36 @@
+---
+# Deletes DHCP-status addresses whose lease is gone; only dhcp-status records are ever deleted, never active, reserved or deprecated ones
+
+# Re-read after the writes above, so new lease records are included
+- name: Read every DHCP-status address NetBox holds
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?limit=0&status=dhcp"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: netbox_dhcp_ips
+  retries: 5
+  delay: 3
+  until: netbox_dhcp_ips is not failed
+  no_log: true
+
+# An empty lease list means OPNsense failed, not that every lease expired at once, so it never triggers deletes
+- name: Decide whether expired-lease cleanup is safe to run
+  ansible.builtin.set_fact:
+    lease_cleanup_safe: "{{ (active_leases | length) > 0 }}"
+    leased_addresses: "{{ active_leases | map(attribute='address') | list }}"
+
+# dhcp-status records whose lease has gone
+- name: Delete DHCP-status addresses whose lease is gone
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.id }}/"
+    method: DELETE
+    headers: "{{ netbox_headers }}"
+    status_code: [204]
+  loop: "{{ netbox_dhcp_ips.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when:
+    - lease_cleanup_safe | bool
+    - (item.address | regex_replace('/.*$', '')) not in leased_addresses
+  register: lease_delete_results

@@ -1,0 +1,81 @@
+---
+# Reads the current leases from OPNsense, looks each up in NetBox, and works out which addresses the inventory accounts for
+
+# The Dnsmasq endpoint, since DHCP on this firewall is served by Dnsmasq rather than ISC dhcpd
+- name: Fetch DHCP leases from OPNsense
+  ansible.builtin.uri:
+    url: "https://{{ firewall_host }}/api/dnsmasq/leases/search"
+    method: GET
+    url_username: "{{ firewall_key }}"
+    url_password: "{{ firewall_secret }}"
+    force_basic_auth: true
+    validate_certs: "{{ validate_certs | default(true) }}"
+    return_content: true
+    status_code: 200
+  register: dhcp_response
+  retries: 5
+  delay: 3
+  until: dhcp_response is not failed
+  no_log: true
+
+# Dnsmasq names the MAC hwaddr, where dhcpd used mac; it only returns current leases, so there is no expired filter
+- name: Filter to leases with a valid IP and MAC
+  ansible.builtin.set_fact:
+    active_leases: >-
+      {{ dhcp_response.json.rows | default([])
+         | selectattr('address', 'defined') | selectattr('address', 'ne', '')
+         | selectattr('hwaddr', 'defined') | selectattr('hwaddr', 'ne', '')
+         | list }}
+
+# Without a mask NetBox matches the address whatever its prefix length, so a record the inventory or Proxmox made is found rather than duplicated
+- name: Query NetBox for each lease IP
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ item.address }}"
+    method: GET
+    headers: "{{ netbox_headers }}"
+    status_code: 200
+  register: netbox_check
+  loop: "{{ active_leases }}"
+  loop_control:
+    label: "{{ item.address }}"
+  retries: 5
+  delay: 3
+  until: netbox_check is not failed
+  no_log: true
+
+# The first record per address, plus any address that already has more than one
+- name: Index the NetBox records for the leases
+  ansible.builtin.set_fact:
+    lease_records: >-
+      {{ dict(found | map(attribute='item.address') | zip(found | map(attribute='json.results') | map('first'))) }}
+    lease_duplicates: "{{ found | selectattr('json.count', '>', 1) | map(attribute='item.address') | list }}"
+  vars:
+    found: "{{ netbox_check.results | default([]) | selectattr('json.count', '>', 0) | list }}"
+
+# An address that is some host's ansible_host is inventory-backed, which makes its lease active rather than dhcp
+- name: Collect ansible_host values from every inventory host
+  ansible.builtin.set_fact:
+    inventory_ansible_hosts: "{{ groups['all'] | default([]) | map('extract', hostvars, 'ansible_host') | select('defined') | map('string') | list }}"
+
+# Literal addresses compare directly; names need resolving first
+- name: Split those into literal addresses and names needing resolution
+  ansible.builtin.set_fact:
+    inventory_literal_ips: "{{ inventory_ansible_hosts | select('match', '^\\d+\\.\\d+\\.\\d+\\.\\d+$') | list }}"
+    inventory_names: "{{ inventory_ansible_hosts | reject('match', '^\\d+\\.\\d+\\.\\d+\\.\\d+$') | list }}"
+
+# A name that does not resolve is simply not matched, so its lease falls through to the other rules rather than failing
+- name: Resolve inventory hostnames to addresses
+  ansible.builtin.command: "getent hosts {{ item }}"
+  loop: "{{ inventory_names }}"
+  register: inventory_name_lookup
+  changed_when: false
+  failed_when: false
+
+# Every address the inventory accounts for
+- name: Build the full set of inventory-backed addresses
+  ansible.builtin.set_fact:
+    inventory_addresses: >-
+      {{ (inventory_literal_ips
+          + (inventory_name_lookup.results | default([]) | selectattr('rc', 'equalto', 0)
+             | map(attribute='stdout') | map('regex_search', '^\S+') | select('string') | list))
+         | unique | list }}

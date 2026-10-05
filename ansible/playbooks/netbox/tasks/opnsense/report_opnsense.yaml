@@ -1,0 +1,27 @@
+---
+# Reports what the OPNsense step changed, and anything a person should check
+
+# One summary of everything the step changed
+- name: Report the OPNsense sync
+  ansible.builtin.debug:
+    msg:
+      - >-
+        OPNsense: {{ active_leases | length }} leases
+        ({{ active_leases | map(attribute='address') | select('in', inventory_addresses) | list | length }} inventory-backed,
+        {{ active_leases | selectattr('is_reserved', 'defined') | selectattr('is_reserved') | list | length }} reservations);
+        created {{ create_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 201) | list | length }},
+        refreshed {{ update_results.results | default([]) | selectattr('status', 'defined') | selectattr('status', 'equalto', 200) | list | length }},
+        expired deleted {{ lease_delete_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }}
+      - >-
+        Leases resolved to a VM: {{ lease_bindings | default([]) | length }}
+        (attached to an interface {{ lease_assign_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }},
+        primary IPv4 changed {{ lease_primary_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }})
+
+# Each line mirrors a safety decision made earlier in the step
+- name: Report OPNsense warnings
+  ansible.builtin.debug:
+    msg: >-
+      {{ ([]
+          + (['EXPIRED-LEASE CLEANUP SKIPPED - OPNsense returned no leases, so nothing was deleted.'] if not (lease_cleanup_safe | bool) else [])
+          + (['More than one NetBox record for ' ~ (lease_duplicates | join(', ')) ~ '; the first was used, so merge or delete the extras.'] if lease_duplicates | length > 0 else []))
+         | default(['none'], true) }}

@@ -1,9 +1,9 @@
 ---
-# Semaphore task template TLS | Renew Certificate; see semaphore/README.md for the project resources it names
-name: TLS | Renew Certificate
-description: Renews the acme.sh certificates on the ACME hosts now; the service reloads through the command acme.sh saved at issue
+# Semaphore task template TLS | Renew Certificates; see semaphore/README.md for the project resources it names
+name: TLS | Renew Certificates
+description: Renews the acme.sh certificates that expire within acme_renew_days, or all with acme_force; each service's app playbook issues them first
 app: ansible
-playbook: ansible/playbooks/tls/renew-cert.yaml
+playbook: ansible/playbooks/tls/renew-certificates.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
 environments:
@@ -25,15 +25,17 @@ survey_vars:
         value: hashicorp-vault
   - name: acme_force
     title: Force renewal
-    description: No renews only certificates past their renewal date; forced renewals count toward Let's Encrypt's weekly limit
+    description: Renew now whatever the expiry; counts toward Let's Encrypt's limit of 5 identical certificates a week
     type: enum
     required: true
-    default_value: 'true'
+    default_value: 'false'
     values:
+      - name: 'No'
+        value: 'false'
       - name: 'Yes'
         value: 'true'
-      - name: No, only if due
-        value: 'false'
-  - name: acme_domain
-    title: Domain (optional)
-    description: Renew only this domain; leave empty for every certificate on the host
+  - name: acme_renew_days
+    title: Renew within days
+    description: Renew certificates that expire within this many days (default 30)
+    type: int
+    default_value: '30'

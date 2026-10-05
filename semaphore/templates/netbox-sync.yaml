@@ -1,14 +1,15 @@
 ---
-# Semaphore task template Netbox | Sync Proxmox; see semaphore/README.md for the project resources it names
-name: Netbox | Sync Proxmox
+# Semaphore task template Netbox | Sync; see semaphore/README.md for the project resources it names
+name: Netbox | Sync
+description: Syncs NetBox from the inventory, Proxmox and OPNsense in that order; each source only updates the records it owns
 view: Netbox
 app: ansible
-playbook: ansible/playbooks/netbox/proxmox-vm-sync/proxmox-vm-sync.yaml
+playbook: ansible/playbooks/netbox/sync-netbox.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
 environments:
   - Hashicorp Secrets
 survey_vars:
-  - name: netbox_url
-    title: NETBOX_URL
-    description: Optional; defaults to netbox_url in the inventory
+  - name: netbox_sources
+    title: Sources (optional)
+    description: Comma-separated subset of inventory, proxmox, opnsense; empty runs all three

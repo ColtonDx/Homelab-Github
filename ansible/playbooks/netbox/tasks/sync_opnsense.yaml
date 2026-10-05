@@ -1,0 +1,47 @@
+---
+# Task file: syncs OPNsense's DHCP leases into NetBox IPAM: records new lease addresses, refreshes the ones it owns, deletes DHCP records whose lease is gone and binds leases to the VM holding them; needs connect_netbox.yaml first
+# Firewall: opnsense_firewall, else the firewalls group's first host's ansible_host; validate_certs (default true) for the firewall's API
+# Vault: FIREWALL_KEY and FIREWALL_SECRET at opnsense (vault_opnsense_path renames it)
+# Status rules: an address that is some host's ansible_host, or a DHCP reservation, is active; any other lease is dhcp; reserved and deprecated are never overwritten
+# Runs after the inventory and Proxmox steps, so a lease only fills in what they have not recorded; each step is a file in tasks/opnsense/
+
+# The firewall's address is a site fact, not a secret
+- name: Find the firewall
+  ansible.builtin.set_fact:
+    firewall_host: "{{ opnsense_firewall | default(hostvars[(groups['firewalls'] | default([]) | first | default(''))].ansible_host | default(''), true) }}"
+
+# Nothing to read without it
+- name: Require the firewall address
+  ansible.builtin.assert:
+    that:
+      - firewall_host | length > 0
+    fail_msg: "Set opnsense_firewall, or put the firewall in the firewalls group with its ansible_host."
+    quiet: true
+
+# The API key pair from the opnsense path
+- name: Load the OPNsense credentials
+  ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+  vars:
+    vault_secrets:
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_KEY, var: firewall_key }
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_SECRET, var: firewall_secret }
+
+# The leases, what NetBox holds for each, and which addresses the inventory accounts for
+- name: Read the leases
+  ansible.builtin.include_tasks: opnsense/read_leases.yaml
+
+# Creates new lease addresses and refreshes the ones this step owns
+- name: Sync the lease addresses
+  ansible.builtin.include_tasks: opnsense/sync_lease_addresses.yaml
+
+# Deletes DHCP-status records whose lease is gone
+- name: Remove expired leases
+  ansible.builtin.include_tasks: opnsense/remove_expired_leases.yaml
+
+# Ties leases to the VM interface whose MAC holds them
+- name: Bind leases to their VMs
+  ansible.builtin.include_tasks: opnsense/bind_leases.yaml
+
+# Counts and anything a person should check
+- name: Report the OPNsense sync
+  ansible.builtin.include_tasks: opnsense/report_opnsense.yaml
