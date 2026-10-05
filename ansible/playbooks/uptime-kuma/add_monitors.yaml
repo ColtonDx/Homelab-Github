@@ -45,6 +45,29 @@
   delegate_to: localhost
   become: false
   block:
+    # Container checks need their Docker host registered in Kuma; the collection fails with an unhelpful error otherwise
+    - name: List Kuma's Docker hosts
+      lucasheld.uptime_kuma.docker_host_info:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+      register: kuma_docker_info
+      when: kuma_monitors | selectattr('type', 'defined') | selectattr('type', 'equalto', 'docker') | list | length > 0
+
+    # Container checks on an unknown Docker host are set aside so the rest still sync
+    - name: Set aside container checks on unknown Docker hosts
+      ansible.builtin.set_fact:
+        kuma_ready: "{{ kuma_monitors | rejectattr('docker_host', 'defined') | list + (kuma_docker_checks | selectattr('docker_host', 'in', kuma_known_hosts) | list) }}"
+        kuma_skipped_hosts: "{{ kuma_docker_checks | rejectattr('docker_host', 'in', kuma_known_hosts) | map(attribute='docker_host') | unique | list }}"
+      vars:
+        kuma_docker_checks: "{{ kuma_monitors | selectattr('docker_host', 'defined') | list }}"
+        kuma_known_hosts: "{{ kuma_docker_info.docker_hosts | default([]) | map(attribute='name') | list }}"
+
+    # Names the hosts to register, which Uptime Kuma | Configure does
+    - name: Warn about unknown Docker hosts
+      ansible.builtin.debug:
+        msg: "Kuma has no Docker host named {{ kuma_skipped_hosts | join(', ') }}, so the container checks on it were skipped; run Uptime Kuma | Configure to register it."
+      when: kuma_skipped_hosts | length > 0
+
     # Facts persist between includes, so each call starts with no groups
     - name: Start the group list
       ansible.builtin.set_fact:
@@ -54,7 +77,7 @@
     - name: List the groups and their parents
       ansible.builtin.set_fact:
         kuma_group_pairs: "{{ kuma_group_pairs + (kuma_segments | zip([''] + kuma_segments[:-1]) | map('join', '|') | list) }}"
-      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
+      loop: "{{ kuma_ready | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
       vars:
         kuma_segments: "{{ item.split('>') | map('trim') | select | list }}"
 
@@ -92,7 +115,7 @@
         parent_name: "{{ kuma_group.split('>') | map('trim') | select | last if kuma_group | length > 0 else omit }}"
         notification_names: "{{ uptime_kuma_notifications | default(omit) }}"
         state: present
-      loop: "{{ kuma_monitors }}"
+      loop: "{{ kuma_ready }}"
       loop_control:
         label: "{{ item.name }}"
       vars:
@@ -102,4 +125,4 @@
     # Shown so the run log says what is being watched
     - name: Report the monitors
       ansible.builtin.debug:
-        msg: "Uptime Kuma is monitoring: {{ kuma_monitors | map(attribute='name') | join(', ') }}"
+        msg: "Uptime Kuma is monitoring: {{ kuma_ready | map(attribute='name') | join(', ') }}"
