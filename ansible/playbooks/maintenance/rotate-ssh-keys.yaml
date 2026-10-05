@@ -23,7 +23,7 @@
     - name: Refuse to rotate the account Ansible connects as without confirmation
       ansible.builtin.assert:
         that:
-          - target_user != (ansible_user | default(ansible_user_id)) or confirm_self_rotation | default(false) | bool
+          - target_user != (ansible_user | default(ansible_facts.user_id)) or confirm_self_rotation | default(false) | bool
         fail_msg: >-
           {{ target_user }} is the account Ansible connects to {{ inventory_hostname }} as. Make sure the new key is
           the one Ansible uses, then re-run with confirm_self_rotation=true.

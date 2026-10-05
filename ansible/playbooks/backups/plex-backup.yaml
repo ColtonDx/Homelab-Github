@@ -12,7 +12,7 @@
     backup_dest: "{{ plex_backup_dest | default('/mnt/media/PlexBackups') }}"
     service_name: "{{ plex_service_name | default('plexmediaserver') }}"
     # Includes the time so two runs on the same day never share a temp folder or archive name
-    stamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    stamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
     temp_dir: "/tmp/plex_backup_{{ stamp }}"
     temp_archive: "/tmp/plex_backup_{{ stamp }}.tar.gz"
     final_archive: "{{ backup_dest }}/plex_backup_{{ stamp }}.tar.gz"

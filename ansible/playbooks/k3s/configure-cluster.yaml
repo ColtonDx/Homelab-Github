@@ -54,14 +54,14 @@
       ansible.builtin.set_fact:
         root_disk: "{{ root_dev | basename | regex_replace('p?[0-9]+$', '') }}"
         longhorn_disk_device: >-
-          /dev/{{ (ansible_devices | dict2items
+          /dev/{{ (ansible_facts.devices | dict2items
                    | rejectattr('key', 'match', '^(sr|loop|fd|dm-|zram)')
                    | selectattr('value.partitions', 'eq', {})
                    | map(attribute='key') | list
                    | difference([root_dev | basename | regex_replace('p?[0-9]+$', '')]))[0] }}
       vars:
         root_dev: >-
-          {{ ansible_mounts | selectattr('mount', 'equalto', '/')
+          {{ ansible_facts.mounts | selectattr('mount', 'equalto', '/')
              | map(attribute='device') | first | default('') }}
 
     # mkfs is destructive, so never let it run against the root disk

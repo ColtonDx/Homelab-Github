@@ -35,19 +35,19 @@
     update_cache: true
     cache_valid_time: 3600
     install_recommends: false
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts.os_family == 'Debian'
 
 # Red Hat hosts get cron from the cronie package
 - name: Ensure cron daemon is installed (RedHat)
   package:
     name: cronie
     state: present
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts.os_family == 'RedHat'
 
 # Keep cron running so scheduled renewals actually happen
 - name: Ensure cron daemon is enabled and running
   service:
-    name: "{{ 'crond' if ansible_os_family == 'RedHat' else 'cron' }}"
+    name: "{{ 'crond' if ansible_facts.os_family == 'RedHat' else 'cron' }}"
     state: started
     enabled: true
 

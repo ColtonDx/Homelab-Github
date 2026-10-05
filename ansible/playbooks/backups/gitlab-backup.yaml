@@ -10,7 +10,7 @@
   vars:
     config_dir: "{{ gitlab_config_dir | default('/etc/gitlab') }}"
     backup_dest: "{{ gitlab_backup_dest | default('/backups') }}"
-    backup_archive: "{{ backup_dest }}/gitlab_config_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+    backup_archive: "{{ backup_dest }}/gitlab_config_{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
 
   tasks:
     # Only root may read the directory, since every archive in it contains secrets

@@ -46,7 +46,7 @@
     - name: Confirm the data disk is mounted on every node
       ansible.builtin.assert:
         that:
-          - hostvars[item].ansible_mounts | selectattr('mount', 'equalto', longhorn_mount_path) | list | length > 0
+          - hostvars[item].ansible_facts.mounts | selectattr('mount', 'equalto', longhorn_mount_path) | list | length > 0
         fail_msg: "{{ longhorn_mount_path }} is not a mount point on {{ item }} - run configure-cluster.yaml."
       loop: "{{ groups['k3s_nodes'] }}"
 
