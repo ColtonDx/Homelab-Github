@@ -1,11 +1,11 @@
 ---
-# Task file: adds or updates Uptime Kuma monitors; used by gitops.yaml
+# Task file: adds or updates Uptime Kuma monitors; used by sync-monitors.yaml after connect_kuma.yaml and register_docker_hosts.yaml
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
-# docker: container (the container name) and docker_host (a Kuma Docker host, as configure.yaml registers them)
+# docker: container (the container name) and docker_host (a Kuma Docker host, as register_docker_hosts.yaml registers them)
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
 # A group can be nested with >, such as Containers > TrueNAS: each part is a group inside the one before it, and the monitor goes in the last; / is an ordinary character, as in CI/CD
-# Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor; connection and Vault settings are in connect.yaml
+# Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
 
 # Catches a malformed entry before logging in, naming the entry
 - name: Validate the monitors
@@ -34,10 +34,6 @@
     fail_msg: "Monitor names must be unique; repeated: {{ kuma_monitors | map(attribute='name') | community.general.counter | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | join(', ') }}"
     quiet: true
 
-# Sets kuma_connected, and stays quiet when Kuma is not configured
-- name: Connect to Uptime Kuma
-  ansible.builtin.include_tasks: connect.yaml
-
 # Everything below needs Kuma
 - name: Add the Uptime Kuma monitors
   when: kuma_connected
@@ -62,10 +58,10 @@
         kuma_docker_checks: "{{ kuma_monitors | selectattr('docker_host', 'defined') | list }}"
         kuma_known_hosts: "{{ kuma_docker_info.docker_hosts | default([]) | map(attribute='name') | list }}"
 
-    # Names the hosts to register, which Uptime Kuma | Configure does
+    # Normally register_docker_hosts.yaml has just registered them, so this means the host could not be reached or named
     - name: Warn about unknown Docker hosts
       ansible.builtin.debug:
-        msg: "Kuma has no Docker host named {{ kuma_skipped_hosts | join(', ') }}, so the container checks on it were skipped; run Uptime Kuma | Configure to register it."
+        msg: "Kuma has no Docker host named {{ kuma_skipped_hosts | join(', ') }}, so the container checks on it were skipped; check its kuma_docker_name and address in the inventory."
       when: kuma_skipped_hosts | length > 0
 
     # Facts persist between includes, so each call starts with no groups

@@ -26,7 +26,7 @@
 
     # Kuma's login, from its own Vault path
     - name: Load the Uptime Kuma credentials
-      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
       vars:
         vault_secrets:
           - path: "{{ vault_uptime_kuma_path | default('uptime-kuma') }}"

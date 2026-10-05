@@ -18,7 +18,7 @@ The **Uptime Kuma | GitOps** job reads the labels in every compose file in `dock
 | `Kuma.Group` | Moves the URL check out of `Applications` |
 | `Kuma.DockerHost` | Turns on the container check, on this Docker host (its inventory name, e.g. `truenas-scale`) |
 
-The Docker host's name in Kuma, and its group under `Containers`, is `kuma_docker_name` on its inventory host, e.g. `TrueNAS`. **Uptime Kuma | Configure** registers every host these labels name.
+The Docker host's name in Kuma, and its group under `Containers`, is `kuma_docker_name` on its inventory host, e.g. `TrueNAS`. The GitOps job registers every host these labels name before adding the checks.
 
 ## Example
 

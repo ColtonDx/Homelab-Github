@@ -3,7 +3,7 @@
 # Needs kuma_maintenance_title, the window's name and the key that ends it; kuma_maintenance_state is present (default) to start it or absent to end it
 # Starting needs kuma_maintenance_monitors, a list of monitor names; optional kuma_maintenance_minutes (default 30) and kuma_maintenance_description
 # The window runs from now for that many minutes and then ends by itself, so a run that dies partway never leaves monitors silenced for good
-# Monitors not in Kuma are skipped with a note; connection and Vault settings are in connect.yaml
+# Monitors not in Kuma are skipped with a note; connection and Vault settings are in connect_kuma.yaml
 
 # A window without a title could never be found again to end it
 - name: Validate the maintenance inputs
@@ -18,7 +18,7 @@
 
 # Sets kuma_connected, and stays quiet when Kuma is not configured
 - name: Connect to Uptime Kuma
-  ansible.builtin.include_tasks: connect.yaml
+  ansible.builtin.include_tasks: connect_kuma.yaml
 
 # Everything below needs Kuma
 - name: Change the maintenance window

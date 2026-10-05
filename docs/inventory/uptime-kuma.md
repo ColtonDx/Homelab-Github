@@ -28,6 +28,10 @@ myserver:
       hostname: "{{ ansible_host }}"
 ```
 
+## Manual monitors
+
+`kuma_manual_monitors` in `group_vars/all/uptime_kuma/monitors.yaml`: a list of monitors with the same fields as above, for anything that is neither a host nor a compose app, such as an external site.
+
 ## Other options
 
 | Option | Where | Meaning |

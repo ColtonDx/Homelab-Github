@@ -1,7 +1,7 @@
 ---
 # Reserves one address in OPNsense Dnsmasq by hand: a host record giving the DNS name and the DHCP reservation; Terraform builds do this themselves after an apply
 # Required: reserve_name (host name without the domain), reserve_ip, reserve_mac; optional opnsense_domain (default domain from the inventory)
-# Re-running with the same name updates its address or MAC; firewall and Vault settings are listed in dnsmasq_reserve_ip.yaml
+# Re-running with the same name updates its address or MAC; firewall and Vault settings are listed in tasks/dnsmasq_reserve_ip.yaml
 - name: Reserve an address in OPNsense Dnsmasq
   hosts: localhost
   connection: local
@@ -20,7 +20,7 @@
 
     # Writes the record and reloads Dnsmasq
     - name: Reserve the address
-      ansible.builtin.include_tasks: dnsmasq_reserve_ip.yaml
+      ansible.builtin.include_tasks: tasks/dnsmasq_reserve_ip.yaml
       vars:
         opnsense_reservations:
           - { name: "{{ reserve_name }}", ip: "{{ reserve_ip }}", mac: "{{ reserve_mac }}" }

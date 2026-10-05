@@ -3,7 +3,7 @@
 # Application URL: a service with Kuma.Name and AppPort gets an HTTP check, named Kuma.Name, on https://<Kuma.Subdomain, else the container name>.<docker_domain><Kuma.Path>, in Applications
 # Container: a service with Kuma.DockerHost (an inventory host name) gets a container check, named after the container, in Containers > <that host's kuma_docker_name, else its inventory name>
 # Optional labels: Kuma.Path (default none), Kuma.AcceptedCodes (comma-separated, default 200-299), Kuma.Group (the HTTP check's group); kuma_application_group and kuma_container_group rename the two groups
-# Also sets kuma_compose_docker_hosts, the inventory hosts the labels name, for configure.yaml to register
+# Also sets kuma_compose_docker_hosts, the inventory hosts the labels name, for register_docker_hosts.yaml to register
 
 # Every stack folder holds one compose file, one level down
 - name: Find the compose files

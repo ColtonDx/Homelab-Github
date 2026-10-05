@@ -311,7 +311,7 @@
 
     # Static VMs get their DNS name and DHCP reservation before anything connects to them; projects without a dns_reservations output reserve nothing
     - name: Reserve the VMs' addresses in OPNsense
-      ansible.builtin.include_tasks: ../opnsense/dnsmasq_reserve_ip.yaml
+      ansible.builtin.include_tasks: ../opnsense/tasks/dnsmasq_reserve_ip.yaml
       vars:
         opnsense_reservations: "{{ tf_result.outputs.dns_reservations.value | default([]) }}"
       when:
@@ -347,7 +347,7 @@
   tasks:
     # The VM, its eth0 and MAC, and its address with a DNS name; skipped unless an apply produced static addresses
     - name: Record the VMs
-      ansible.builtin.include_tasks: ../netbox/record_vms.yaml
+      ansible.builtin.include_tasks: ../netbox/tasks/record_vms.yaml
       vars:
         netbox_vm_records: "{{ tf_netbox_records | default([]) }}"
         netbox_vm_cluster: "{{ tf_sources.netbox_cluster | default('') }}"

@@ -27,7 +27,7 @@
 
     # Each host's monitors, worked out the same way the inventory sync names them
     - name: Find the hosts' monitors
-      ansible.builtin.include_tasks: host_monitors.yaml
+      ansible.builtin.include_tasks: tasks/read_host_monitors.yaml
       vars:
         kuma_hosts: "{{ mw_hosts }}"
       when: mw_action == 'start'
@@ -43,10 +43,10 @@
 
     # Starts the window, or ends it early by title
     - name: Change the maintenance window
-      ansible.builtin.include_tasks: maintenance.yaml
+      ansible.builtin.include_tasks: tasks/set_maintenance_window.yaml
       vars:
         kuma_maintenance_state: "{{ 'present' if mw_action == 'start' else 'absent' }}"
         kuma_maintenance_title: "{{ maintenance_title | default('Maintenance ' ~ ((mw_hosts if mw_hosts | length > 0 else mw_named) | join(', ')), true) }}"
         kuma_maintenance_monitors: "{{ (kuma_host_monitors | default([]) | map(attribute='name') | list + mw_named) | unique }}"
         kuma_maintenance_minutes: "{{ maintenance_minutes | default(60) }}"
-        kuma_maintenance_description: "Started from Semaphore by maintenance-window.yaml"
+        kuma_maintenance_description: "Started from Semaphore by set-maintenance-window.yaml"

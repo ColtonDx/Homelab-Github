@@ -85,14 +85,14 @@
 
     # A static VM gets its DNS name and DHCP reservation; a DHCP VM's output is empty, so nothing is reserved
     - name: Reserve the VM's address in OPNsense
-      ansible.builtin.include_tasks: ../opnsense/dnsmasq_reserve_ip.yaml
+      ansible.builtin.include_tasks: ../opnsense/tasks/dnsmasq_reserve_ip.yaml
       vars:
         opnsense_reservations: "{{ adhoc_apply.outputs.dns_reservations.value | default([]) }}"
       when: reserve_ip | default(true) | bool
 
     # The VM, its eth0 and MAC, and its address in NetBox; a DHCP VM's output is empty, so nothing is recorded
     - name: Record the VM in NetBox
-      ansible.builtin.include_tasks: ../netbox/record_vms.yaml
+      ansible.builtin.include_tasks: ../netbox/tasks/record_vms.yaml
       vars:
         netbox_vm_records: "{{ adhoc_apply.outputs.dns_reservations.value | default([]) }}"
       when: record_netbox | default(true) | bool

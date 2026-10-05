@@ -65,9 +65,9 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Semaphore \| Scheduled Job Alerts | (none) | [semaphore-scheduled-job-alerts.yaml](templates/semaphore-scheduled-job-alerts.yaml) | `ansible/playbooks/semaphore/scheduled-job-alerts.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificate | (none) | [tls-renew-certificate.yaml](templates/tls-renew-certificate.yaml) | `ansible/playbooks/tls/renew-cert.yaml` |
-| Uptime Kuma \| Configure | (none) | [uptime-kuma-configure.yaml](templates/uptime-kuma-configure.yaml) | `ansible/playbooks/uptime-kuma/configure.yaml` |
-| Uptime Kuma \| GitOps | (none) | [uptime-kuma-gitops.yaml](templates/uptime-kuma-gitops.yaml) | `ansible/playbooks/uptime-kuma/gitops.yaml` |
-| Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/maintenance-window.yaml` |
+| Uptime Kuma \| GitOps + Socket Proxy | (none) | [uptime-kuma-gitops-socket-proxy.yaml](templates/uptime-kuma-gitops-socket-proxy.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` with `-e deploy_socket_proxy=true` |
+| Uptime Kuma \| GitOps | (none) | [uptime-kuma-gitops.yaml](templates/uptime-kuma-gitops.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` |
+| Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/set-maintenance-window.yaml` |
 
 ## File format
 

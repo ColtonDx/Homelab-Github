@@ -29,7 +29,7 @@
 
     # The same API key the DHCP-to-NetBox sync uses
     - name: Load the OPNsense API key
-      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
       vars:
         vault_secrets:
           - path: "{{ vault_opnsense_path | default('opnsense') }}"

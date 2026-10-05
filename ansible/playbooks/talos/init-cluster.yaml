@@ -1,8 +1,8 @@
 ---
 # Configures the Talos cluster made of the talos_cluster group's hosts: nodes in maintenance mode get their config, a new cluster is bootstrapped once, and running nodes are updated one at a time
 # Normally run by terraform/build-project.yaml after the talos project applies, and it runs bootstrap-secrets.yaml at the end; it can also be run on its own
-# Settings: cluster.yaml's committed name, versions and extensions, overridden by the group's talos dict (vip, gateway, prefix, node_cidr, and optionally install_image); each host's ansible_host is its address
-# The patches use the pre-1.14 format, so cluster.yaml keeps config_version at v1.13 while nodes run 1.14; see the check below
+# Settings: vars/cluster.yaml's committed name, versions and extensions, overridden by the group's talos dict (vip, gateway, prefix, node_cidr, and optionally install_image); each host's ansible_host is its address
+# The patches use the pre-1.14 format, so vars/cluster.yaml keeps config_version at v1.13 while nodes run 1.14; see the check below
 # Environment and Vault: as tasks/talos_access.yaml; talos_generate_secrets=true for a brand-new cluster; talos_bootstrap_secrets=false skips the last step
 - name: Configure the Talos cluster
   hosts: localhost

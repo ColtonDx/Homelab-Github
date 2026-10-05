@@ -3,7 +3,7 @@
 name: Uptime Kuma | GitOps
 description: 'Keeps Uptime Kuma in step with Git: inventory hosts with kuma_monitor and compose containers with a Kuma.Name label; runs on a schedule and never deletes monitors'
 app: ansible
-playbook: ansible/playbooks/uptime-kuma/gitops.yaml
+playbook: ansible/playbooks/uptime-kuma/sync-monitors.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
 environments:

@@ -3,7 +3,7 @@
 name: Uptime Kuma | Maintenance Window
 description: Silences Uptime Kuma monitors for planned work; the window ends by itself after the set minutes, or end it early by its title
 app: ansible
-playbook: ansible/playbooks/uptime-kuma/maintenance-window.yaml
+playbook: ansible/playbooks/uptime-kuma/set-maintenance-window.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
 environments:

@@ -63,7 +63,7 @@
             # The same monitors the inventory sync creates for this host
             - name: Find this host's monitors
               ansible.builtin.include_tasks:
-                file: ../uptime-kuma/host_monitors.yaml
+                file: ../uptime-kuma/tasks/read_host_monitors.yaml
                 apply:
                   become: false
               vars:
@@ -72,7 +72,7 @@
             # Ends by itself after patch_window_minutes, so a run that dies here never leaves the host silenced
             - name: Start the maintenance window
               ansible.builtin.include_tasks:
-                file: ../uptime-kuma/maintenance.yaml
+                file: ../uptime-kuma/tasks/set_maintenance_window.yaml
                 apply:
                   become: false
               vars:
@@ -170,7 +170,7 @@
                 # Removes the window by the title it was opened with
                 - name: End the maintenance window
                   ansible.builtin.include_tasks:
-                    file: ../uptime-kuma/maintenance.yaml
+                    file: ../uptime-kuma/tasks/set_maintenance_window.yaml
                     apply:
                       become: false
                   vars:
