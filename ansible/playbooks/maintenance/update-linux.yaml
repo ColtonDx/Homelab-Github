@@ -156,6 +156,7 @@
                 msg: "Could not open an Uptime Kuma maintenance window for {{ inventory_hostname }}, so its monitors may alert while it is patched."
 
         - name: Stop services, update and reboot if needed
+          when: patch_needed | bool
           block:
             # Stop in the order given, so dependents can be listed before what they depend on
             - name: Stop services
