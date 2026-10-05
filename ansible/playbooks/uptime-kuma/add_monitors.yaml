@@ -4,6 +4,7 @@
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
 # docker: container (the container name) and docker_host (a Kuma Docker host, as configure.yaml registers them)
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
+# A group can be nested with >, such as Containers > TrueNAS: each part is a group inside the one before it, and the monitor goes in the last; / is an ordinary character, as in CI/CD
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor; connection and Vault settings are in connect.yaml
 
 # Catches a malformed entry before logging in, naming the entry
@@ -44,15 +45,31 @@
   delegate_to: localhost
   become: false
   block:
-    # Groups keep the dashboard sorted; each is created the first time a monitor uses it
+    # Facts persist between includes, so each call starts with no groups
+    - name: Start the group list
+      ansible.builtin.set_fact:
+        kuma_group_pairs: []
+
+    # Each group path becomes parent and child pairs, parents first, so a nested group always has its parent to go in
+    - name: List the groups and their parents
+      ansible.builtin.set_fact:
+        kuma_group_pairs: "{{ kuma_group_pairs + (kuma_segments | zip([''] + kuma_segments[:-1]) | map('join', '|') | list) }}"
+      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
+      vars:
+        kuma_segments: "{{ item.split('>') | map('trim') | select | list }}"
+
+    # Groups keep the dashboard sorted; each is created the first time a monitor uses it, inside its parent when it has one
     - name: Ensure the monitor groups exist
       lucasheld.uptime_kuma.monitor:
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
-        name: "{{ item }}"
+        name: "{{ item.split('|')[0] }}"
         type: group
+        parent_name: "{{ item.split('|')[1] if item.split('|')[1] | length > 0 else omit }}"
         state: present
-      loop: "{{ kuma_monitors | map(attribute='group', default=kuma_monitor_group | default(kuma_default_group | default('Applications'))) | select | unique | list }}"
+      loop: "{{ kuma_group_pairs | default([]) | unique }}"
+      loop_control:
+        label: "{{ item.split('|') | reverse | select | join(' > ') }}"
 
     # Fields that do not apply to a monitor's type are left out, so Kuma keeps its own defaults for them
     - name: Add or update the monitors
@@ -72,7 +89,7 @@
         ignoreTls: "{{ item.ignore_tls | default(false) | bool if kuma_type == 'http' else omit }}"
         expiryNotification: "{{ item.url is match('^https://') if kuma_type == 'http' else omit }}"
         interval: "{{ item.interval | default(60) | int }}"
-        parent_name: "{{ kuma_group if kuma_group | length > 0 else omit }}"
+        parent_name: "{{ kuma_group.split('>') | map('trim') | select | last if kuma_group | length > 0 else omit }}"
         notification_names: "{{ uptime_kuma_notifications | default(omit) }}"
         state: present
       loop: "{{ kuma_monitors }}"

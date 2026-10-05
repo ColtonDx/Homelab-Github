@@ -9,7 +9,7 @@ A container gets an Uptime Kuma monitor when its compose service has a `Kuma.Nam
 | `Kuma.Name` | Turns the monitor on, with this name. Without it, the container is not monitored |
 | `Kuma.Subdomain` | The address's subdomain (default the container name) |
 | `Kuma.Path` | A path to check, e.g. `/health` (default none) |
-| `Kuma.Group` | The Kuma group (default `Applications`) |
+| `Kuma.Group` | The Kuma group (default `Containers > <Docker host>`); use `>` to nest groups |
 | `Kuma.AcceptedCodes` | Status codes that count as up, comma-separated (default `200-299`) |
 | `Kuma.DockerHost` | Container checks only: which Docker host (default `kuma_default_docker_host` in the inventory) |
 
@@ -35,6 +35,8 @@ services:
       - "Kuma.Group=Databases"
 ```
 
-This gives an HTTP check on `https://myapp.<docker_domain>/health` and a container check on `myapp-db`.
+This gives an HTTP check on `https://myapp.<docker_domain>/health` and a container check on `myapp-db`, both in the `Containers > <Docker host>` group, except the database, which goes in its own `Databases` group.
+
+The Docker host's name in Kuma, and its group under `Containers`, is `kuma_docker_name` on its inventory host, e.g. `TrueNAS`, else the inventory name.
 
 Monitor names must be unique, and removing a label does not delete the monitor; delete it in Kuma.

@@ -53,7 +53,7 @@ If a name is set in more than one place, Vault wins over `docker_app_vars`, whic
 | `AppPort=<port>` | The port Nginx Proxy Manager forwards to; set it on the one container that serves the app. Its stack also gets an Uptime Kuma monitor on deploy |
 | `AppScheme=https` | Optional, on the same container as `AppPort`: forward over HTTPS instead of the default HTTP, for apps that only serve TLS |
 | `Kuma.Name=<name>` | Optional: gives the container an Uptime Kuma monitor with this name, created by the Uptime Kuma GitOps job. With `AppPort` it is an HTTP check on `https://<Kuma.Subdomain or container>.<docker_domain>`; without, a container check |
-| `Kuma.Subdomain`, `Kuma.Path`, `Kuma.Group`, `Kuma.AcceptedCodes`, `Kuma.DockerHost` | Optional, with `Kuma.Name`: the address's subdomain and path, the Kuma group (default `Applications`), status codes that count as up, and for container checks the Kuma Docker host (default `kuma_default_docker_host` from the inventory) |
+| `Kuma.Subdomain`, `Kuma.Path`, `Kuma.Group`, `Kuma.AcceptedCodes`, `Kuma.DockerHost` | Optional, with `Kuma.Name`: the address's subdomain and path, the Kuma group (default `Containers > <Docker host>`), status codes that count as up, and for container checks the Kuma Docker host (default `kuma_default_docker_host` from the inventory) |
 | `ConfigPath=<path>` | Optional: where `docker/<app>/config/*.j2`, rendered from the inventory, is copied into this container by `deploy-stack.yaml` or `push-config.yaml` |
 
 ## Template

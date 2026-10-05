@@ -1,8 +1,9 @@
 ---
 # Task file: turns the Kuma labels in this repo's docker/*/docker-compose.yaml into kuma_compose_monitors, the list add_monitors.yaml takes
 # A container is monitored only when it has a Kuma.Name label; with AppPort it gets an HTTP check on https://<Kuma.Subdomain, else the container name>.<docker_domain><Kuma.Path>
-# Without AppPort it gets a container check on the Kuma Docker host in Kuma.DockerHost, else kuma_default_docker_host from the inventory
-# Optional labels: Kuma.Path (default /), Kuma.Group (default kuma_compose_group, else Applications), Kuma.AcceptedCodes (comma-separated, default 200-299)
+# Without AppPort it gets a container check on the Docker host in Kuma.DockerHost (an inventory host name), else kuma_default_docker_host from the inventory
+# Monitors go in Containers > <the Docker host's kuma_docker_name, else its inventory name>, the group per host; Kuma.Group overrides it, and kuma_container_group renames Containers
+# Optional labels: Kuma.Path (default none), Kuma.AcceptedCodes (comma-separated, default 200-299)
 
 # Every stack folder holds one compose file, one level down
 - name: Find the compose files
@@ -43,15 +44,18 @@
       {{ kuma_cm_raw if kuma_cm_raw is mapping else
          dict(kuma_cm_raw | map('regex_replace', '^([^=]*)=.*$', '\1') | zip(kuma_cm_raw | map('regex_replace', '^[^=]*=?', ''))) }}
     kuma_cm_container: "{{ item.value.container_name | default(item.key) }}"
+    kuma_cm_host: "{{ kuma_cm_labels['Kuma.DockerHost'] | default(kuma_default_docker_host | default('')) }}"
+    kuma_cm_host_name: "{{ hostvars[kuma_cm_host].kuma_docker_name | default(kuma_cm_host) if kuma_cm_host in hostvars else kuma_cm_host }}"
     kuma_cm_http:
       type: http
       url: "https://{{ kuma_cm_labels['Kuma.Subdomain'] | default(kuma_cm_container) }}.{{ docker_domain }}{{ kuma_cm_labels['Kuma.Path'] | default('') }}"
     kuma_cm_docker:
       type: docker
       container: "{{ kuma_cm_container }}"
-      docker_host: "{{ kuma_cm_labels['Kuma.DockerHost'] | default(kuma_default_docker_host | default('')) }}"
+      docker_host: "{{ kuma_cm_host_name }}"
     kuma_cm_entry: >-
-      {{ {'name': kuma_cm_labels['Kuma.Name'], 'group': kuma_cm_labels['Kuma.Group'] | default(kuma_compose_group | default('Applications'))}
+      {{ {'name': kuma_cm_labels['Kuma.Name'],
+          'group': kuma_cm_labels['Kuma.Group'] | default((kuma_container_group | default('Containers')) ~ (' > ' ~ kuma_cm_host_name if kuma_cm_host_name | length > 0 else ''))}
          | combine(kuma_cm_http if 'AppPort' in kuma_cm_labels else kuma_cm_docker)
          | combine({'accepted_codes': kuma_cm_labels['Kuma.AcceptedCodes'].split(',') | map('trim') | list} if 'Kuma.AcceptedCodes' in kuma_cm_labels else {}) }}
   when: "'Kuma.Name' in kuma_cm_labels"

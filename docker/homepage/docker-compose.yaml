@@ -14,7 +14,7 @@ services:
       - HOMEPAGE_VAR_TAUTULLI_TOKEN=${HOMEPAGE_VAR_TAUTULLI_TOKEN}
       - HOMEPAGE_VAR_TRUENAS_TOKEN=${HOMEPAGE_VAR_TRUENAS_TOKEN}
       - HOMEPAGE_VAR_CLAW_TOKEN=${HOMEPAGE_VAR_CLAW_TOKEN}
-      - HOMEPAGE_ALLOWED_HOSTS=homepage.${DOCKER_DOMAIN}
+      - HOMEPAGE_ALLOWED_HOSTS=home.${DOCKER_DOMAIN}
     volumes:
       - data:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -22,6 +22,7 @@ services:
       - "Backup=homepage" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
       - "Kuma.Name=Homepage" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.Subdomain=home" # Address checked: https://home.<docker_domain>
       - "ConfigPath=/app/config" # Sets where push-config.yaml writes docker/homepage/config
 
 networks:
