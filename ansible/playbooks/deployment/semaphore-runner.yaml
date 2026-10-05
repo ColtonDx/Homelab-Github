@@ -25,14 +25,17 @@
       - hvac==2.4.0
       - uptime-kuma-api2==2.9.0
       - httpx==0.28.1
+      - pynetbox==7.8.0
     # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the K3s data-disk mount
     # lucasheld.uptime_kuma for the uptime-kuma playbooks, on uptime-kuma-api2 above since its own library stopped at Kuma 1.x; oxlorg.opnsense, with httpx above, for Dnsmasq reservations
+    # netbox.netbox, with pynetbox above, for netbox/seed.yaml
     runner_collection_pins:
       - community.general:==13.4.0
       - community.hashi_vault:==7.1.0
       - ansible.posix:==2.2.2
       - lucasheld.uptime_kuma:==1.2.0
       - oxlorg.opnsense:==26.1.11
+      - netbox.netbox:==3.23.0
     # An explicit semaphore_url wins; otherwise Semaphore sits with the other Docker apps
     runner_semaphore_url: "{{ (semaphore_url | default('https://semaphore.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}"
     runner_user: semaphore

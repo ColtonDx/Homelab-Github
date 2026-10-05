@@ -1,0 +1,11 @@
+---
+# Semaphore task template Netbox | Inventory Sync; see semaphore/README.md for the project resources it names
+name: Netbox | Inventory Sync
+description: Records every inventory host's address in NetBox with its netbox_ip details; existing addresses only get the fields the inventory sets
+view: Netbox
+app: ansible
+playbook: ansible/playbooks/netbox/inventory-sync.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

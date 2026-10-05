@@ -1,0 +1,11 @@
+---
+# Semaphore task template Netbox | Seed; see semaphore/README.md for the project resources it names
+name: Netbox | Seed
+description: Seeds NetBox with the curated records the syncs cannot discover, from group_vars/all/netbox in the inventory; prefixes and addresses are create-only
+view: Netbox
+app: ansible
+playbook: ansible/playbooks/netbox/seed.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

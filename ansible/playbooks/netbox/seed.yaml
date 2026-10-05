@@ -1,0 +1,144 @@
+---
+# Seeds NetBox with the curated records the syncs cannot discover: manufacturers, device roles, platforms, VLANs, prefixes and static IP addresses
+# Data: netbox_manufacturers, netbox_device_roles, netbox_platforms, netbox_vlans, netbox_prefixes and netbox_ip_addresses from the inventory; any that is unset is skipped
+# Manufacturers, roles, platforms and VLANs are created or updated; prefixes and IP addresses are create-only, so curated records in NetBox are never overwritten
+# Connection: netbox_url in the inventory or NETBOX_URL in the environment; Vault: NETBOX_TOKEN at netbox (vault_netbox_path renames it)
+- name: Seed NetBox from the inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # The same address the other NetBox playbooks use
+    - name: Find NetBox
+      ansible.builtin.set_fact:
+        seed_url: "{{ (netbox_url | default(lookup('ansible.builtin.env', 'NETBOX_URL'), true) | default('', true)) | regex_replace('/+$', '') }}"
+
+    # Nothing can be seeded without it
+    - name: Require the NetBox address
+      ansible.builtin.assert:
+        that:
+          - seed_url is match('^https?://')
+        fail_msg: "Set netbox_url in the inventory or NETBOX_URL in the environment."
+        quiet: true
+
+    # The token the other NetBox playbooks use
+    - name: Load the NetBox token
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - { path: "{{ vault_netbox_path | default('netbox') }}", field: NETBOX_TOKEN, var: seed_token }
+
+    # Platforms below can name a manufacturer, so these come first
+    - name: Seed manufacturers
+      netbox.netbox.netbox_manufacturer:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          name: "{{ item.name }}"
+          slug: "{{ item.slug }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_manufacturers | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Roles a device can be given
+    - name: Seed device roles
+      netbox.netbox.netbox_device_role:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          name: "{{ item.name }}"
+          slug: "{{ item.slug }}"
+          color: "{{ item.color | default(omit) }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_device_roles | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Operating systems and firmware; manufacturer only where one vendor owns the platform
+    - name: Seed platforms
+      netbox.netbox.netbox_platform:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          name: "{{ item.name }}"
+          slug: "{{ item.slug }}"
+          manufacturer: "{{ item.manufacturer | default(omit) }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_platforms | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Before prefixes, which attach to a VLAN by vid and site
+    - name: Seed VLANs
+      netbox.netbox.netbox_vlan:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          vid: "{{ item.vid }}"
+          name: "{{ item.name }}"
+          description: "{{ item.description | default(omit) }}"
+          site: "{{ item.site | default(omit) }}"
+          status: "{{ item.status | default('active') }}"
+          tenant: "{{ item.tenant | default(omit) }}"
+        state: present
+      loop: "{{ netbox_vlans | default([]) }}"
+      loop_control:
+        label: "{{ item.vid }} {{ item.name }}"
+
+    # Read first, so the create-only steps below can skip what NetBox already holds
+    - name: Read the prefixes and addresses NetBox holds
+      ansible.builtin.uri:
+        url: "{{ seed_url }}/api/ipam/{{ item }}/?limit=0"
+        headers:
+          Authorization: "Token {{ seed_token }}"
+          Accept: application/json
+      loop: [prefixes, ip-addresses]
+      register: seed_existing
+      retries: 5
+      delay: 3
+      until: seed_existing is not failed
+      no_log: true
+
+    # Addresses are compared without their mask, so the same address with another prefix length still counts as present
+    - name: Note what already exists
+      ansible.builtin.set_fact:
+        seed_have_prefixes: "{{ seed_existing.results[0].json.results | map(attribute='prefix') | list }}"
+        seed_have_addresses: "{{ seed_existing.results[1].json.results | map(attribute='address') | map('regex_replace', '/.*$', '') | list }}"
+
+    # Create-only: an existing prefix keeps whatever was curated on it in NetBox
+    - name: Seed prefixes
+      netbox.netbox.netbox_prefix:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          prefix: "{{ item.prefix }}"
+          status: "{{ item.status | default('active') }}"
+          site: "{{ item.site | default(omit) }}"
+          vlan: "{{ item.vlan | default(omit) }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_prefixes | default([]) }}"
+      loop_control:
+        label: "{{ item.prefix }}"
+      when: item.prefix not in seed_have_prefixes
+
+    # Create-only: updating in place once rewrote curated descriptions and DNS names, so existing addresses are never touched
+    - name: Seed static IP addresses
+      netbox.netbox.netbox_ip_address:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          address: "{{ item.address }}"
+          status: "{{ item.status | default('active') }}"
+          dns_name: "{{ item.dns_name | default(omit) }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_ip_addresses | default([]) }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when: item.address | regex_replace('/.*$', '') not in seed_have_addresses

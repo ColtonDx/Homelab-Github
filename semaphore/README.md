@@ -49,6 +49,8 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | K3s \| Ansible \| Initialize | Kubernetes | [k3s-ansible-initialize.yaml](templates/k3s-ansible-initialize.yaml) | `ansible/playbooks/k3s/initialize.yaml` |
 | K3s \| Terraform \| Deployment | Kubernetes | [k3s-terraform-deployment.yaml](templates/k3s-terraform-deployment.yaml) | `ansible/playbooks/terraform/build-project.yaml` |
 | Netbox \| Opnsense Sync | Netbox | [netbox-opnsense-sync.yaml](templates/netbox-opnsense-sync.yaml) | `ansible/playbooks/netbox/opnsense-dhcp-to-netbox.yaml` |
+| Netbox \| Inventory Sync | Netbox | [netbox-inventory-sync.yaml](templates/netbox-inventory-sync.yaml) | `ansible/playbooks/netbox/inventory-sync.yaml` |
+| Netbox \| Seed | Netbox | [netbox-seed.yaml](templates/netbox-seed.yaml) | `ansible/playbooks/netbox/seed.yaml` |
 | Netbox \| Sync Proxmox | Netbox | [netbox-sync-proxmox.yaml](templates/netbox-sync-proxmox.yaml) | `ansible/playbooks/netbox/proxmox-vm-sync/proxmox-vm-sync.yaml` |
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
@@ -75,4 +77,4 @@ Each file follows the fields of Semaphore's template API (`/api/project/{id}/tem
 - `task_params` and `allow_override_args_in_task` control what can be changed when starting a task.
 - `survey_vars` are the questions asked when starting a task; for an Ansible template each answer becomes an extra variable of the same name, and for a Bash template the survey name is the script's flag, such as `--proxmox-host`.
 
-Templates for jobs that still run from the old GitLab repo are not copied here until their playbooks move to this repo.
+Templates for jobs that still run from the old GitLab repo (Host | Docker, Build Container Registry Image) are not copied here until their playbooks move to this repo.

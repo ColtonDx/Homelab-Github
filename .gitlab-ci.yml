@@ -36,7 +36,7 @@ ansible:
   image: python:3.13-slim
   script:
     - pip install ansible-core==2.21.4 hvac
-    - ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2 lucasheld.uptime_kuma:==1.2.0 oxlorg.opnsense:==26.1.11
+    - ansible-galaxy collection install community.general:==13.4.0 community.hashi_vault:==7.1.0 ansible.posix:==2.2.2 lucasheld.uptime_kuma:==1.2.0 oxlorg.opnsense:==26.1.11 netbox.netbox:==3.23.0
     - sh ci/ansible-syntax.sh
 
 # Formatting and validity of each Terraform project, without a backend or provider credentials
