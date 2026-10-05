@@ -1,0 +1,27 @@
+services:
+  gitlab-runner:
+    container_name: gitlab-runner
+    restart: unless-stopped
+    image: gitlab/gitlab-runner:latest
+    environment:
+      # GitLab's address, from docker_app_vars.gitlab-runner in the inventory
+      - GITLAB_URL=${GITLAB_URL}
+      # Runner authentication token (glrt-...) from GitLab, Admin > CI/CD > Runners > New instance runner; from Vault at gitlab-runner
+      - GITLAB_RUNNER_TOKEN=${GITLAB_RUNNER_TOKEN}
+    # Registers on first start, then keeps the saved config.toml; delete the data volume to register again with a new token
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if ! grep -q '^\[\[runners\]\]' /etc/gitlab-runner/config.toml 2>/dev/null; then
+          gitlab-runner register --non-interactive --url "$$GITLAB_URL" --token "$$GITLAB_RUNNER_TOKEN" \
+            --executor docker --docker-image alpine:latest --description gitlab-runner || exit 1
+        fi
+        exec /usr/bin/dumb-init /entrypoint run --user=gitlab-runner --working-directory=/home/gitlab-runner
+    volumes:
+      - data:/etc/gitlab-runner # Registration and config.toml
+      - /var/run/docker.sock:/var/run/docker.sock # The Docker executor starts each job in its own container on this host
+    labels:
+      - "Backup=gitlab-runner" # Sets the DVBM Backup Job Label
+
+volumes:
+  data:
