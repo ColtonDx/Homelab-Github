@@ -6,7 +6,7 @@ playbook: ansible/playbooks/maintenance/update-linux.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
 environments:
-  - Empty
+  - Hashicorp Secrets
 survey_vars:
   - name: target_hosts
     title: Hosts
