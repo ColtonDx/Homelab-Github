@@ -1,14 +1,14 @@
 ---
 # Task file: registers Docker hosts in Uptime Kuma so container checks have somewhere to connect; needs connect_kuma.yaml run first
-# The hosts are the inventory's docker group plus every host a compose Kuma.DockerHost label names (kuma_compose_docker_hosts from read_compose_monitors.yaml)
+# The hosts are those a compose Kuma.DockerHost label names (kuma_compose_docker_hosts from read_compose_monitors.yaml), since only they run the stacks
 # Each is named kuma_docker_name on its inventory host (default the inventory name) and reached at tcp://<ansible_host>:<kuma_docker_port, default 2375>, or kuma_docker_url
-# Kuma reads containers through the read-only socket proxy on each host, which sync-monitors.yaml deploys with -e deploy_socket_proxy=true
+# Kuma reads containers through the read-only socket proxy each such host runs as the docker-socket-proxy Portainer stack
 
 # Each host with the name and address Kuma uses
 - name: List the Docker hosts
   ansible.builtin.set_fact:
     kuma_docker_hosts: "{{ kuma_docker_hosts | default([]) + [{'name': hostvars[item].kuma_docker_name | default(item), 'url': hostvars[item].kuma_docker_url | default('tcp://' ~ (hostvars[item].ansible_host | default(item)) ~ ':' ~ (hostvars[item].kuma_docker_port | default(2375)))}] }}"
-  loop: "{{ (groups['docker'] | default([]) + kuma_compose_docker_hosts | default([])) | unique }}"
+  loop: "{{ kuma_compose_docker_hosts | default([]) | unique }}"
 
 # Matched by name, so re-runs update the address; container checks point at this name
 - name: Register each Docker host

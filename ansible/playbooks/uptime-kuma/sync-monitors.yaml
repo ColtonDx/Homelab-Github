@@ -2,7 +2,6 @@
 # The one Uptime Kuma playbook: makes Kuma match Git, run on a schedule; each step is a task file in this folder
 # Monitors come from three places: inventory hosts' kuma_monitor (read_host_monitors.yaml), compose labels in docker/ (read_compose_monitors.yaml), and kuma_manual_monitors in the inventory for anything else
 # Then it logs in (connect_kuma.yaml), registers the Docker hosts (register_docker_hosts.yaml) and adds or updates every monitor (add_monitors.yaml); monitors are matched by name and never deleted
-# -e deploy_socket_proxy=true also runs the read-only Docker socket proxy on the docker group hosts over SSH; the scheduled run leaves hosts alone
 # Hosts with no group set get none, unless sync_group names one; connection and Vault settings are in connect_kuma.yaml
 - name: Sync Uptime Kuma from Git
   hosts: localhost
@@ -54,34 +53,3 @@
       ansible.builtin.include_tasks: tasks/add_monitors.yaml
       vars:
         kuma_monitors: "{{ kuma_all_monitors }}"
-
-# Only with -e deploy_socket_proxy=true; the host the compose stacks run on gets its proxy as the docker-socket-proxy Portainer stack instead
-- name: Run the Docker socket proxy on the docker hosts
-  hosts: "{{ 'docker' if deploy_socket_proxy | default(false) | bool else 'localhost:!localhost' }}"
-  become: true
-  gather_facts: false
-
-  vars:
-    proxy_dir: /opt/docker-socket-proxy
-
-  tasks:
-    # Somewhere for the compose file to live
-    - name: Create the proxy's folder
-      ansible.builtin.file:
-        path: "{{ proxy_dir }}"
-        state: directory
-        mode: "0755"
-
-    # The same compose file Portainer deploys, so every host runs the same read-only settings
-    - name: Copy the proxy's compose file
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../../docker/docker-socket-proxy/docker-compose.yaml"
-        dest: "{{ proxy_dir }}/docker-compose.yaml"
-        mode: "0644"
-
-    # Starts the proxy, or recreates it when the compose file changed; compose reports what it did on stderr
-    - name: Start the proxy
-      ansible.builtin.command:
-        argv: [docker, compose, --project-directory, "{{ proxy_dir }}", up, --detach, --remove-orphans]
-      register: proxy_up
-      changed_when: proxy_up.stderr is search('(Creat|Recreat|Start)(ed|ing)')

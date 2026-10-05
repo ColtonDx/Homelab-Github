@@ -1,6 +1,6 @@
 ---
-# Semaphore task template Uptime Kuma | GitOps; see semaphore/README.md for the project resources it names
-name: Uptime Kuma | GitOps
+# Semaphore task template Uptime Kuma | Sync Monitors; see semaphore/README.md for the project resources it names
+name: Uptime Kuma | Sync Monitors
 description: 'Keeps Uptime Kuma in step with Git: inventory hosts with kuma_monitor and compose containers with a Kuma.Name label; runs on a schedule and never deletes monitors'
 app: ansible
 playbook: ansible/playbooks/uptime-kuma/sync-monitors.yaml
