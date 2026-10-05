@@ -31,6 +31,68 @@
         - name: Check distribution type
           ansible.builtin.setup:
 
+        # Refreshed with apt-get rather than the apt module, whose cache errors come back empty; any source that fails stops the host with apt's own message
+        - name: Refresh the package index (Debian-based)
+          ansible.builtin.command: apt-get update -q
+          register: apt_refresh
+          changed_when: false
+          failed_when: apt_refresh.rc != 0 or apt_refresh_problems | length > 0
+          retries: 3
+          delay: 10
+          until: apt_refresh is not failed
+          vars:
+            apt_refresh_problems: "{{ (apt_refresh.stdout_lines | default([]) + apt_refresh.stderr_lines | default([])) | select('match', '^(E:|Err:|W: (Failed to fetch|Some index files failed))') | list }}"
+          when: ansible_facts['os_family'] == "Debian"
+
+        # A dry run of the same upgrade the apt step below performs; each Inst line is a package it would install or upgrade
+        - name: Count pending updates (Debian-based)
+          ansible.builtin.command: "apt-get -s -q {{ 'dist-upgrade' if distro_upgrade_requested else 'upgrade --with-new-pkgs' }}"
+          register: apt_pending
+          changed_when: false
+          when: ansible_facts['os_family'] == "Debian"
+
+        # Exits 100 when updates are available and 0 when there are none
+        - name: Count pending updates (Red Hat-based)
+          ansible.builtin.command: dnf check-update -q
+          register: dnf_pending
+          changed_when: false
+          failed_when: dnf_pending.rc not in [0, 100]
+          when: ansible_facts['os_family'] in ["RedHat", "Fedora"]
+
+        # Debian flags a pending reboot with this file
+        - name: Check for a pending reboot (Debian-based)
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+          when: ansible_facts['os_family'] == "Debian"
+
+        # needs-restarting exits 1 when a reboot is needed; a host without it is treated as not needing one
+        - name: Check for a pending reboot (Red Hat-based)
+          ansible.builtin.shell: command -v needs-restarting >/dev/null || exit 0; needs-restarting -r
+          register: reboot_required_cmd
+          changed_when: false
+          failed_when: reboot_required_cmd.rc not in [0, 1]
+          when: ansible_facts['os_family'] in ["RedHat", "Fedora"]
+
+        # Services, the maintenance window, the upgrade and the reboot all wait on this, so a host with nothing to do is left alone
+        - name: Decide whether the host needs patching
+          ansible.builtin.set_fact:
+            pending_updates: "{{ apt_pending.stdout_lines | default([]) | select('match', '^Inst ') | list | length
+                                 if apt_pending.stdout_lines is defined else (1 if (dnf_pending.rc | default(0)) == 100 else 0) }}"
+            patch_needed: >-
+              {{ (apt_pending.stdout_lines | default([]) | select('match', '^Inst ') | list | length > 0)
+                 or (dnf_pending.rc | default(0)) == 100
+                 or (reboot_requested and ((reboot_required_file.stat.exists | default(false)) or (reboot_required_cmd.rc | default(0)) == 1)) }}
+
+        # Shown so the run log says why a host was skipped or patched
+        - name: Report what the host needs
+          ansible.builtin.debug:
+            msg: >-
+              {{ inventory_hostname }}:
+              {{ ('nothing to install' if pending_updates | int == 0 else (pending_updates ~ ' package(s) to update' if apt_pending.stdout_lines is defined else 'updates available')) }}{{
+                 ', reboot pending' if (reboot_required_file.stat.exists | default(false)) or (reboot_required_cmd.rc | default(0)) == 1 else '' }}{{
+                 '; services and the host are left alone' if not patch_needed | bool else '' }}
+
         # Read every listed service's current state so it can be restored exactly
         - name: Gather service facts
           ansible.builtin.service_facts:
@@ -56,6 +118,7 @@
         # Opened before anything stops, so stopped services and the reboot raise no alerts; a Kuma problem only warns, so patching never waits on monitoring
         - name: Open an Uptime Kuma maintenance window
           when:
+            - patch_needed | bool
             - reboot_requested or service_list | length > 0
             - not (skip_maintenance_window | default(false) | bool)
           become: false
