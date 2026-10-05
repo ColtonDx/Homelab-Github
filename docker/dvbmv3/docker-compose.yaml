@@ -44,6 +44,8 @@ services:
       - /mnt/NASPool/Docker/rclone/rclone.conf:/root/.config/rclone/rclone.conf:ro
     labels:
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=DVBMv3" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.Subdomain=dvbm3" # Address checked: https://dvbm3.<docker_domain>
       - "AppScheme=https" # Sets the Reverse Proxy Job to forward over HTTPS
 
 volumes:

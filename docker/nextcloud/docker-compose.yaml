@@ -16,6 +16,7 @@ services:
     labels:
       - "Backup=nextcloud" # Sets the DVBM Backup Job Label
       - "AppPort=443" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Nextcloud" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "AppScheme=https" # Sets the Reverse Proxy Job to forward over HTTPS
 
 networks:

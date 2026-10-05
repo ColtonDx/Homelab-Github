@@ -1,0 +1,57 @@
+---
+# Task file: turns the Kuma labels in this repo's docker/*/docker-compose.yaml into kuma_compose_monitors, the list add_monitors.yaml takes
+# A container is monitored only when it has a Kuma.Name label; with AppPort it gets an HTTP check on https://<Kuma.Subdomain, else the container name>.<docker_domain><Kuma.Path>
+# Without AppPort it gets a container check on the Kuma Docker host in Kuma.DockerHost, else kuma_default_docker_host from the inventory
+# Optional labels: Kuma.Path (default /), Kuma.Group (default kuma_compose_group, else Applications), Kuma.AcceptedCodes (comma-separated, default 200-299)
+
+# Every stack folder holds one compose file, one level down
+- name: Find the compose files
+  ansible.builtin.find:
+    paths: "{{ kuma_compose_root | default(playbook_dir ~ '/../../../docker') }}"
+    patterns: docker-compose.yaml
+    recurse: true
+    depth: 2
+  register: kuma_cm_found
+  delegate_to: localhost
+  become: false
+
+# Facts persist between includes, so each call starts empty
+- name: Start the lists
+  ansible.builtin.set_fact:
+    kuma_cm_files: "{{ kuma_cm_found.files | map(attribute='path') | sort }}"
+    kuma_cm_services: []
+    kuma_compose_monitors: []
+
+# Each service tagged with its stack, so names and errors can say where they came from
+- name: Read each compose file's services
+  ansible.builtin.set_fact:
+    kuma_cm_services: "{{ kuma_cm_services + ((lookup('ansible.builtin.file', item) | from_yaml).services | default({}) | dict2items | map('combine', {'stack': item | dirname | basename}) | list) }}"
+  loop: "{{ kuma_cm_files }}"
+  loop_control:
+    label: "{{ item | dirname | basename }}"
+
+# Labels may be written as a list of key=value strings or as a mapping; both become a mapping here
+- name: Build a monitor for each labelled container
+  ansible.builtin.set_fact:
+    kuma_compose_monitors: "{{ kuma_compose_monitors + [kuma_cm_entry] }}"
+  loop: "{{ kuma_cm_services }}"
+  loop_control:
+    label: "{{ item.stack }}/{{ item.key }}"
+  vars:
+    kuma_cm_raw: "{{ item.value.labels | default({}) }}"
+    kuma_cm_labels: >-
+      {{ kuma_cm_raw if kuma_cm_raw is mapping else
+         dict(kuma_cm_raw | map('regex_replace', '^([^=]*)=.*$', '\1') | zip(kuma_cm_raw | map('regex_replace', '^[^=]*=?', ''))) }}
+    kuma_cm_container: "{{ item.value.container_name | default(item.key) }}"
+    kuma_cm_http:
+      type: http
+      url: "https://{{ kuma_cm_labels['Kuma.Subdomain'] | default(kuma_cm_container) }}.{{ docker_domain }}{{ kuma_cm_labels['Kuma.Path'] | default('') }}"
+    kuma_cm_docker:
+      type: docker
+      container: "{{ kuma_cm_container }}"
+      docker_host: "{{ kuma_cm_labels['Kuma.DockerHost'] | default(kuma_default_docker_host | default('')) }}"
+    kuma_cm_entry: >-
+      {{ {'name': kuma_cm_labels['Kuma.Name'], 'group': kuma_cm_labels['Kuma.Group'] | default(kuma_compose_group | default('Applications'))}
+         | combine(kuma_cm_http if 'AppPort' in kuma_cm_labels else kuma_cm_docker)
+         | combine({'accepted_codes': kuma_cm_labels['Kuma.AcceptedCodes'].split(',') | map('trim') | list} if 'Kuma.AcceptedCodes' in kuma_cm_labels else {}) }}
+  when: "'Kuma.Name' in kuma_cm_labels"

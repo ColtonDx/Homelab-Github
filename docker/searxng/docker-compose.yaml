@@ -12,6 +12,8 @@ services:
     labels:
       - "Backup=searxng" # Sets the DVBM Backup Job Label
       - "AppPort=8080" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=SearXNG" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.Subdomain=searxng-core" # Address checked: https://searxng-core.<docker_domain>
 
   valkey:
     container_name: searxng-valkey

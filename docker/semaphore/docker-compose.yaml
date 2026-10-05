@@ -51,6 +51,7 @@ services:
     labels:
       - "Backup=semaphore" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Semaphore" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
 volumes:
   postgres:

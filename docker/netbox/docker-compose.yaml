@@ -25,6 +25,7 @@ services:
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=NetBox" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
 
   postgres:

@@ -29,6 +29,8 @@ services:
     labels:
       - "Backup=garage" # Sets the DVBM Backup Job Label
       - "AppPort=3909" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Garage" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.Subdomain=garageui" # Address checked: https://garageui.<docker_domain>
 
 
 networks:

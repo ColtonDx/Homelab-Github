@@ -24,6 +24,7 @@ services:
     labels:
       - "Backup=bookstack" # Sets the DVBM Backup Job Label
       - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Bookstack" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
   mariadb:
     container_name: bookstack_mariadb

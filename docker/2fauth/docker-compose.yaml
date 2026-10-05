@@ -56,6 +56,8 @@ services:
     labels:
       - "Backup=2fauth" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=2FAuth" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
+      - "Kuma.Subdomain=2f" # Address checked: https://2f.<docker_domain>
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

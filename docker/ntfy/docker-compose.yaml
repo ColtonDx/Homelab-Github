@@ -19,6 +19,7 @@ services:
     labels:
       - "Backup=ntfy" # Sets the DVBM Backup Job Label
       - "AppPort=80" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=ntfy" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
 networks:
   default:

@@ -21,6 +21,7 @@ services:
     labels:
       - "Backup=homepage" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Homepage" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
       - "ConfigPath=/app/config" # Sets where push-config.yaml writes docker/homepage/config
 
 networks:

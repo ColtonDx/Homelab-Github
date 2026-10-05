@@ -1,0 +1,14 @@
+services:
+  docker-socket-proxy:
+    container_name: docker-socket-proxy
+    restart: unless-stopped
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      # Read-only: listing and inspecting containers is all Uptime Kuma's container checks need; everything else, including every write, stays refused
+      - CONTAINERS=1
+      - INFO=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # The host's Docker API, read through the proxy only
+    ports:
+      - "2375:2375" # Uptime Kuma connects here; the one stack besides Nginx Proxy Manager that publishes a port, since Kuma runs on another host

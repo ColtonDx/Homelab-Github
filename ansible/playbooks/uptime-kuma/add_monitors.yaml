@@ -1,7 +1,8 @@
 ---
-# Task file: adds or updates Uptime Kuma monitors; used by inventory-sync.yaml and at the end of every Portainer stack deployment
+# Task file: adds or updates Uptime Kuma monitors; used by gitops.yaml
 # Needs kuma_monitors, a list; each entry has name and type (default http) plus that type's fields, and monitors are matched by name so re-runs update them
 # http: url, optional accepted_codes (['200-299']) and ignore_tls (false); ping: hostname; port: hostname and port; dns: hostname (the name to look up), dns_resolve_server, optional dns_resolve_type (A) and port (53)
+# docker: container (the container name) and docker_host (a Kuma Docker host, as configure.yaml registers them)
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor; connection and Vault settings are in connect.yaml
 
@@ -10,12 +11,13 @@
   ansible.builtin.assert:
     that:
       - item.name | default('') | length > 0
-      - kuma_type in ['http', 'ping', 'port', 'dns']
+      - kuma_type in ['http', 'ping', 'port', 'dns', 'docker']
       - kuma_type != 'http' or (item.url | default('') is match('^https?://'))
-      - kuma_type == 'http' or (item.hostname | default('') | length > 0)
+      - kuma_type in ['http', 'docker'] or (item.hostname | default('') | length > 0)
+      - kuma_type != 'docker' or (item.container | default('') | length > 0 and item.docker_host | default('') | length > 0)
       - kuma_type != 'port' or (item.port | default('') | string | length > 0)
       - kuma_type != 'dns' or (item.dns_resolve_server | default('') | length > 0)
-    fail_msg: "Monitor {{ item.name | default('(no name)') }}: needs a name and a type of http (with an http(s) url), ping (hostname), port (hostname and port) or dns (hostname and dns_resolve_server)."
+    fail_msg: "Monitor {{ item.name | default('(no name)') }}: needs a name and a type of http (with an http(s) url), ping (hostname), port (hostname and port), dns (hostname and dns_resolve_server) or docker (container and docker_host)."
     quiet: true
   loop: "{{ kuma_monitors }}"
   loop_control:
@@ -60,7 +62,9 @@
         name: "{{ item.name }}"
         type: "{{ kuma_type }}"
         url: "{{ item.url if kuma_type == 'http' else omit }}"
-        hostname: "{{ item.hostname if kuma_type != 'http' else omit }}"
+        hostname: "{{ item.hostname if kuma_type in ['ping', 'port', 'dns'] else omit }}"
+        docker_container: "{{ item.container if kuma_type == 'docker' else omit }}"
+        docker_host_name: "{{ item.docker_host if kuma_type == 'docker' else omit }}"
         port: "{{ item.port | default(53) | int if kuma_type in ['port', 'dns'] else omit }}"
         dns_resolve_server: "{{ item.dns_resolve_server if kuma_type == 'dns' else omit }}"
         dns_resolve_type: "{{ item.dns_resolve_type | default('A') if kuma_type == 'dns' else omit }}"

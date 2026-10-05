@@ -16,6 +16,7 @@ services:
     labels:
       - "Backup=homebox" # Sets the DVBM Backup Job Label
       - "AppPort=7745" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Homebox" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network

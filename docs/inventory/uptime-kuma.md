@@ -1,6 +1,6 @@
 # Uptime Kuma
 
-Read by the **Uptime Kuma | Inventory Sync** job, which creates a monitor for every host with `kuma_monitor`, and by Linux patching, which silences a host's monitors while it reboots.
+Read by the **Uptime Kuma | GitOps** job, which creates a monitor for every host with `kuma_monitor` (apps get theirs from `Kuma.*` labels in their compose files), and by Linux patching, which silences a host's monitors while it reboots.
 
 ## Per host
 

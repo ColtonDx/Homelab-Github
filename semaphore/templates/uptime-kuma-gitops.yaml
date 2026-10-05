@@ -1,0 +1,14 @@
+---
+# Semaphore task template Uptime Kuma | GitOps; see semaphore/README.md for the project resources it names
+name: Uptime Kuma | GitOps
+description: 'Keeps Uptime Kuma in step with Git: inventory hosts with kuma_monitor and compose containers with a Kuma.Name label; runs on a schedule and never deletes monitors'
+app: ansible
+playbook: ansible/playbooks/uptime-kuma/gitops.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: sync_group
+    title: Default group
+    description: Kuma group for hosts with no kuma_monitor_group or entry group; empty for none

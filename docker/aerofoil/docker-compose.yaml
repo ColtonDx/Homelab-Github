@@ -14,6 +14,7 @@ services:
     labels:
       - "Backup=aerofoil"
       - "AppPort=8465"
+      - "Kuma.Name=Aerofoil" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
 volumes:
   config:

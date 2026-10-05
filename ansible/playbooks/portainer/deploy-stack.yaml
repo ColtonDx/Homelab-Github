@@ -4,7 +4,6 @@
 # Required: app_name, portainer_endpoint, repo_url (the repository Portainer clones)
 # Optional: repo_ref (default refs/heads/main), repo_auth with vault_repo_path, stack_prune (default false), stack_pull_image (default true)
 # Optional: skip_push_config=true skips copying docker/<app_name>/config in; npm_add_proxy with npm_domain to register the AppPort container in NPM (over AppScheme, default http); dvbm_job=true (or DVBM_JOB=true in the environment) to register the Backup label's job
-# Apps with an AppPort label get an Uptime Kuma monitor on https://<container>.<npm_domain> through uptime-kuma/add_monitors.yaml; skip_kuma_monitor=true skips it
 - name: Deploy a Docker stack to Portainer
   hosts: localhost
   connection: local
@@ -133,14 +132,3 @@
     - name: Push the app's config
       ansible.builtin.include_tasks: tasks/push_config.yaml
       when: not (skip_push_config | default(false) | bool)
-
-    # Watches the address NPM serves the app on, the same one npm_add_proxy registers; skipped with a note when Uptime Kuma is not configured
-    - name: Add the app's Uptime Kuma monitor
-      ansible.builtin.include_tasks: ../uptime-kuma/add_monitors.yaml
-      vars:
-        kuma_monitors:
-          - { name: "{{ stack_name }}", url: "https://{{ stack_proxy_container }}.{{ npm_domain }}" }
-      when:
-        - not (skip_kuma_monitor | default(false) | bool)
-        - stack_proxy_container | length > 0
-        - npm_domain | default('') | length > 0

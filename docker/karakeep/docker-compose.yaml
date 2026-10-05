@@ -24,6 +24,7 @@ services:
     labels:
       - "Backup=karakeep" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
+      - "Kuma.Name=Karakeep" # Uptime Kuma monitor, created by the Uptime Kuma GitOps job
 
   chrome:
     container_name: karakeep-chrome

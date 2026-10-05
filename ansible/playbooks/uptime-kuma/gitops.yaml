@@ -1,10 +1,10 @@
 ---
-# Keeps Uptime Kuma in step with the inventory: adds or updates a monitor for every host with a kuma_monitor variable; meant to run on a schedule, and covers hosts no install playbook does, such as the firewall, NAS and hypervisors
-# The forms kuma_monitor takes and its defaults are in host_monitors.yaml; each entry's fields are in add_monitors.yaml
-# Hosts with no group set get none, unless sync_group names one
-# Monitors are matched by name, so re-runs update them; a host whose kuma_monitor is removed keeps its monitor until it is deleted in Kuma
+# Keeps Uptime Kuma in step with Git: a monitor for every inventory host with kuma_monitor, and for every container in docker/ with a Kuma.Name label; meant to run on a schedule
+# Host monitors: the forms kuma_monitor takes are in host_monitors.yaml; app monitors: the labels are in compose_monitors.yaml; each entry's fields are in add_monitors.yaml
+# Hosts with no group set get none, unless sync_group names one; apps default to Applications
+# Monitors are matched by name, so re-runs update them; one removed from Git keeps its monitor until it is deleted in Kuma
 # Connection and Vault settings are in connect.yaml
-- name: Sync Uptime Kuma monitors from the inventory
+- name: Sync Uptime Kuma monitors from Git
   hosts: localhost
   connection: local
   gather_facts: false
@@ -19,21 +19,25 @@
       vars:
         kuma_hosts: "{{ groups['all'] }}"
 
-    # A sync with nothing to do is almost always a missing inventory change, so it says so instead of passing silently
+    # Every container in the repo's compose files with a Kuma.Name label
+    - name: Work out the apps' monitors
+      ansible.builtin.include_tasks: compose_monitors.yaml
+
+    # A sync with nothing to do is almost always a missing label or inventory change, so it says so instead of passing silently
     - name: Require at least one monitor
       ansible.builtin.assert:
         that:
-          - kuma_host_monitors | length > 0
-        fail_msg: "No inventory host sets kuma_monitor, so there is nothing to sync."
+          - (kuma_host_monitors + kuma_compose_monitors) | length > 0
+        fail_msg: "No inventory host sets kuma_monitor and no container has a Kuma.Name label, so there is nothing to sync."
         quiet: true
 
     # Shown before any change, so the run log lists exactly what was asked for
     - name: Show the monitors to sync
       ansible.builtin.debug:
-        msg: "{{ kuma_host_monitors | map(attribute='name') | zip(kuma_host_monitors | map(attribute='type')) | map('join', ' (') | map('regex_replace', '$', ')') | list }}"
+        msg: "{{ (kuma_host_monitors + kuma_compose_monitors) | map(attribute='name') | zip((kuma_host_monitors + kuma_compose_monitors) | map(attribute='type')) | map('join', ' (') | map('regex_replace', '$', ')') | list }}"
 
     # Validates every entry, logs in once and adds or updates each monitor
     - name: Add the monitors
       ansible.builtin.include_tasks: add_monitors.yaml
       vars:
-        kuma_monitors: "{{ kuma_host_monitors }}"
+        kuma_monitors: "{{ kuma_host_monitors + kuma_compose_monitors }}"
