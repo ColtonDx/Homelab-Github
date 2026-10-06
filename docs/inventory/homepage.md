@@ -18,7 +18,7 @@ What you can set in the inventory to change what Homepage shows. Everything else
 |---|---|
 | `homepage_url` | Where that host's tile links to, and what its status dot checks |
 
-These hosts need it: `gitlab`, `hashicorp-vault`, `kasm`, `PVE-VM-1`, `PVE-VM-2`, `PVE-VM-3`, `truenas-scale`, `truenas-claw`, `unraid`, `citadel`, `core-switch-1`, `plex`, `apc-pdu`, `eaton-ups`, `home-assistant`, `kvm`, `alarm-panel`, `slzb06`.
+These hosts need it: `gitlab`, `hashicorp-vault`, `kasm`, `PVE-VM-1`, `PVE-VM-2`, `PVE-VM-3`, `truenas-scale`, `truenas-claw`, `unraid`, `citadel`, `core-switch-1`, `plex`, `apc-pdu`, `eaton-ups`, `home-assistant`, `kvm`, `slzb06`.
 
 ## Example
 
