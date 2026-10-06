@@ -26,8 +26,11 @@ survey_vars:
         value: terraform/proxmox/talos
       - name: K3s nodes (legacy)
         value: terraform/proxmox/k3s
+      - name: Malcolm VM
+        value: terraform/proxmox/malcolm
   - name: tf_action
     title: Action
+    description: plan reviews, apply builds then installs, install reruns only the install playbook
     type: enum
     required: true
     default_value: plan
@@ -36,6 +39,8 @@ survey_vars:
         value: plan
       - name: Apply
         value: apply
+      - name: Rerun install only (no Terraform)
+        value: install
   - name: tf_install
     title: Install after apply
     description: Runs the install playbook named in the project's sources.yaml

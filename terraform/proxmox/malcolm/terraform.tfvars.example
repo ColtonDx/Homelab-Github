@@ -1,0 +1,10 @@
+# For a direct Terraform run, copy to terraform.tfvars (gitignored) and fill in; build-project.yaml reads these from the inventory instead; Proxmox credentials come from TF_VAR_* environment variables instead
+target_node    = "pve-node-1"
+template_name  = "debian-cloud-template"
+storage_pool   = "local-zfs"
+ip_address     = "192.0.2.45"
+gateway        = "192.0.2.1"
+capture_bridge = "vmbr1"
+
+# Only when adopting an existing VM with terraform import, so the plan keeps its current MAC
+# mac_address = "BC:24:11:00:00:00"

@@ -53,8 +53,6 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
-| App \| Install Gitlab | (none) | [app-install-gitlab.yaml](templates/app-install-gitlab.yaml) | `ansible/playbooks/deployment/app-gitlab.yaml` |
-| App \| Install KASM | (none) | [app-install-kasm.yaml](templates/app-install-kasm.yaml) | `ansible/playbooks/deployment/app-kasm.yaml` |
 | Linux Disk Utilization Check | (none) | [linux-disk-utilization-check.yaml](templates/linux-disk-utilization-check.yaml) | `ansible/playbooks/maintenance/disk-usage-alert.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |

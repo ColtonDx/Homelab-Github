@@ -1,0 +1,387 @@
+---
+# Installs Malcolm (malcolm.fyi) on Debian with live capture from the VM's second NIC, or moves it to malcolm_version, then issues its TLS certificate; safe to re-run
+# Inventory: malcolm_domain (required); optional malcolm_capture_iface (default the one NIC with no IPv4 address), malcolm_admin_user (default admin), malcolm_opensearch_heap_gb (default a quarter of RAM, at most 31)
+# Vault: MALCOLM_ADMIN_PASSWORD at malcolm (vault_malcolm_path renames it), set as the web login only on the first install; CF_API and CF_EMAIL at cloudflare for the certificate
+# Extra vars: malcolm_version to move to another release, which also needs its tag's commit recorded in malcolm_release_commits
+# Host tuning follows Malcolm's Linux host configuration docs and is applied here rather than by its interactive install.py; a changed kernel command line reboots the VM once
+- name: Install Malcolm on Debian
+  hosts: malcolm
+  become: true
+  gather_facts: true
+
+  vars:
+    malcolm_version: "26.09.0"
+    # Each release tag's commit, so a moved or replaced tag is refused rather than installed
+    malcolm_release_commits:
+      "26.09.0": "7cfac5bc448bd9031a2cbb35bd058d7253c2e2c8"
+    malcolm_dir: /opt/malcolm
+    malcolm_owner: "{{ ansible_user | default(ansible_facts.env.SUDO_USER | default('root')) }}"
+    malcolm_heap_gb: "{{ malcolm_opensearch_heap_gb | default([[(ansible_facts.memtotal_mb / 4096) | int, 4] | max, 31] | min) }}"
+    malcolm_grub_params: [systemd.unified_cgroup_hierarchy=1, cgroup_enable=memory, swapaccount=1, cgroup.memory=nokmem]
+
+  pre_tasks:
+    # Stop before touching the host when the domain or the pinned commit is missing
+    - name: Validate the Malcolm inputs
+      ansible.builtin.assert:
+        that:
+          - malcolm_domain | default('') | length > 0
+          - malcolm_version in malcolm_release_commits
+          - malcolm_owner != 'root'
+        fail_msg: >-
+          Set malcolm_domain in the inventory, record Malcolm {{ malcolm_version }}'s tag commit in malcolm_release_commits,
+          and connect as a normal user (Malcolm's containers run as that user, never root).
+        quiet: true
+
+    # The web login, used only by the first install's auth setup
+    - name: Load the Malcolm admin password
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - { path: "{{ vault_malcolm_path | default('malcolm') }}", field: MALCOLM_ADMIN_PASSWORD, var: malcolm_admin_password }
+
+  tasks:
+    # git for the release, acl so tasks can run as the owner, xfsprogs for the data disk, Python modules for Malcolm's own scripts
+    - name: Install Malcolm's host packages
+      ansible.builtin.apt:
+        name: [git, acl, openssl, xfsprogs, ethtool, python3-ruamel.yaml, python3-dotenv]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Malcolm's documented sysctl settings for OpenSearch and the capture tools
+    - name: Apply Malcolm's kernel settings
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-malcolm.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/deployment/app-malcolm.yaml
+          fs.file-max=2097152
+          fs.inotify.max_user_watches=131072
+          fs.inotify.max_queued_events=131072
+          fs.inotify.max_user_instances=512
+          vm.swappiness=1
+          vm.max_map_count=524288
+          vm.dirty_background_ratio=5
+          vm.dirty_ratio=10
+          vm.overcommit_memory=1
+          net.ipv4.tcp_retries2=5
+      register: malcolm_sysctl
+
+    # Loads the file above now rather than at the next boot
+    - name: Load the kernel settings
+      ansible.builtin.command: sysctl --load /etc/sysctl.d/99-malcolm.conf
+      when: malcolm_sysctl is changed
+      changed_when: true
+
+    # Open files and locked memory, for OpenSearch's memory_lock
+    - name: Raise the user limits
+      ansible.builtin.copy:
+        dest: /etc/security/limits.d/99-malcolm.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/deployment/app-malcolm.yaml
+          * soft nofile 65535
+          * hard nofile 65535
+          * soft memlock unlimited
+          * hard memlock unlimited
+
+    # The same limits for services, which do not read limits.d
+    - name: Raise the systemd limits
+      ansible.builtin.copy:
+        dest: /etc/systemd/system.conf.d/99-malcolm.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/deployment/app-malcolm.yaml
+          [Manager]
+          DefaultLimitNOFILE=65535:65535
+          DefaultLimitMEMLOCK=infinity
+      register: malcolm_systemd_limits
+
+    # The current kernel command line, so Malcolm's parameters are added without dropping any already there
+    - name: Read the GRUB defaults
+      ansible.builtin.slurp:
+        src: /etc/default/grub
+      register: malcolm_grub
+
+    # Malcolm's documented cgroup parameters, appended to whatever the template already sets
+    - name: Add Malcolm's kernel parameters
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX='
+        line: 'GRUB_CMDLINE_LINUX="{{ (grub_current.split() + malcolm_grub_params) | unique | join(" ") }}"'
+      vars:
+        grub_current: >-
+          {{ malcolm_grub.content | b64decode | regex_search('(?m)^GRUB_CMDLINE_LINUX="([^"]*)"', '\1') | default([''], true) | first }}
+      register: malcolm_grub_line
+
+    # Takes effect at the reboot below
+    - name: Rebuild the GRUB configuration
+      ansible.builtin.command: update-grub
+      when: malcolm_grub_line is changed
+      changed_when: true
+
+    # Detected rather than named, since Linux does not enumerate the SCSI disks in a stable order
+    - name: Select the data disk
+      ansible.builtin.set_fact:
+        malcolm_root_disk: "{{ root_dev | basename | regex_replace('p?[0-9]+$', '') }}"
+        malcolm_data_device: >-
+          /dev/{{ (ansible_facts.devices | dict2items
+                   | rejectattr('key', 'match', '^(sr|loop|fd|dm-|zram)')
+                   | selectattr('value.partitions', 'eq', {})
+                   | map(attribute='key') | list
+                   | difference([root_dev | basename | regex_replace('p?[0-9]+$', '')]))[0] | default('') }}
+      vars:
+        root_dev: "{{ ansible_facts.mounts | selectattr('mount', 'equalto', '/') | map(attribute='device') | first | default('') }}"
+
+    # mkfs is destructive, so never let it run against the root disk or a missing one
+    - name: Confirm the data disk is not the root disk
+      ansible.builtin.assert:
+        that:
+          - malcolm_data_device != '/dev/'
+          - malcolm_data_device | basename != malcolm_root_disk
+        fail_msg: "No separate data disk found on {{ inventory_hostname }}; check the Terraform project's scsi1 disk is attached."
+        quiet: true
+
+    # XFS, as Malcolm recommends for large datasets; an existing filesystem is left alone
+    - name: Create a filesystem on the data disk
+      community.general.filesystem:
+        fstype: xfs
+        dev: "{{ malcolm_data_device }}"
+
+    # Malcolm keeps its indices, PCAP and logs inside its own folder, so the whole folder lives on the data disk
+    - name: Mount the data disk at Malcolm's folder
+      ansible.posix.mount:
+        path: "{{ malcolm_dir }}"
+        src: "{{ malcolm_data_device }}"
+        fstype: xfs
+        opts: defaults,noatime
+        state: mounted
+
+    # Owned by the account the containers run as
+    - name: Hand Malcolm's folder to its owner
+      ansible.builtin.file:
+        path: "{{ malcolm_dir }}"
+        state: directory
+        owner: "{{ malcolm_owner }}"
+        group: "{{ malcolm_owner }}"
+        mode: "0750"
+
+    # The NIC on the mirror bridge is the one with no IPv4 address; the en/eth match leaves out Docker's bridges and veths on later runs
+    - name: Find the capture interface
+      ansible.builtin.set_fact:
+        malcolm_iface: >-
+          {{ malcolm_capture_iface | default(candidates | first | default(''), true) }}
+      vars:
+        candidates: >-
+          {{ ansible_facts.interfaces | select('match', '^(en|eth)')
+             | reject('equalto', ansible_facts.default_ipv4.interface | default(''))
+             | map('regex_replace', '-', '_')
+             | map('extract', ansible_facts) | rejectattr('ipv4', 'defined')
+             | map(attribute='device') | list }}
+
+    # Without it there is nothing to capture from
+    - name: Require a capture interface
+      ansible.builtin.assert:
+        that:
+          - malcolm_iface | length > 0
+        fail_msg: "No NIC without an address found for capture; check the capture bridge NIC is attached, or set malcolm_capture_iface."
+        quiet: true
+
+    # cloud-init leaves a NIC with no ipconfig down, so this brings it up at every boot with no address; Malcolm's PCAP_IFACE_TWEAK handles promiscuous mode and offloads
+    - name: Bring the capture interface up at boot
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/malcolm-capture-iface.service
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/deployment/app-malcolm.yaml
+          [Unit]
+          Description=Bring up Malcolm's capture interface {{ malcolm_iface }} without an address
+          After=network.target
+          Before=docker.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/sbin/ip link set dev {{ malcolm_iface }} up promisc on
+
+          [Install]
+          WantedBy=multi-user.target
+      register: malcolm_iface_unit
+
+    # Started now as well, so capture works before the first reboot
+    - name: Enable the capture interface service
+      ansible.builtin.systemd:
+        name: malcolm-capture-iface.service
+        enabled: true
+        state: "{{ 'restarted' if malcolm_iface_unit is changed else 'started' }}"
+        daemon_reload: "{{ malcolm_iface_unit is changed }}"
+
+    # Malcolm runs entirely in Docker; its owner joins the docker group
+    - name: Install Docker Engine
+      ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
+      vars:
+        docker_users: ["{{ malcolm_owner }}"]
+
+    # The kernel parameters and systemd limits only apply after a reboot, so the first install restarts once here
+    - name: Reboot for the kernel and limit settings
+      ansible.builtin.reboot:
+        msg: "Reboot by app-malcolm.yaml for Malcolm's kernel parameters"
+        test_command: whoami
+      when: malcolm_grub_line is changed or malcolm_systemd_limits is changed
+
+    # The pinned release tag, shallow; a new malcolm_version moves the checkout to that tag
+    - name: Check out Malcolm {{ malcolm_version }}
+      ansible.builtin.git:
+        repo: https://github.com/cisagov/Malcolm.git
+        dest: "{{ malcolm_dir }}"
+        version: "v{{ malcolm_version }}"
+        depth: 1
+        force: false
+      become_user: "{{ malcolm_owner }}"
+      register: malcolm_checkout
+
+    # A tag that moved or was replaced is refused rather than run
+    - name: Require the pinned commit
+      ansible.builtin.assert:
+        that:
+          - malcolm_checkout.after == malcolm_release_commits[malcolm_version]
+        fail_msg: "v{{ malcolm_version }} resolved to {{ malcolm_checkout.after }}, not the pinned {{ malcolm_release_commits[malcolm_version] }}; check the release before updating the pin."
+        quiet: true
+
+    # First install only: writes config/*.env from Malcolm's defaults, without prompts
+    - name: Write Malcolm's default configuration
+      ansible.builtin.command:
+        argv: [./scripts/configure, --non-interactive, --defaults, --skip-splash]
+        chdir: "{{ malcolm_dir }}"
+        creates: "{{ malcolm_dir }}/config/opensearch.env"
+      become_user: "{{ malcolm_owner }}"
+
+    # The settings this playbook owns, enforced on every run; anything else changed in config/ is left alone
+    - name: Set live capture and memory
+      ansible.builtin.lineinfile:
+        path: "{{ malcolm_dir }}/config/{{ item.file }}"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { file: pcap-capture.env, key: PCAP_IFACE, value: "{{ malcolm_iface }}" }
+        - { file: pcap-capture.env, key: PCAP_IFACE_TWEAK, value: "true" }
+        - { file: zeek-live.env, key: ZEEK_LIVE_CAPTURE, value: "true" }
+        - { file: suricata-live.env, key: SURICATA_LIVE_CAPTURE, value: "true" }
+        - { file: arkime-live.env, key: ARKIME_LIVE_CAPTURE, value: "true" }
+      loop_control:
+        label: "{{ item.file }} {{ item.key }}={{ item.value }}"
+      become_user: "{{ malcolm_owner }}"
+      register: malcolm_settings
+
+    # Only the heap sizes change; Malcolm's other JVM options stay as shipped
+    - name: Size OpenSearch's heap
+      ansible.builtin.replace:
+        path: "{{ malcolm_dir }}/config/opensearch.env"
+        regexp: '-Xm([sx])[0-9]+[gGmM]\b'
+        replace: '-Xm\g<1>{{ malcolm_heap_gb }}g'
+      become_user: "{{ malcolm_owner }}"
+      register: malcolm_heap
+
+    # Set after the first auth setup, so later runs never reset the login or regenerate the certificates
+    - name: Check whether auth setup has run
+      ansible.builtin.stat:
+        path: "{{ malcolm_dir }}/.ansible-auth-setup"
+      register: malcolm_auth_done
+
+    # First install only: basic auth with the Vault password, plus self-signed certificates that the TLS play below replaces
+    - name: Set up Malcolm's authentication
+      when: not malcolm_auth_done.stat.exists
+      block:
+        # The hash Malcolm's auth setup takes, made on the host so the password never reaches a file
+        - name: Hash the admin password
+          ansible.builtin.command:
+            argv: [openssl, passwd, -6, -stdin]
+            stdin: "{{ malcolm_admin_password }}"
+          register: malcolm_admin_hash
+          changed_when: false
+          no_log: true
+
+        # Writes nginx/htpasswd, the internal service credentials and the certificates
+        - name: Run Malcolm's auth setup
+          ansible.builtin.command:
+            argv:
+              - ./scripts/auth_setup
+              - --auth-noninteractive
+              - --auth-method
+              - basic
+              - --auth-admin-username
+              - "{{ malcolm_admin_user | default('admin') }}"
+              - --auth-admin-password-openssl
+              - "{{ malcolm_admin_hash.stdout }}"
+              - --auth-generate-webcerts
+              - --auth-generate-fwcerts
+            chdir: "{{ malcolm_dir }}"
+          become_user: "{{ malcolm_owner }}"
+          no_log: true
+
+        # Marks the setup done only once it has succeeded
+        - name: Record that auth setup has run
+          ansible.builtin.file:
+            path: "{{ malcolm_dir }}/.ansible-auth-setup"
+            state: touch
+            owner: "{{ malcolm_owner }}"
+            mode: "0600"
+
+    # Images for a new release, or the first install; slow, so only when the checkout changed
+    - name: Pull Malcolm's images
+      ansible.builtin.command:
+        argv: [docker, compose, --profile, malcolm, pull, --quiet]
+        chdir: "{{ malcolm_dir }}"
+      become_user: "{{ malcolm_owner }}"
+      when: malcolm_checkout is changed
+      changed_when: true
+
+    # Starts Malcolm, or recreates its containers when a managed setting changed; compose reports what it did on stderr
+    - name: Start Malcolm
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'compose', '--profile', 'malcolm', 'up', '--detach', '--remove-orphans'] + (['--force-recreate'] if malcolm_settings is changed or malcolm_heap is changed else []) }}"
+        chdir: "{{ malcolm_dir }}"
+      become_user: "{{ malcolm_owner }}"
+      register: malcolm_up
+      changed_when: malcolm_up.stderr is search('(Creat|Recreat|Start)(ed|ing)')
+
+    # Where to log in; OpenSearch takes several minutes to come up on a first install
+    - name: Report Malcolm
+      ansible.builtin.debug:
+        msg: "Malcolm {{ malcolm_version }} is starting at https://{{ malcolm_domain }} capturing on {{ malcolm_iface }}, OpenSearch heap {{ malcolm_heap_gb }}g; the first start takes several minutes"
+
+# Replaces the self-signed certificate with Let's Encrypt; renewals are tls/renew-certificates.yaml's job
+- name: Configure Malcolm's TLS certificate
+  hosts: malcolm
+  become: true
+  gather_facts: true
+
+  vars:
+    malcolm_dir: /opt/malcolm
+    malcolm_owner: "{{ ansible_user | default(ansible_facts.env.SUDO_USER | default('root')) }}"
+    vault_secrets:
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_EMAIL
+        var: acme_email
+
+  tasks:
+    # The Cloudflare credentials the DNS challenge needs
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # Malcolm's nginx reads these fixed names; the reload command hands them back to Malcolm's owner, since acme.sh writes as root, then restarts only the proxy
+    - name: Issue and install Malcolm's certificate
+      ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+      vars:
+        acme_domain: "{{ malcolm_domain }}"
+        acme_ssl_dir: "{{ malcolm_dir }}/nginx/certs"
+        acme_key_path: "{{ malcolm_dir }}/nginx/certs/key.pem"
+        acme_fullchain_path: "{{ malcolm_dir }}/nginx/certs/cert.pem"
+        acme_reloadcmd: >-
+          chown {{ malcolm_owner }}: {{ malcolm_dir }}/nginx/certs/key.pem {{ malcolm_dir }}/nginx/certs/cert.pem
+          && cd {{ malcolm_dir }} && runuser -u {{ malcolm_owner }} -- docker compose --profile malcolm restart nginx-proxy
+        acme_ssl_owner: "{{ malcolm_owner }}"
+        acme_ssl_group: "{{ malcolm_owner }}"

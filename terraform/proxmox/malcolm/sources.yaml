@@ -1,0 +1,24 @@
+---
+# Tells ansible/playbooks/terraform/build-project.yaml where this project's inputs come from; locations only, never values
+
+# State file in Garage; tf_backend=local replaces it with local state for a bootstrap run
+state_key: malcolm.tfstate
+
+# Secrets, passed to Terraform as TF_VAR_* environment variables and never logged
+vault:
+  - { path: proxmox, field: PROXMOX_API_URL, var: proxmox_api_url }
+  - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
+  - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
+
+# The VM's inventory host: its terraform_defaults, its ansible_host as ip_address, then its own terraform dict, supply any variable they name
+host: malcolm
+
+# Fallbacks for anything the inventory does not set
+netbox:
+  ip_address: { find: ip, dns_name: "malcolm.{{ domain }}" }
+  ip_prefix: { find: prefix_length, dns_name: "malcolm.{{ domain }}" }
+
+# Run after an apply to install or update what runs on the VM; that playbook then issues its TLS certificate
+install:
+  playbook: ansible/playbooks/deployment/app-malcolm.yaml
+  hosts: malcolm

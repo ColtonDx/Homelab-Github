@@ -1,6 +1,6 @@
 ---
 # Plans or applies any Terraform project, filling its variables from overrides, the inventory, NetBox and Vault as its sources.yaml describes
-# Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, or apply)
+# Required: tf_project, the project folder relative to the repo root (e.g. terraform/proxmox/gitlab); optional tf_action (plan, default, apply, or install to rerun only the install playbook without Terraform)
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
 # Inventory: sources.yaml's host (one VM) or group (a cluster) supplies values from terraform_defaults, ansible_host and each host's terraform dict
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
@@ -25,10 +25,10 @@
       ansible.builtin.assert:
         that:
           - tf_project | default('') | length > 0
-          - tf_action_resolved in ['plan', 'apply']
+          - tf_action_resolved in ['plan', 'apply', 'install']
           - tf_backend_resolved in ['s3', 'local']
           - tf_overrides is mapping
-        fail_msg: "Pass tf_project; tf_action must be plan or apply, tf_backend s3 or local, and tf_vars a dict."
+        fail_msg: "Pass tf_project; tf_action must be plan, apply or install, tf_backend s3 or local, and tf_vars a dict."
 
     # A relative project path is taken from the repo root, which sits three levels above this playbook
     - name: Resolve the project folder
@@ -63,6 +63,26 @@
       vars:
         install_path: "{{ tf_sources.install.playbook | default('') }}"
       when: tf_sources.install is defined
+
+    # tf_action=install reruns only the install playbook, so it needs one and touches nothing else: no secrets, Terraform, DNS or NetBox
+    - name: Require an install entry for an install-only run
+      ansible.builtin.assert:
+        that:
+          - tf_sources.install is defined
+        fail_msg: "{{ tf_project }} has no install entry in its sources.yaml, so there is nothing to rerun."
+        quiet: true
+      when: tf_action_resolved == 'install'
+
+    # The same hand-off an apply makes, so the wait and install plays below run unchanged
+    - name: Hand an install-only run straight to the install
+      ansible.builtin.set_fact:
+        tf_install_hosts: "{{ tf_sources.install.hosts }}"
+      when: tf_action_resolved == 'install'
+
+    # Ends this play only; the plays below still run
+    - name: Skip Terraform for an install-only run
+      ansible.builtin.meta: end_play
+      when: tf_action_resolved == 'install'
 
     # Terraform rejects -var for an undeclared variable, so only declared names are ever passed
     - name: Read the variables the project declares
