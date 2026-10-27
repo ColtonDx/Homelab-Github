@@ -40,6 +40,7 @@ myserver:
 | `kuma_monitor_group` | Host or group | Group for all of a host's monitors, when an entry has no `group` |
 | `uptime_kuma_url` | `all: vars:` | Kuma's address (default `https://kuma.<docker_domain>`) |
 | `uptime_kuma_notifications` | `all: vars:` | Kuma notifications to attach to every monitor, e.g. `[Discord]` |
+| `kuma_group_notifications` | `all: vars:` | Kuma notifications per top-level group, e.g. `Containers: [Container Health]`; each must already exist in Kuma, and one that does not is skipped with a warning |
 | `patch_window_minutes` | Host or group | Longest maintenance window during patching (default `30`) |
 
 The Kuma login is in Vault at `uptime-kuma` (`KUMA_USERNAME`, `KUMA_PASSWORD`).

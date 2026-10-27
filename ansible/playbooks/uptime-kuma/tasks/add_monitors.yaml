@@ -6,6 +6,8 @@
 # Every type: optional group and interval (default 60 seconds); the group is the entry's own, else kuma_monitor_group from the inventory, else the caller's kuma_default_group, else Applications; empty means none
 # A group can be nested with >, such as Containers > TrueNAS: each part is a group inside the one before it, and the monitor goes in the last; / is an ordinary character, as in CI/CD
 # Optional: uptime_kuma_notifications in the inventory, names of Kuma notifications attached to every monitor
+# Optional: kuma_group_notifications in the inventory, a map of top-level group to notification names, such as Containers: [Container Health], attached to every monitor under that group
+# A named notification Kuma does not have is left off with a warning; monitors with no names keep whatever notifications they already have
 
 # Catches a malformed entry before logging in, naming the entry
 - name: Validate the monitors
@@ -64,6 +66,30 @@
         msg: "Kuma has no Docker host named {{ kuma_skipped_hosts | join(', ') }}, so the container checks on it were skipped; check its kuma_docker_name and address in the inventory."
       when: kuma_skipped_hosts | length > 0
 
+    # Every notification name the inventory asks for, so the ones Kuma lacks can be found before any monitor uses them
+    - name: List the notifications to attach
+      ansible.builtin.set_fact:
+        kuma_wanted_notifications: "{{ (uptime_kuma_notifications | default([]) + (kuma_group_notifications | default({}) | dict2items | map(attribute='value') | flatten)) | unique }}"
+
+    # The collection fails on a name Kuma does not have, so the names are checked here
+    - name: List Kuma's notifications
+      lucasheld.uptime_kuma.notification_info:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+      register: kuma_notification_info
+      when: kuma_wanted_notifications | length > 0
+
+    # Kept as facts for the monitor task below
+    - name: Note which notifications exist
+      ansible.builtin.set_fact:
+        kuma_known_notifications: "{{ kuma_notification_info.notifications | default([]) | map(attribute='name') | list }}"
+
+    # A notification is created in Kuma's settings with its Discord webhook, then picked up on the next run
+    - name: Warn about notifications Kuma does not have
+      ansible.builtin.debug:
+        msg: "Kuma has no notification named {{ kuma_wanted_notifications | difference(kuma_known_notifications) | join(', ') }}, so it was left off; create it in Kuma's notification settings with exactly that name."
+      when: kuma_wanted_notifications | difference(kuma_known_notifications) | length > 0
+
     # Facts persist between includes, so each call starts with no groups
     - name: Start the group list
       ansible.builtin.set_fact:
@@ -111,7 +137,7 @@
         expiryNotification: "{{ item.url is match('^https://') if kuma_type == 'http' else omit }}"
         interval: "{{ item.interval | default(60) | int }}"
         parent_name: "{{ kuma_group.split('>') | map('trim') | select | last if kuma_group | length > 0 else omit }}"
-        notification_names: "{{ uptime_kuma_notifications | default(omit) }}"
+        notification_names: "{{ kuma_monitor_notifications if kuma_monitor_notifications | length > 0 else omit }}"
         state: present
       loop: "{{ kuma_ready }}"
       loop_control:
@@ -119,6 +145,11 @@
       vars:
         kuma_type: "{{ item.type | default('http') }}"
         kuma_group: "{{ item.group | default(kuma_monitor_group | default(kuma_default_group | default('Applications'))) }}"
+        # The site-wide names plus those for the monitor's top-level group, limited to the ones Kuma has
+        kuma_monitor_notifications: >-
+          {{ (uptime_kuma_notifications | default([])
+              + (kuma_group_notifications | default({})).get(kuma_group.split('>') | map('trim') | first | default(''), []))
+             | unique | select('in', kuma_known_notifications) | list }}
 
     # Shown so the run log says what is being watched
     - name: Report the monitors
