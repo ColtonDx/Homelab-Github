@@ -83,12 +83,14 @@
       environment: "{{ adhoc_tf_env }}"
       register: adhoc_apply
 
-    # A static VM gets its DNS name and DHCP reservation; a DHCP VM's output is empty, so nothing is reserved
+    # Only a static VM gets its DNS name and DHCP reservation; a DHCP VM never calls OPNsense
     - name: Reserve the VM's address in OPNsense
       ansible.builtin.include_tasks: ../opnsense/tasks/dnsmasq_reserve_ip.yaml
       vars:
         opnsense_reservations: "{{ adhoc_apply.outputs.dns_reservations.value | default([]) }}"
-      when: reserve_ip | default(true) | bool
+      when:
+        - reserve_ip | default(true) | bool
+        - adhoc_apply.outputs.ipconfig0.value | default('') is match('ip=[0-9.]+/')
 
     # The VM, its eth0 and MAC, and its address in NetBox; a DHCP VM's output is empty, so nothing is recorded
     - name: Record the VM in NetBox
