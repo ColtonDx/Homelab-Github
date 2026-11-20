@@ -8,6 +8,12 @@
     proxmox_to_return: "{{ hostvars['localhost'].proxmox_moved | default([]) }}"
   run_once: true
 
+# Start empty outside the block, so the move tasks' loops are defined even when the block is skipped
+- name: Reset the return plan
+  ansible.builtin.set_fact:
+    proxmox_return_plan: []
+  run_once: true
+
 # Nothing moved means nothing to do
 - name: Return the guests
   when: proxmox_to_return | length > 0
@@ -20,11 +26,6 @@
       register: proxmox_now
       changed_when: false
       check_mode: false
-
-    # Start empty
-    - name: Reset the return plan
-      ansible.builtin.set_fact:
-        proxmox_return_plan: []
 
     # A move runs on the node holding the guest, so each guest's current node is mapped back to its inventory host
     - name: Work out where each guest is and which inventory host holds it
