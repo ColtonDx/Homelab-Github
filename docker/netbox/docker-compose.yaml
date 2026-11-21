@@ -32,7 +32,8 @@ services:
   postgres:
     container_name: netbox-db
     restart: unless-stopped
-    image: postgres
+    # Pinned to the major version the data was created with; a new major needs pg_upgrade, so moving up is a deliberate change
+    image: postgres:18.7
     networks:
       - default
     environment:
