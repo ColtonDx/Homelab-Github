@@ -1,0 +1,114 @@
+---
+# Installs Docker and a pinned GitLab Runner, writes config.toml and adds a daily Docker prune; expects gitlab_runner_token to be set
+# Docker from Debian, so it gets the distribution's security updates; the guest agent lets Proxmox see the VM's state; python3-debian is what deb822_repository needs
+- name: Install Docker and the base packages
+  ansible.builtin.apt:
+    name: [docker.io, ca-certificates, curl, qemu-guest-agent, python3-debian]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Restart policies come with both packages; this makes sure they are running and start at boot
+- name: Start Docker and the guest agent
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [docker, qemu-guest-agent]
+
+# GitLab's own repository, since Debian does not ship a current runner; deb822 fetches the signing key itself, so no gpg is needed
+- name: Add the GitLab Runner apt repository
+  ansible.builtin.deb822_repository:
+    name: gitlab-runner
+    types: [deb]
+    uris: "https://packages.gitlab.com/runner/gitlab-runner/{{ ansible_facts.distribution | lower }}/"
+    suites: ["{{ ansible_facts.distribution_release }}"]
+    components: [main]
+    signed_by: https://packages.gitlab.com/runner/gitlab-runner/gpgkey
+    state: present
+  notify: Refresh the package lists
+
+# A new or changed source entry needs fresh package lists before the install below
+- name: Refresh the package lists if the repository changed
+  ansible.builtin.meta: flush_handlers
+
+# Pinned, with its helper images at the same version, so a re-run never upgrades the runner by surprise
+- name: Install GitLab Runner
+  ansible.builtin.apt:
+    name:
+      - "gitlab-runner={{ gitlab_runner_version }}"
+      - "gitlab-runner-helper-images={{ gitlab_runner_version }}"
+    state: present
+
+# Root-only, since it holds the token; with an authentication token no register step is needed
+- name: Write the runner configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/gitlab-runner/config.toml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart gitlab-runner
+
+# The package's unit restarts the runner if it exits; this makes sure it is running and starts at boot
+- name: Start gitlab-runner
+  ansible.builtin.systemd:
+    name: gitlab-runner
+    state: started
+    enabled: true
+
+# A daily prune keeps job images and build cache from filling the disk
+- name: Install the Docker prune service and timer
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    content: "{{ item.content }}"
+    mode: "0644"
+  loop:
+    - name: docker-prune.service
+      content: |
+        # Removes unused images, containers, networks and build cache older than {{ gitlab_runner_prune_after }}
+        [Unit]
+        Description=Prune old Docker data left by CI jobs
+        Requires=docker.service
+        After=docker.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/docker system prune --all --force --filter until={{ gitlab_runner_prune_after }}
+    - name: docker-prune.timer
+      content: |
+        # Runs docker-prune.service once a day; Persistent catches up after downtime
+        [Unit]
+        Description=Daily Docker prune
+
+        [Timer]
+        OnCalendar=daily
+        RandomizedDelaySec=1h
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: "{{ item.name }}"
+  register: gitlab_runner_prune_units
+
+# Reloads systemd when the units change, then makes sure the timer is on
+- name: Enable the Docker prune timer
+  ansible.builtin.systemd:
+    name: docker-prune.timer
+    state: started
+    enabled: true
+    daemon_reload: "{{ gitlab_runner_prune_units is changed }}"
+
+# Flush now, so a changed config is live before the check below
+- name: Apply a changed configuration
+  ansible.builtin.meta: flush_handlers
+
+# Confirms GitLab accepts the token; read-only, so it runs in check mode too once the runner is installed
+- name: Check the runner can reach GitLab
+  ansible.builtin.command: gitlab-runner verify
+  register: gitlab_runner_verify
+  changed_when: false
+  failed_when: gitlab_runner_verify.rc != 0 or 'is valid' not in (gitlab_runner_verify.stdout ~ gitlab_runner_verify.stderr)
+  when: not ansible_check_mode
