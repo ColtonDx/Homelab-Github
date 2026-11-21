@@ -1,0 +1,20 @@
+---
+# Every setting the gitlab_runner role reads; override any of them in the inventory
+# The runner should match GitLab's major and minor version
+gitlab_runner_version: "19.6.0-1"
+# Name shown in GitLab's runner list
+gitlab_runner_name: "{{ inventory_hostname }}"
+# Jobs run at once; each gets its own container
+gitlab_runner_concurrent: 2
+# Image for jobs that name none
+gitlab_runner_default_image: "alpine:3"
+# Privileged job containers allow Docker-in-Docker image builds, and give every job root on this VM
+gitlab_runner_privileged: false
+# Extra volumes for job containers; /certs/client shares Docker-in-Docker's TLS certificates with the job
+gitlab_runner_volumes: ["/certs/client", "/cache"]
+# CA bundle on the runner for a GitLab certificate it does not already trust; empty uses the system store
+gitlab_runner_tls_ca_file: ""
+# Prometheus metrics, also the health check Uptime Kuma polls; empty turns the listener off
+gitlab_runner_metrics_address: ":9252"
+# Images, containers and build cache older than this are pruned daily, so job leftovers do not fill the disk
+gitlab_runner_prune_after: "72h"

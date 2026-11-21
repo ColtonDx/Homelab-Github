@@ -1,0 +1,11 @@
+---
+# Picks up the GitLab Runner repository's package lists
+- name: Refresh the package lists
+  ansible.builtin.apt:
+    update_cache: true
+
+# Picks up a changed config.toml straight away, rather than at the runner's next config check
+- name: Restart gitlab-runner
+  ansible.builtin.systemd:
+    name: gitlab-runner
+    state: restarted

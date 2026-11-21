@@ -1,0 +1,12 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: gitlab_runner
+  author: homelab
+  description: Installs Docker and GitLab Runner with the Docker executor on Debian
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []
