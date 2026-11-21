@@ -3,7 +3,7 @@ services:
     container_name: worksuite
     restart: unless-stopped
     # GITLAB_REGISTRY is the GitLab container registry host, e.g. registry.example.com
-    image: ${GITLAB_REGISTRY}/coltondx/worksuite:latest
+    image: ${GITLAB_REGISTRY}/development/worksuite:latest
     networks:
       - reverseproxy-nw
 #    ports:
