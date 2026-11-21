@@ -1,7 +1,7 @@
 ---
 # Installs Docker and GitLab Runner on a dedicated VM and connects the runner to GitLab with a runner authentication token
 # The token (glrt-...) is created in GitLab under the group or project's Build > Runners > New runner, then stored in Vault
-# Vault: GITLAB_RUNNER_TOKEN at gitlab-runner (gitlab_runner_vault_path renames it); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
+# Vault: GITLAB_RUNNER_TOKEN at gitlab-runner (gitlab_runner_vault_path and gitlab_runner_vault_field rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: gitlab_runner_url (required, GitLab's address); the gitlab_runner_* variables below for everything else
 - name: Install and configure GitLab Runner
   hosts: gitlab-runner
@@ -31,7 +31,7 @@
 
     vault_secrets:
       - path: "{{ gitlab_runner_vault_path | default('gitlab-runner') }}"
-        field: GITLAB_RUNNER_TOKEN
+        field: "{{ gitlab_runner_vault_field | default('GITLAB_RUNNER_TOKEN') }}"
         var: gitlab_runner_token
 
   handlers:
