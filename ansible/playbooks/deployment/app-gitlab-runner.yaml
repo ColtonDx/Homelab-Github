@@ -27,7 +27,6 @@
     gitlab_runner_metrics_address: ":9252"
     # Images, containers and build cache older than this are pruned daily, so job leftovers do not fill the disk
     gitlab_runner_prune_after: "72h"
-    gitlab_runner_keyring_path: /etc/apt/keyrings/gitlab-runner.asc
 
     vault_secrets:
       - path: "{{ gitlab_runner_vault_path | default('gitlab-runner') }}"
@@ -35,6 +34,11 @@
         var: gitlab_runner_token
 
   handlers:
+    # Picks up the GitLab Runner repository's package lists
+    - name: Refresh the package lists
+      ansible.builtin.apt:
+        update_cache: true
+
     # Picks up a changed config.toml straight away, rather than at the runner's next config check
     - name: Restart gitlab-runner
       ansible.builtin.systemd:
@@ -53,10 +57,10 @@
     - name: Load Vault secrets
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
 
-    # Docker from Debian, so it gets the distribution's security updates; the guest agent lets Proxmox see the VM's state
+    # Docker from Debian, so it gets the distribution's security updates; the guest agent lets Proxmox see the VM's state; python3-debian is what deb822_repository needs
     - name: Install Docker and the base packages
       ansible.builtin.apt:
-        name: [docker.io, ca-certificates, curl, qemu-guest-agent]
+        name: [docker.io, ca-certificates, curl, qemu-guest-agent, python3-debian]
         state: present
         update_cache: true
         cache_valid_time: 3600
@@ -69,31 +73,21 @@
         enabled: true
       loop: [docker, qemu-guest-agent]
 
-    # Holds the repository signing key referenced by the source entry
-    - name: Ensure the apt keyrings directory exists
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: "0755"
-
-    # Downloaded once; force: false keeps re-runs from fetching it again
-    - name: Add the GitLab Runner signing key
-      ansible.builtin.get_url:
-        url: https://packages.gitlab.com/runner/gitlab-runner/gpgkey
-        dest: "{{ gitlab_runner_keyring_path }}"
-        mode: "0644"
-        force: false
-
-    # GitLab's own repository, since Debian does not ship a current runner
+    # GitLab's own repository, since Debian does not ship a current runner; deb822 fetches the signing key itself, so no gpg is needed
     - name: Add the GitLab Runner apt repository
-      ansible.builtin.apt_repository:
-        repo: >-
-          deb [signed-by={{ gitlab_runner_keyring_path }}]
-          https://packages.gitlab.com/runner/gitlab-runner/{{ ansible_facts.distribution | lower }}/
-          {{ ansible_facts.distribution_release }} main
-        filename: gitlab-runner
+      ansible.builtin.deb822_repository:
+        name: gitlab-runner
+        types: [deb]
+        uris: "https://packages.gitlab.com/runner/gitlab-runner/{{ ansible_facts.distribution | lower }}/"
+        suites: ["{{ ansible_facts.distribution_release }}"]
+        components: [main]
+        signed_by: https://packages.gitlab.com/runner/gitlab-runner/gpgkey
         state: present
-        update_cache: true
+      notify: Refresh the package lists
+
+    # A new or changed source entry needs fresh package lists before the install below
+    - name: Refresh the package lists if the repository changed
+      ansible.builtin.meta: flush_handlers
 
     # Pinned, with its helper images at the same version, so a re-run never upgrades the runner by surprise
     - name: Install GitLab Runner
