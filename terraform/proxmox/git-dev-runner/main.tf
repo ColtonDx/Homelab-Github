@@ -1,4 +1,4 @@
-# Builds a dedicated GitLab CI runner VM on Proxmox from a cloud-init template; ansible/playbooks/terraform/build-project.yaml applies this and then installs Docker and gitlab-runner with app-gitlab-runner.yaml
+# Builds the dedicated GitLab CI runner VM for development projects on Proxmox from a cloud-init template; ansible/playbooks/terraform/build-project.yaml applies this and then installs Docker and gitlab-runner with app-gitlab-runner.yaml
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
 # The VM holds no state worth keeping (jobs, caches and images are rebuilt), so a broken runner is replaced by destroying and re-applying
@@ -7,7 +7,7 @@ terraform {
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
   backend "s3" {
     bucket                      = "terraform"
-    key                         = "gitlab-runner.tfstate"
+    key                         = "git-dev-runner.tfstate"
     region                      = "garage"
     skip_requesting_account_id  = true
     skip_credentials_validation = true

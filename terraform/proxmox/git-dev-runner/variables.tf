@@ -54,7 +54,7 @@ variable "mac_address" {
 variable "vm_name" {
   type        = string
   description = "VM name"
-  default     = "gitlab-runner"
+  default     = "Git-Dev-Runner"
 }
 
 variable "vm_id" {
@@ -66,7 +66,7 @@ variable "vm_id" {
 variable "description" {
   type        = string
   description = "Proxmox description"
-  default     = "GitLab CI runner, managed by Terraform"
+  default     = "GitLab CI runner for development projects, managed by Terraform"
 }
 
 variable "cores" {

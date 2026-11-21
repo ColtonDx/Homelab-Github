@@ -2,7 +2,7 @@
 # Tells ansible/playbooks/terraform/build-project.yaml where this project's inputs come from; locations only, never values
 
 # State file in Garage; tf_backend=local replaces it with local state for a bootstrap run
-state_key: gitlab-runner.tfstate
+state_key: git-dev-runner.tfstate
 
 # Secrets, passed to Terraform as TF_VAR_* environment variables and never logged
 vault:
@@ -11,9 +11,9 @@ vault:
   - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
 # The VM's inventory host: its terraform_defaults, its ansible_host as ip_address, then its own terraform dict, supply any variable they name
-host: gitlab-runner
+host: git-dev-runner
 
 # Run after an apply to install Docker and gitlab-runner and register the runner
 install:
   playbook: ansible/playbooks/deployment/app-gitlab-runner.yaml
-  hosts: gitlab-runner
+  hosts: git-dev-runner
