@@ -1,0 +1,177 @@
+---
+# Installs Docker and GitLab Runner on a dedicated VM and connects the runner to GitLab with a runner authentication token
+# The token (glrt-...) is created in GitLab under the group or project's Build > Runners > New runner, then stored in Vault
+# Vault: GITLAB_RUNNER_TOKEN at gitlab-runner (gitlab_runner_vault_path renames it); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
+# Inventory: gitlab_runner_url (required, GitLab's address); the gitlab_runner_* variables below for everything else
+- name: Install and configure GitLab Runner
+  hosts: gitlab-runner
+  become: true
+  gather_facts: true
+
+  vars:
+    # The runner should match GitLab's major and minor version
+    gitlab_runner_version: "19.6.0-1"
+    # Name shown in GitLab's runner list
+    gitlab_runner_name: "{{ inventory_hostname }}"
+    # Jobs run at once; each gets its own container
+    gitlab_runner_concurrent: 2
+    # Image for jobs that name none
+    gitlab_runner_default_image: "alpine:3"
+    # Privileged job containers allow Docker-in-Docker image builds, and give every job root on this VM
+    gitlab_runner_privileged: false
+    # Extra volumes for job containers; /certs/client shares Docker-in-Docker's TLS certificates with the job
+    gitlab_runner_volumes: ["/certs/client", "/cache"]
+    # CA bundle on the runner for a GitLab certificate it does not already trust; empty uses the system store
+    gitlab_runner_tls_ca_file: ""
+    # Prometheus metrics, also the health check Uptime Kuma polls; empty turns the listener off
+    gitlab_runner_metrics_address: ":9252"
+    # Images, containers and build cache older than this are pruned daily, so job leftovers do not fill the disk
+    gitlab_runner_prune_after: "72h"
+    gitlab_runner_keyring_path: /etc/apt/keyrings/gitlab-runner.asc
+
+    vault_secrets:
+      - path: "{{ gitlab_runner_vault_path | default('gitlab-runner') }}"
+        field: GITLAB_RUNNER_TOKEN
+        var: gitlab_runner_token
+
+  handlers:
+    # Picks up a changed config.toml straight away, rather than at the runner's next config check
+    - name: Restart gitlab-runner
+      ansible.builtin.systemd:
+        name: gitlab-runner
+        state: restarted
+
+  tasks:
+    # Fail before changing anything when GitLab's address is missing
+    - name: Check GitLab's address is set
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_url | default('') | length > 0
+        fail_msg: "Set gitlab_runner_url in the inventory to GitLab's address, e.g. https://gitlab.example.com."
+
+    # The runner authentication token
+    - name: Load Vault secrets
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # Docker from Debian, so it gets the distribution's security updates; the guest agent lets Proxmox see the VM's state
+    - name: Install Docker and the base packages
+      ansible.builtin.apt:
+        name: [docker.io, ca-certificates, curl, qemu-guest-agent]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Restart policies come with both packages; this makes sure they are running and start at boot
+    - name: Start Docker and the guest agent
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop: [docker, qemu-guest-agent]
+
+    # Holds the repository signing key referenced by the source entry
+    - name: Ensure the apt keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # Downloaded once; force: false keeps re-runs from fetching it again
+    - name: Add the GitLab Runner signing key
+      ansible.builtin.get_url:
+        url: https://packages.gitlab.com/runner/gitlab-runner/gpgkey
+        dest: "{{ gitlab_runner_keyring_path }}"
+        mode: "0644"
+        force: false
+
+    # GitLab's own repository, since Debian does not ship a current runner
+    - name: Add the GitLab Runner apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by={{ gitlab_runner_keyring_path }}]
+          https://packages.gitlab.com/runner/gitlab-runner/{{ ansible_facts.distribution | lower }}/
+          {{ ansible_facts.distribution_release }} main
+        filename: gitlab-runner
+        state: present
+        update_cache: true
+
+    # Pinned, with its helper images at the same version, so a re-run never upgrades the runner by surprise
+    - name: Install GitLab Runner
+      ansible.builtin.apt:
+        name:
+          - "gitlab-runner={{ gitlab_runner_version }}"
+          - "gitlab-runner-helper-images={{ gitlab_runner_version }}"
+        state: present
+
+    # Root-only, since it holds the token; with an authentication token no register step is needed
+    - name: Write the runner configuration
+      ansible.builtin.template:
+        src: templates/gitlab-runner-config.toml.j2
+        dest: /etc/gitlab-runner/config.toml
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      notify: Restart gitlab-runner
+
+    # The package's unit restarts the runner if it exits; this makes sure it is running and starts at boot
+    - name: Start gitlab-runner
+      ansible.builtin.systemd:
+        name: gitlab-runner
+        state: started
+        enabled: true
+
+    # A daily prune keeps job images and build cache from filling the disk
+    - name: Install the Docker prune service and timer
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.name }}"
+        content: "{{ item.content }}"
+        mode: "0644"
+      loop:
+        - name: docker-prune.service
+          content: |
+            # Removes unused images, containers, networks and build cache older than {{ gitlab_runner_prune_after }}
+            [Unit]
+            Description=Prune old Docker data left by CI jobs
+            Requires=docker.service
+            After=docker.service
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/bin/docker system prune --all --force --filter until={{ gitlab_runner_prune_after }}
+        - name: docker-prune.timer
+          content: |
+            # Runs docker-prune.service once a day; Persistent catches up after downtime
+            [Unit]
+            Description=Daily Docker prune
+
+            [Timer]
+            OnCalendar=daily
+            RandomizedDelaySec=1h
+            Persistent=true
+
+            [Install]
+            WantedBy=timers.target
+      loop_control:
+        label: "{{ item.name }}"
+      register: gitlab_runner_prune_units
+
+    # Reloads systemd when the units change, then makes sure the timer is on
+    - name: Enable the Docker prune timer
+      ansible.builtin.systemd:
+        name: docker-prune.timer
+        state: started
+        enabled: true
+        daemon_reload: "{{ gitlab_runner_prune_units is changed }}"
+
+    # Flush now, so a changed config is live before the check below
+    - name: Apply a changed configuration
+      ansible.builtin.meta: flush_handlers
+
+    # Confirms GitLab accepts the token; read-only, so it runs in check mode too once the runner is installed
+    - name: Check the runner can reach GitLab
+      ansible.builtin.command: gitlab-runner verify
+      register: gitlab_runner_verify
+      changed_when: false
+      failed_when: gitlab_runner_verify.rc != 0 or 'is valid' not in (gitlab_runner_verify.stdout ~ gitlab_runner_verify.stderr)
+      when: not ansible_check_mode
