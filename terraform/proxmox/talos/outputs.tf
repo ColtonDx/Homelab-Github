@@ -10,7 +10,7 @@ output "node_vmids" {
 }
 
 output "dns_reservations" {
-  description = "Name, address and MAC of each node with an address, which build-project.yaml reserves in OPNsense Dnsmasq after an apply"
+  description = "Name, address and MAC of each node with an address, which build-project.yaml records in NetBox after an apply"
   value = [for k, v in proxmox_vm_qemu.talos_node : {
     name = k
     ip   = local.nodes[k].address

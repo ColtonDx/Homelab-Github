@@ -4,7 +4,6 @@
 # Optional: tf_vars, a dict that overrides any variable; tf_backend=local to run on local state when Garage is not available yet
 # Inventory: sources.yaml's host (one VM) or group (a cluster) supplies values from terraform_defaults, ansible_host and each host's terraform dict
 # Optional: tf_migrate_state=true on an s3 run copies state left by a local run into Garage
-# After an apply it reserves each VM's address in OPNsense Dnsmasq from the project's dns_reservations output (tf_reserve_ip=false skips it)
 # It then records each VM in NetBox: the VM in sources.yaml's netbox_cluster, its eth0 and MAC, and its address with a DNS name (tf_netbox=false skips it)
 # It then waits for the VM and runs the install playbook named by sources.yaml's install entry, which then runs its own TLS; tf_install=false skips that
 # Environment: VAULT_ADDR, VAULT_TOKEN, VAULT_KV_MOUNT; GARAGE_URL (or garage_url) for the s3 backend; NETBOX_URL only when a lookup needs NetBox
@@ -328,15 +327,6 @@
     - name: Show Terraform's output
       ansible.builtin.debug:
         msg: "{{ tf_result.stdout_lines | default([]) }}"
-
-    # Static VMs get their DNS name and DHCP reservation before anything connects to them; projects without a dns_reservations output reserve nothing
-    - name: Reserve the VMs' addresses in OPNsense
-      ansible.builtin.include_tasks: ../opnsense/tasks/dnsmasq_reserve_ip.yaml
-      vars:
-        opnsense_reservations: "{{ tf_result.outputs.dns_reservations.value | default([]) }}"
-      when:
-        - tf_action_resolved == 'apply'
-        - tf_reserve_ip | default(true) | bool
 
     # Read by the NetBox plays below, which only run after an apply
     - name: Hand the built VMs over to NetBox

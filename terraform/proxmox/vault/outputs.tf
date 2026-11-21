@@ -10,7 +10,7 @@ output "vault_vmid" {
 }
 
 output "dns_reservations" {
-  description = "Name, address and MAC of each VM, which build-project.yaml reserves in OPNsense Dnsmasq after an apply"
+  description = "Name, address and MAC of each VM, which build-project.yaml records in NetBox after an apply"
   value = [{
     name = proxmox_vm_qemu.vault.name
     ip   = var.ip_address
