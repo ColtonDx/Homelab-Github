@@ -2,6 +2,7 @@
 # Installs Docker and the central monitoring stack (Grafana, Loki, Prometheus and a syslog receiver) on a dedicated VM; safe to re-run
 # Vault: GRAFANA_ADMIN_PASSWORD at grafana and DISCORD_WEBHOOK_URL at discord (vault_grafana_path and vault_discord_path rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
+# Extra scrape jobs (monitoring_server_scrape_jobs) can name a bearer token by vault_path and vault_field
 # HTTPS: set monitoring_server_grafana_domain and this issues Grafana's certificate with ACME, which also needs CF_API and CF_EMAIL at cloudflare
 - name: Install the monitoring stack
   hosts: "{{ target_hosts | default('monitoring_servers') }}"
@@ -10,7 +11,10 @@
 
   vars:
     # The Cloudflare credentials for the certificate's DNS challenge are only read when Grafana serves HTTPS
-    vault_secrets: "{{ monitoring_vault_secrets + (monitoring_acme_secrets if monitoring_server_grafana_domain | default('') | length > 0 else []) }}"
+    vault_secrets: >-
+      {{ monitoring_vault_secrets
+         + (monitoring_acme_secrets if monitoring_server_grafana_domain | default('') | length > 0 else [])
+         + monitoring_scrape_secrets | default([]) }}
     monitoring_vault_secrets:
       - path: "{{ vault_grafana_path | default('grafana') }}"
         field: GRAFANA_ADMIN_PASSWORD
@@ -29,9 +33,26 @@
     monitoring_dir: "{{ monitoring_server_dir | default('/opt/monitoring') }}"
 
   pre_tasks:
-    # Grafana's first password and the Discord webhook for alerts
+    # Scrape jobs that name a Vault token add it to the secrets loaded below, as monitoring_scrape_token_<job name>
+    - name: List the scrape job tokens to load
+      ansible.builtin.set_fact:
+        monitoring_scrape_secrets: "{{ monitoring_scrape_secrets | default([]) + [{'path': item.vault_path, 'field': item.vault_field, 'var': 'monitoring_scrape_token_' ~ item.name}] }}"
+      loop: "{{ monitoring_server_scrape_jobs | default([]) | selectattr('vault_path', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Grafana's first password, the Discord webhook for alerts, and any scrape tokens
     - name: Load Vault secrets
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # The role takes the tokens as one map keyed by job name
+    - name: Collect the scrape tokens
+      ansible.builtin.set_fact:
+        monitoring_server_scrape_tokens: "{{ monitoring_server_scrape_tokens | default({}) | combine({item.name: lookup('ansible.builtin.vars', 'monitoring_scrape_token_' ~ item.name)}) }}"
+      loop: "{{ monitoring_server_scrape_jobs | default([]) | selectattr('vault_path', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
 
     - name: Install Docker
       ansible.builtin.include_tasks: ../../tasks/docker_install.yaml

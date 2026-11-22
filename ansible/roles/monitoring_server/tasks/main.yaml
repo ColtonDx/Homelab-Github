@@ -5,7 +5,9 @@
     that:
       - monitoring_server_grafana_admin_password | default('') | length > 0
       - monitoring_server_discord_webhook_url | default('') | length > 0
-    fail_msg: "Load monitoring_server_grafana_admin_password and monitoring_server_discord_webhook_url (from Vault) before applying this role."
+      - monitoring_server_scrape_jobs | selectattr('vault_path', 'defined') | map(attribute='name')
+        | reject('in', monitoring_server_scrape_tokens | default({})) | list | length == 0
+    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url and each scrape job's token (from Vault) before applying this role."
     quiet: true
 
 # Grafana won't start over HTTPS without its certificate, so stop here rather than leave it restarting
@@ -59,6 +61,27 @@
     group: root
     mode: "0644"
   notify: Restart loki
+
+# Bearer tokens for extra scrape jobs, one file each, readable by Prometheus (uid 65534) and kept out of its configuration file
+- name: Create the scrape token folder
+  ansible.builtin.file:
+    path: "{{ monitoring_server_dir }}/prometheus/tokens"
+    state: directory
+    owner: root
+    group: "65534"
+    mode: "0750"
+
+- name: Write the scrape tokens
+  ansible.builtin.copy:
+    content: "{{ monitoring_server_scrape_tokens[item.name] }}"
+    dest: "{{ monitoring_server_dir }}/prometheus/tokens/{{ item.name }}"
+    owner: root
+    group: "65534"
+    mode: "0640"
+  loop: "{{ monitoring_server_scrape_jobs | selectattr('vault_path', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
 
 - name: Write Prometheus's configuration
   ansible.builtin.template:
