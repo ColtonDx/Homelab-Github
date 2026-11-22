@@ -1,0 +1,185 @@
+# {{ ansible_managed }}
+# Alert rules, all routed to Discord by alerting.yaml. Provisioned rules are read-only in the Grafana UI.
+# Each rule should mean "someone needs to look"; the description says the first thing to check.
+{% raw %}
+apiVersion: 1
+
+groups:
+  # Host health, from the metrics each host's Alloy pushes
+  - orgId: 1
+    name: hosts
+    folder: Alerts
+    interval: 1m
+    rules:
+      # Pushed metrics go stale when a host or its Alloy stops, so compare against hosts seen in the last day
+      - uid: host-not-reporting
+        title: Host stopped reporting
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: 'group by (host) (last_over_time(up{job="node"}[1d])) unless group by (host) (up{job="node"})'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.host }} has sent no metrics for over 5 minutes"
+          description: "The host is down or its Alloy agent stopped. Check the VM is running, then `systemctl status alloy` on it. This alert clears by itself 24h after the host last reported."
+
+      # Local disks only; network shares report the NAS's capacity, not the host's
+      - uid: disk-almost-full
+        title: Disk almost full
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: '100 * (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs"} / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs|zfs"})'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [90]}
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.host }} {{ $labels.mountpoint }} is {{ humanize $values.A.Value }}% full"
+          description: "Find what is growing with `du -xh --max-depth=2 {{ $labels.mountpoint }} | sort -h | tail`; Docker hosts: `docker system df`."
+
+      # Services Prometheus scrapes itself (the stack and the Proxmox exporter)
+      - uid: scrape-target-down
+        title: Monitoring target down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: 'up{job!="node"} == bool 0'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }})"
+          description: "Check the target's container on the monitoring host with `docker compose ps` and its logs."
+
+  # Log patterns from the systemd journal that always need a person
+  - orgId: 1
+    name: logs
+    folder: Alerts
+    interval: 1m
+    rules:
+      - uid: oom-kill
+        title: Process killed for memory
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum by (host) (count_over_time({job="journal"} |~ "(?i)out of memory: killed process" [5m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "The kernel killed a process on {{ $labels.host }} for lack of memory"
+          description: "Check which process with `journalctl -k | grep -i 'killed process'`, then the VM's memory size or the service's limits."
+
+      - uid: disk-errors
+        title: Disk or filesystem errors
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum by (host) (count_over_time({job="journal"} |~ "(?i)(blk_update_request: I/O error|buffer I/O error|EXT4-fs error|XFS .*(error|corruption)|remounting filesystem read-only)" [5m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.host }} is logging disk or filesystem errors"
+          description: "Read `journalctl -k -p err` on the host, then check the Proxmox storage behind its disk."
+
+      # Only system units (logged by systemd itself), not transient units in user sessions
+      - uid: systemd-unit-failed
+        title: Service failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum by (host, failed_unit) (count_over_time({job="journal", unit="init.scope"} |= "Failed with result" | regexp "^(?P<failed_unit>[^ ]+): Failed with result" [5m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.failed_unit }} failed on {{ $labels.host }}"
+          description: "Check `systemctl status {{ $labels.failed_unit }}` and `journalctl -u {{ $labels.failed_unit }} -n 50` on the host."
+{% endraw %}
