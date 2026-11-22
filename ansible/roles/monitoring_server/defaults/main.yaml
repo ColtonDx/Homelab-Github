@@ -1,0 +1,26 @@
+---
+# Folder holding the Compose project and every service's configuration
+monitoring_server_dir: /opt/monitoring
+
+# Image versions, pinned so upgrades are deliberate changes
+monitoring_server_grafana_version: "13.3.1"
+monitoring_server_loki_version: "3.7.10"
+monitoring_server_prometheus_version: "v3.16.0"
+monitoring_server_alloy_version: "v1.22.0"
+
+# How long logs and metrics are kept
+monitoring_server_retention_days: 30
+
+# Published ports; clients push logs to Loki and metrics to Prometheus's remote-write receiver
+monitoring_server_grafana_port: 3000
+monitoring_server_loki_port: 3100
+monitoring_server_prometheus_port: 9090
+
+# Grafana's first administrator; the password comes from Vault and only takes effect on the first start, after which it lives in Grafana's database
+monitoring_server_grafana_admin_user: admin
+
+# Syslog listeners for devices that can't run an agent: most network gear sends RFC 3164 over UDP 514, and RFC 5424 senders use 5514
+monitoring_server_syslog_listeners:
+  - { port: 514, protocol: udp, format: rfc3164 }
+  - { port: 5514, protocol: udp, format: rfc5424 }
+  - { port: 5514, protocol: tcp, format: rfc5424 }

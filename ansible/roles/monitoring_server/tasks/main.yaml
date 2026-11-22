@@ -1,0 +1,115 @@
+---
+# Fail before changing anything when a secret the stack needs is missing
+- name: Check the secrets are loaded
+  ansible.builtin.assert:
+    that:
+      - monitoring_server_grafana_admin_password | default('') | length > 0
+      - monitoring_server_discord_webhook_url | default('') | length > 0
+    fail_msg: "Load monitoring_server_grafana_admin_password and monitoring_server_discord_webhook_url (from Vault) before applying this role."
+    quiet: true
+
+# Compose project folder with one subfolder per service's configuration; data lives in named volumes
+- name: Create the configuration folders
+  ansible.builtin.file:
+    path: "{{ monitoring_server_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting]
+
+# Secrets for the containers, readable by root only; a change recreates Grafana at the compose step, since a restart would keep the old values
+- name: Write the environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ monitoring_server_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Write the Compose file
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: "{{ monitoring_server_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Write Loki's configuration
+  ansible.builtin.template:
+    src: loki.yaml.j2
+    dest: "{{ monitoring_server_dir }}/loki/config.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart loki
+
+- name: Write Prometheus's configuration
+  ansible.builtin.template:
+    src: prometheus.yaml.j2
+    dest: "{{ monitoring_server_dir }}/prometheus/prometheus.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart prometheus
+
+# Alloy here only receives syslog from devices that can't run an agent, and forwards it to Loki
+- name: Write the syslog receiver's configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ monitoring_server_dir }}/alloy/config.alloy"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart alloy
+
+# Data sources are provisioned, so Grafana is rebuilt from code with no clicking
+- name: Write Grafana's data sources
+  ansible.builtin.template:
+    src: grafana/datasources.yaml.j2
+    dest: "{{ monitoring_server_dir }}/grafana/datasources/datasources.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart grafana
+
+# The Discord contact point and default policy; the webhook comes from the environment file, not this file
+- name: Write Grafana's alert routing
+  ansible.builtin.template:
+    src: grafana/alerting.yaml.j2
+    dest: "{{ monitoring_server_dir }}/grafana/alerting/alerting.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart grafana
+
+# Pulls missing images and starts or recreates any service whose Compose definition changed; reports a change only when a container was created or started
+- name: Start the monitoring stack
+  ansible.builtin.command:
+    argv: [docker, compose, up, --detach, --remove-orphans]
+    chdir: "{{ monitoring_server_dir }}"
+  register: monitoring_server_up
+  changed_when: monitoring_server_up.stderr is search('Creat|Recreat|Start|Remov')
+  when: not ansible_check_mode
+
+# Apply any configuration change before the readiness checks
+- name: Apply changed configuration
+  ansible.builtin.meta: flush_handlers
+
+# Fails the run if a service does not come up, rather than leaving it broken unnoticed
+- name: Wait for each service to report ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item.port }}{{ item.path }}"
+    status_code: 200
+  register: monitoring_server_ready
+  until: monitoring_server_ready.status == 200
+  retries: 30
+  delay: 5
+  loop:
+    - { port: "{{ monitoring_server_grafana_port }}", path: /api/health }
+    - { port: "{{ monitoring_server_loki_port }}", path: /ready }
+    - { port: "{{ monitoring_server_prometheus_port }}", path: /-/ready }
+  loop_control:
+    label: "{{ item.path }} on {{ item.port }}"
+  when: not ansible_check_mode

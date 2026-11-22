@@ -11,4 +11,4 @@ Run it through `ansible/playbooks/terraform/build-project.yaml` (the "Terraform 
 | `outputs.tf` | Address and VMID, and the record NetBox gets after an apply |
 | `sources.yaml` | Where build-project.yaml finds the state key, secrets and inventory host |
 
-The software is installed by a separate playbook, added to `sources.yaml` as the install entry once it exists.
+The software is installed by `ansible/playbooks/deployment/app-monitoring.yaml`, which `sources.yaml` names as the install entry.

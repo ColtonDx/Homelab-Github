@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# Host metrics arrive by remote write from each client's Alloy; these jobs watch the monitoring stack itself
+global:
+  scrape_interval: 60s
+  evaluation_interval: 60s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]

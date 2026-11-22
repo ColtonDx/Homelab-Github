@@ -1,0 +1,12 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: monitoring_server
+  author: homelab
+  description: Runs Grafana, Loki, Prometheus and a Grafana Alloy syslog receiver in Docker Compose
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

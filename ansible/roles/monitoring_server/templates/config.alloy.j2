@@ -1,0 +1,42 @@
+// {{ ansible_managed }}
+// Receives syslog from devices that can't run an agent and sends it to Loki, labelled by the sending host
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Turns syslog header fields into labels for searching in Grafana
+loki.relabel "syslog" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__syslog_message_hostname"]
+    target_label  = "host"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_severity"]
+    target_label  = "level"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_app_name"]
+    target_label  = "app"
+  }
+}
+
+loki.source.syslog "devices" {
+{% for listener in monitoring_server_syslog_listeners %}
+  listener {
+    address       = "0.0.0.0:{{ listener.port }}"
+    protocol      = "{{ listener.protocol }}"
+    syslog_format = "{{ listener.format }}"
+    labels        = { job = "syslog" }
+  }
+
+{% endfor %}
+  relabel_rules = loki.relabel.syslog.rules
+  forward_to    = [loki.write.local.receiver]
+}
