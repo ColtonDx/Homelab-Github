@@ -18,7 +18,7 @@
     mode: "0755"
   loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting]
 
-# Secrets for the containers, readable by root only
+# Secrets for the containers, readable by root only; a change recreates Grafana at the compose step, since a restart would keep the old values
 - name: Write the environment file
   ansible.builtin.template:
     src: env.j2
@@ -27,7 +27,6 @@
     group: root
     mode: "0600"
   no_log: true
-  notify: Restart grafana
 
 - name: Write the Compose file
   ansible.builtin.template:
@@ -85,13 +84,14 @@
     mode: "0644"
   notify: Restart grafana
 
-# Pulls missing images and starts or recreates any service whose Compose definition changed
+# Pulls missing images and starts or recreates any service whose Compose definition changed; reports a change only when a container was created or started
 - name: Start the monitoring stack
-  community.docker.docker_compose_v2:
-    project_src: "{{ monitoring_server_dir }}"
-    state: present
-    pull: missing
-    remove_orphans: true
+  ansible.builtin.command:
+    argv: [docker, compose, up, --detach, --remove-orphans]
+    chdir: "{{ monitoring_server_dir }}"
+  register: monitoring_server_up
+  changed_when: monitoring_server_up.stderr is search('Creat|Recreat|Start|Remov')
+  when: not ansible_check_mode
 
 # Apply any configuration change before the readiness checks
 - name: Apply changed configuration

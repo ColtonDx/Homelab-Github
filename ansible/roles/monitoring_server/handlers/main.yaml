@@ -1,25 +1,26 @@
 ---
 # Restarts only the services whose configuration changed; each is notified by its own template
+# Plain docker compose commands, so the role needs no collection beyond ansible-core
 - name: Restart grafana
-  community.docker.docker_compose_v2:
-    project_src: "{{ monitoring_server_dir }}"
-    services: [grafana]
-    state: restarted
+  ansible.builtin.command:
+    argv: [docker, compose, restart, grafana]
+    chdir: "{{ monitoring_server_dir }}"
+  changed_when: true
 
 - name: Restart loki
-  community.docker.docker_compose_v2:
-    project_src: "{{ monitoring_server_dir }}"
-    services: [loki]
-    state: restarted
+  ansible.builtin.command:
+    argv: [docker, compose, restart, loki]
+    chdir: "{{ monitoring_server_dir }}"
+  changed_when: true
 
 - name: Restart prometheus
-  community.docker.docker_compose_v2:
-    project_src: "{{ monitoring_server_dir }}"
-    services: [prometheus]
-    state: restarted
+  ansible.builtin.command:
+    argv: [docker, compose, restart, prometheus]
+    chdir: "{{ monitoring_server_dir }}"
+  changed_when: true
 
 - name: Restart alloy
-  community.docker.docker_compose_v2:
-    project_src: "{{ monitoring_server_dir }}"
-    services: [alloy]
-    state: restarted
+  ansible.builtin.command:
+    argv: [docker, compose, restart, alloy]
+    chdir: "{{ monitoring_server_dir }}"
+  changed_when: true
