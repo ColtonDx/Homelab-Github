@@ -2,19 +2,31 @@
 # Installs Docker and the central monitoring stack (Grafana, Loki, Prometheus and a syslog receiver) on a dedicated VM; safe to re-run
 # Vault: GRAFANA_ADMIN_PASSWORD at grafana and DISCORD_WEBHOOK_URL at discord (vault_grafana_path and vault_discord_path rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
+# HTTPS: set monitoring_server_grafana_domain and this issues Grafana's certificate with ACME, which also needs CF_API and CF_EMAIL at cloudflare
 - name: Install the monitoring stack
   hosts: "{{ target_hosts | default('monitoring_servers') }}"
   become: true
   gather_facts: true
 
   vars:
-    vault_secrets:
+    # The Cloudflare credentials for the certificate's DNS challenge are only read when Grafana serves HTTPS
+    vault_secrets: "{{ monitoring_vault_secrets + (monitoring_acme_secrets if monitoring_server_grafana_domain | default('') | length > 0 else []) }}"
+    monitoring_vault_secrets:
       - path: "{{ vault_grafana_path | default('grafana') }}"
         field: GRAFANA_ADMIN_PASSWORD
         var: monitoring_server_grafana_admin_password
       - path: "{{ vault_discord_path | default('discord') }}"
         field: DISCORD_WEBHOOK_URL
         var: monitoring_server_discord_webhook_url
+    monitoring_acme_secrets:
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_API
+        var: cloudflare_api_token
+      - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+        field: CF_EMAIL
+        var: acme_email
+    monitoring_tls_dir: "{{ monitoring_server_tls_dir | default(monitoring_dir ~ '/tls') }}"
+    monitoring_dir: "{{ monitoring_server_dir | default('/opt/monitoring') }}"
 
   pre_tasks:
     # Grafana's first password and the Discord webhook for alerts
@@ -23,6 +35,23 @@
 
     - name: Install Docker
       ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
+
+    # Issued before the stack starts, since Grafana needs it to serve HTTPS; Grafana runs as uid 472, so each install hands it the files,
+    # and renewals restart Grafana once the stack exists (renew-certificates.yaml and acme.sh's cron reuse this command)
+    - name: Issue and install Grafana's certificate
+      ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+      vars:
+        acme_domain: "{{ monitoring_server_grafana_domain }}"
+        acme_ssl_dir: "{{ monitoring_tls_dir }}"
+        acme_key_path: "{{ monitoring_tls_dir }}/tls.key"
+        acme_fullchain_path: "{{ monitoring_tls_dir }}/tls.crt"
+        acme_reloadcmd: >-
+          chown 472:0 {{ monitoring_tls_dir }}/tls.key {{ monitoring_tls_dir }}/tls.crt
+          && chmod 0600 {{ monitoring_tls_dir }}/tls.key
+          && (test ! -f {{ monitoring_dir }}/compose.yaml || docker compose --project-directory {{ monitoring_dir }} restart grafana)
+        acme_ssl_owner: "472"
+        acme_ssl_group: root
+      when: monitoring_server_grafana_domain | default('') | length > 0
 
   roles:
     # Settings live in the role's defaults, so inventory values always win over them

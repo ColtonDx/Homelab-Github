@@ -12,6 +12,12 @@ scrape_configs:
     static_configs:
       - targets: ["loki:3100"]
   - job_name: grafana
+{% if monitoring_server_grafana_domain %}
+    # The certificate names the public domain, not the container
+    scheme: https
+    tls_config:
+      server_name: {{ monitoring_server_grafana_domain }}
+{% endif %}
     static_configs:
       - targets: ["grafana:3000"]
   - job_name: alloy
