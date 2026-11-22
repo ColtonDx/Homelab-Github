@@ -182,4 +182,31 @@ groups:
         annotations:
           summary: "{{ $labels.failed_unit }} failed on {{ $labels.host }}"
           description: "Check `systemctl status {{ $labels.failed_unit }}` and `journalctl -u {{ $labels.failed_unit }} -n 50` on the host."
+      # Repeated failed logins on one host: password guesses, unknown users or rejected keys
+      - uid: ssh-auth-failures
+        title: Repeated SSH login failures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum by (host) (count_over_time({job="journal", unit=~"ssh.*"} |~ "Failed password|Invalid user|maximum authentication attempts|Connection closed by authenticating user" [10m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [4]}
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.host }} had {{ $values.A.Value }} failed SSH logins in 10 minutes"
+          description: "See who and from where with `journalctl -u ssh --since -15min | grep -E 'Failed|Invalid|closed by authenticating'`; an unknown source address means look now."
 {% endraw %}
