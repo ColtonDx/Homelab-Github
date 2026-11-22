@@ -23,3 +23,14 @@ scrape_configs:
   - job_name: alloy
     static_configs:
       - targets: ["alloy:12345"]
+{% for job in monitoring_server_scrape_jobs %}
+  - job_name: {{ job.name }}
+    metrics_path: {{ job.metrics_path | default('/metrics') }}
+    scheme: {{ job.scheme | default('http') }}
+{% if job.vault_path is defined %}
+    authorization:
+      credentials_file: /etc/prometheus/tokens/{{ job.name }}
+{% endif %}
+    static_configs:
+      - targets: {{ job.targets | to_json }}
+{% endfor %}

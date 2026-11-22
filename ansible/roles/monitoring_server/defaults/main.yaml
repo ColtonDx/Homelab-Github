@@ -29,3 +29,7 @@ monitoring_server_syslog_listeners:
   - { port: 514, protocol: udp, format: rfc3164 }
   - { port: 5514, protocol: udp, format: rfc5424 }
   - { port: 5514, protocol: tcp, format: rfc5424 }
+
+# Extra Prometheus scrape jobs for services outside the stack, each {name, targets, metrics_path (default /metrics), scheme (default http)}
+# A job that needs a bearer token also sets vault_path and vault_field; app-monitoring.yaml loads the token into monitoring_server_scrape_tokens[name]
+monitoring_server_scrape_jobs: []
