@@ -1,0 +1,18 @@
+---
+# Address of the monitoring server (its Loki and Prometheus ports); required
+monitoring_client_server: ""
+monitoring_client_loki_port: 3100
+monitoring_client_prometheus_port: 9090
+
+# Grafana Alloy release installed from Grafana's apt repository, pinned so upgrades are deliberate
+monitoring_client_alloy_version: "1.22.0"
+
+# Name every metric and log line from this host carries as its host label
+monitoring_client_host_label: "{{ inventory_hostname }}"
+
+# Also ship container logs when the host runs Docker; auto turns it on when the Docker socket exists
+monitoring_client_docker_logs: auto
+
+# Filesystems and mount points left out of disk metrics: pseudo and container filesystems that would only add noise
+monitoring_client_fs_types_exclude: "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs|tracefs)$"
+monitoring_client_mount_points_exclude: "^/(dev|proc|run|sys|var/lib/docker/.+|var/lib/containerd/.+)($|/)"
