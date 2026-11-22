@@ -1,0 +1,101 @@
+---
+# Fail before changing anything when the server address or the OS is wrong
+- name: Check the inputs
+  ansible.builtin.assert:
+    that:
+      - monitoring_client_server | length > 0
+      - ansible_facts.os_family == 'Debian'
+    fail_msg: "Set monitoring_client_server to the monitoring server's address; only Debian and Ubuntu hosts are supported."
+    quiet: true
+
+# gnupg lets apt_repository check the key, which minimal cloud images leave out
+- name: Install prerequisites
+  ansible.builtin.apt:
+    name: [ca-certificates, gnupg]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Downloaded once; force: false keeps re-runs from fetching it again
+- name: Add Grafana's apt signing key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg.key
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+    force: false
+
+- name: Add Grafana's apt repository
+  ansible.builtin.apt_repository:
+    repo: deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+    filename: grafana
+    state: present
+    update_cache: true
+
+# The version wildcard matches the package's Debian revision; a version change upgrades or downgrades in place
+- name: Install Grafana Alloy
+  ansible.builtin.apt:
+    name: "alloy={{ monitoring_client_alloy_version }}*"
+    state: present
+    allow_downgrade: true
+  notify: Restart alloy
+
+# Docker logs need the socket, so auto follows whether Docker is installed
+- name: Check for the Docker socket
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: monitoring_client_docker_sock
+
+- name: Decide whether to ship container logs
+  ansible.builtin.set_fact:
+    monitoring_client_ship_docker: >-
+      {{ monitoring_client_docker_sock.stat.exists if monitoring_client_docker_logs == 'auto'
+         else monitoring_client_docker_logs | bool }}
+
+# Reading the journal needs systemd-journal, and container logs need the docker group
+- name: Give Alloy read access to the logs
+  ansible.builtin.user:
+    name: alloy
+    groups: "{{ ['systemd-journal'] + (['docker'] if monitoring_client_ship_docker | bool else []) }}"
+    append: true
+  notify: Restart alloy
+
+- name: Write Alloy's configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: alloy
+    mode: "0640"
+    # Alloy's own parser rejects a broken file before it replaces the working one
+    validate: alloy fmt %s
+  notify: Restart alloy
+
+# The package restarts Alloy on failure; this makes sure it is on and starts at boot
+- name: Enable and start Alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    enabled: true
+    state: started
+
+# Restart now rather than at the end, so the readiness check below sees the new configuration
+- name: Apply configuration changes
+  ansible.builtin.meta: flush_handlers
+
+# Alloy only reports ready once every component has loaded, so a bad setting fails the run here instead of passing silently
+- name: Wait for Alloy to report ready
+  ansible.builtin.uri:
+    url: http://127.0.0.1:12345/-/ready
+    status_code: 200
+  register: monitoring_client_ready
+  until: monitoring_client_ready.status == 200
+  retries: 12
+  delay: 5
+  when: not ansible_check_mode

@@ -1,0 +1,11 @@
+---
+# Installs Grafana Alloy on Linux hosts so they ship metrics and logs (journal, plus Docker containers where present) to the monitoring server; safe to re-run
+# Inventory: hosts in monitoring_clients (or target_hosts) and monitoring_client_server; every setting is in ansible/roles/monitoring_client/defaults/main.yaml
+- name: Ship host metrics and logs to the monitoring server
+  hosts: "{{ target_hosts | default('monitoring_clients') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    # A path rather than a name, so the role resolves however Semaphore starts the run
+    - role: ../../roles/monitoring_client  # noqa: role-name[path]

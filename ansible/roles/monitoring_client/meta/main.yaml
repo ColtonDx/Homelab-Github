@@ -1,0 +1,14 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: monitoring_client
+  author: homelab
+  description: Installs Grafana Alloy to ship a host's metrics and logs to the central monitoring stack
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

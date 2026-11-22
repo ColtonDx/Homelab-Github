@@ -1,0 +1,6 @@
+---
+# Alloy reloads cleanly on restart; notified by the configuration, group and settings changes
+- name: Restart alloy
+  ansible.builtin.systemd_service:
+    name: alloy
+    state: restarted

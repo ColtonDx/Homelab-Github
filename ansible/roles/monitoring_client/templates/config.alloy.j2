@@ -1,0 +1,101 @@
+// {{ ansible_managed }}
+// Ships this host's metrics to Prometheus and its logs to Loki on the monitoring server, every series labelled with the host's name
+
+// Host metrics: CPU, memory, disks, filesystems, network, load and systemd units
+prometheus.exporter.unix "host" {
+  enable_collectors = ["systemd"]
+
+  filesystem {
+    fs_types_exclude     = "{{ monitoring_client_fs_types_exclude }}"
+    mount_points_exclude = "{{ monitoring_client_mount_points_exclude }}"
+  }
+}
+
+// job and instance match what node exporter dashboards expect
+discovery.relabel "host" {
+  targets = prometheus.exporter.unix.host.targets
+
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ monitoring_client_host_label }}"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = discovery.relabel.host.output
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.server.receiver]
+}
+
+prometheus.remote_write "server" {
+  external_labels = { host = "{{ monitoring_client_host_label }}" }
+
+  endpoint {
+    url = "http://{{ monitoring_client_server }}:{{ monitoring_client_prometheus_port }}/api/v1/write"
+  }
+}
+
+loki.write "server" {
+  external_labels = { host = "{{ monitoring_client_host_label }}" }
+
+  endpoint {
+    url = "http://{{ monitoring_client_server }}:{{ monitoring_client_loki_port }}/loki/api/v1/push"
+  }
+}
+
+// System logs from the journal, labelled by unit and level
+loki.relabel "journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "system" {
+  max_age       = "12h"
+  relabel_rules = loki.relabel.journal.rules
+  labels        = { job = "journal" }
+  forward_to    = [loki.write.server.receiver]
+}
+{% if monitoring_client_ship_docker | bool %}
+
+// Container logs, labelled by container and Compose project
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  labels        = { job = "docker" }
+  forward_to    = [loki.write.server.receiver]
+}
+{% endif %}
