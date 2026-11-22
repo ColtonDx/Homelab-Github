@@ -135,6 +135,16 @@
     mode: "0644"
   notify: Restart grafana
 
+# Host, disk, scrape and journal alert rules, sent through the Discord route above
+- name: Write Grafana's alert rules
+  ansible.builtin.template:
+    src: grafana/alert-rules.yaml.j2
+    dest: "{{ monitoring_server_dir }}/grafana/alerting/alert-rules.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart grafana
+
 # Pulls missing images and starts or recreates any service whose Compose definition changed; reports a change only when a container was created or started
 - name: Start the monitoring stack
   ansible.builtin.command:
