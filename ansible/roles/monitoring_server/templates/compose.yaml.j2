@@ -9,14 +9,29 @@ services:
     environment:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+{% if monitoring_server_grafana_domain %}
+      # HTTPS with the certificate in monitoring_server_tls_dir; whatever installs it restarts Grafana on renewal
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_DOMAIN: {{ monitoring_server_grafana_domain }}
+      GF_SERVER_ROOT_URL: https://{{ monitoring_server_grafana_domain }}{{ '' if monitoring_server_grafana_port | int == 443 else ':' ~ monitoring_server_grafana_port }}/
+      GF_SERVER_CERT_FILE: /etc/grafana/tls/tls.crt
+      GF_SERVER_CERT_KEY: /etc/grafana/tls/tls.key
+{% endif %}
     ports:
       - "{{ monitoring_server_grafana_port }}:3000"
     volumes:
       - grafana:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
+{% if monitoring_server_grafana_domain %}
+      - {{ monitoring_server_tls_dir }}:/etc/grafana/tls:ro
+{% endif %}
     healthcheck:
+{% if monitoring_server_grafana_domain %}
+      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://127.0.0.1:3000/api/health"]
+{% else %}
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+{% endif %}
       interval: 30s
       timeout: 5s
       retries: 3

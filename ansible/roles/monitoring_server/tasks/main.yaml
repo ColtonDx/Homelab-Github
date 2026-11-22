@@ -8,6 +8,21 @@
     fail_msg: "Load monitoring_server_grafana_admin_password and monitoring_server_discord_webhook_url (from Vault) before applying this role."
     quiet: true
 
+# Grafana won't start over HTTPS without its certificate, so stop here rather than leave it restarting
+- name: Check Grafana's certificate is installed
+  ansible.builtin.stat:
+    path: "{{ monitoring_server_tls_dir }}/{{ item }}"
+  register: monitoring_server_tls_files
+  loop: [tls.crt, tls.key]
+  when: monitoring_server_grafana_domain | length > 0
+
+- name: Fail when the certificate is missing
+  ansible.builtin.assert:
+    that: monitoring_server_tls_files.results | selectattr('stat.exists') | list | length == 2
+    fail_msg: "Install tls.crt and tls.key in {{ monitoring_server_tls_dir }} before serving Grafana as {{ monitoring_server_grafana_domain }}; app-monitoring.yaml issues them with ACME."
+    quiet: true
+  when: monitoring_server_grafana_domain | length > 0 and not ansible_check_mode
+
 # Compose project folder with one subfolder per service's configuration; data lives in named volumes
 - name: Create the configuration folders
   ansible.builtin.file:
@@ -100,14 +115,16 @@
 # Fails the run if a service does not come up, rather than leaving it broken unnoticed
 - name: Wait for each service to report ready
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ item.port }}{{ item.path }}"
+    url: "{{ item.scheme | default('http') }}://127.0.0.1:{{ item.port }}{{ item.path }}"
     status_code: 200
+    # Grafana's certificate names its domain, not the loopback address checked here
+    validate_certs: false
   register: monitoring_server_ready
   until: monitoring_server_ready.status == 200
   retries: 30
   delay: 5
   loop:
-    - { port: "{{ monitoring_server_grafana_port }}", path: /api/health }
+    - { port: "{{ monitoring_server_grafana_port }}", path: /api/health, scheme: "{{ 'https' if monitoring_server_grafana_domain else 'http' }}" }
     - { port: "{{ monitoring_server_loki_port }}", path: /ready }
     - { port: "{{ monitoring_server_prometheus_port }}", path: /-/ready }
   loop_control:

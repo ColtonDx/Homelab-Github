@@ -11,8 +11,13 @@ monitoring_server_alloy_version: "v1.22.0"
 # How long logs and metrics are kept
 monitoring_server_retention_days: 30
 
-# Published ports; clients push logs to Loki and metrics to Prometheus's remote-write receiver
-monitoring_server_grafana_port: 3000
+# Name Grafana is served at over HTTPS, using the certificate installed in monitoring_server_tls_dir; empty serves plain HTTP
+monitoring_server_grafana_domain: ""
+# Folder holding Grafana's certificate (tls.crt) and key (tls.key), mounted read-only into the container
+monitoring_server_tls_dir: "{{ monitoring_server_dir }}/tls"
+
+# Published ports; Grafana moves to 443 when it serves HTTPS, and clients push logs to Loki and metrics to Prometheus's remote-write receiver
+monitoring_server_grafana_port: "{{ 443 if monitoring_server_grafana_domain | length > 0 else 3000 }}"
 monitoring_server_loki_port: 3100
 monitoring_server_prometheus_port: 9090
 
