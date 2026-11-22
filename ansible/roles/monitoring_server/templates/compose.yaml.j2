@@ -1,0 +1,73 @@
+# {{ ansible_managed }}
+# Grafana, Loki and Prometheus, plus Alloy as the syslog receiver; data lives in named volumes and configuration in this folder
+services:
+  grafana:
+    image: grafana/grafana:{{ monitoring_server_grafana_version }}
+    container_name: grafana
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "{{ monitoring_server_grafana_port }}:3000"
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on: [loki, prometheus]
+
+  loki:
+    image: grafana/loki:{{ monitoring_server_loki_version }}
+    container_name: loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yaml"]
+    ports:
+      - "{{ monitoring_server_loki_port }}:3100"
+    volumes:
+      - loki:/loki
+      - ./loki/config.yaml:/etc/loki/config.yaml:ro
+
+  prometheus:
+    image: prom/prometheus:{{ monitoring_server_prometheus_version }}
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ monitoring_server_retention_days }}d
+      # Clients' Alloy agents push metrics here instead of being scraped
+      - --web.enable-remote-write-receiver
+    ports:
+      - "{{ monitoring_server_prometheus_port }}:9090"
+    volumes:
+      - prometheus:/prometheus
+      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  alloy:
+    image: grafana/alloy:{{ monitoring_server_alloy_version }}
+    container_name: alloy
+    restart: unless-stopped
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
+    ports:
+{% for listener in monitoring_server_syslog_listeners %}
+      - "{{ listener.port }}:{{ listener.port }}/{{ listener.protocol }}"
+{% endfor %}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    depends_on: [loki]
+
+volumes:
+  grafana:
+  loki:
+  prometheus:

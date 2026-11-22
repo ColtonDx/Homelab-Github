@@ -12,3 +12,8 @@ vault:
 
 # The VM's inventory host: its terraform_defaults, its ansible_host as ip_address, then its own terraform dict, supply any variable they name
 host: monitoring
+
+# Run after an apply to install Docker and the monitoring stack
+install:
+  playbook: ansible/playbooks/deployment/app-monitoring.yaml
+  hosts: monitoring

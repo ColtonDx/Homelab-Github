@@ -1,0 +1,25 @@
+---
+# Restarts only the services whose configuration changed; each is notified by its own template
+- name: Restart grafana
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_server_dir }}"
+    services: [grafana]
+    state: restarted
+
+- name: Restart loki
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_server_dir }}"
+    services: [loki]
+    state: restarted
+
+- name: Restart prometheus
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_server_dir }}"
+    services: [prometheus]
+    state: restarted
+
+- name: Restart alloy
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_server_dir }}"
+    services: [alloy]
+    state: restarted
