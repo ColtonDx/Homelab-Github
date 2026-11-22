@@ -7,7 +7,9 @@
       - monitoring_server_discord_webhook_url | default('') | length > 0
       - monitoring_server_scrape_jobs | selectattr('vault_path', 'defined') | map(attribute='name')
         | reject('in', monitoring_server_scrape_tokens | default({})) | list | length == 0
-    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url and each scrape job's token (from Vault) before applying this role."
+      - monitoring_server_pve_targets | length == 0 or '!' in monitoring_server_pve_token_id | default('')
+      - monitoring_server_pve_targets | length == 0 or monitoring_server_pve_token_secret | default('') | length > 0
+    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url, each scrape job's token and, with Proxmox targets, the Proxmox token id (user@realm!name) and secret (from Vault) before applying this role."
     quiet: true
 
 # Grafana won't start over HTTPS without its certificate, so stop here rather than leave it restarting
@@ -44,6 +46,17 @@
     group: root
     mode: "0600"
   no_log: true
+
+# The Proxmox exporter's token, kept in its own file so only that container sees it; a change recreates it at the compose step
+- name: Write the Proxmox exporter's environment file
+  ansible.builtin.template:
+    src: pve.env.j2
+    dest: "{{ monitoring_server_dir }}/pve.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: monitoring_server_pve_targets | length > 0
 
 - name: Write the Compose file
   ansible.builtin.template:
