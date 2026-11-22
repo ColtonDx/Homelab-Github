@@ -1,6 +1,6 @@
 ---
 # Installs Docker and the central monitoring stack (Grafana, Loki, Prometheus and a syslog receiver) on a dedicated VM; safe to re-run
-# Vault: GRAFANA_ADMIN_PASSWORD at monitoring and DISCORD_WEBHOOK_URL at discord (vault_monitoring_path and vault_discord_path rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
+# Vault: GRAFANA_ADMIN_PASSWORD at grafana and DISCORD_WEBHOOK_URL at discord (vault_grafana_path and vault_discord_path rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
 - name: Install the monitoring stack
   hosts: "{{ target_hosts | default('monitoring_servers') }}"
@@ -9,7 +9,7 @@
 
   vars:
     vault_secrets:
-      - path: "{{ vault_monitoring_path | default('monitoring') }}"
+      - path: "{{ vault_grafana_path | default('grafana') }}"
         field: GRAFANA_ADMIN_PASSWORD
         var: monitoring_server_grafana_admin_password
       - path: "{{ vault_discord_path | default('discord') }}"
