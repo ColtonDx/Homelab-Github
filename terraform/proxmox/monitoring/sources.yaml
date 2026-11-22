@@ -12,4 +12,3 @@ vault:
 
 # The VM's inventory host: its terraform_defaults, its ansible_host as ip_address, then its own terraform dict, supply any variable they name
 host: monitoring
-
