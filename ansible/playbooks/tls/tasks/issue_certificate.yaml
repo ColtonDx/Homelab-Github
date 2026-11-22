@@ -130,7 +130,14 @@
   args:
     creates: "{{ acme_store_dir }}/{{ acme_domain }}.key"
   register: acme_issue
+  failed_when: false
   no_log: true
+
+# The task above hides its output to keep the token out of the log, so show acme.sh's own error here with the token removed
+- name: Report a failed issue
+  ansible.builtin.fail:
+    msg: "{{ (acme_issue.stdout_lines | default([]) + acme_issue.stderr_lines | default([]))[-15:] | map('replace', cloudflare_api_token, '<redacted>') | list }}"
+  when: acme_issue.rc | default(0) != 0
 
 # Exits 1 when the certificate expires within acme_renew_days, which includes one already expired
 - name: Check the certificate's expiry
@@ -152,10 +159,17 @@
       -d "{{ acme_domain }}" \
       --ecc
   register: acme_renew
+  failed_when: false
   when:
     - acme_issue is not changed
     - (acme_force | default(false) | bool) or (acme_expiry_check.rc | default(0)) == 1
   no_log: true
+
+# As above, acme.sh's error with the token removed
+- name: Report a failed renewal
+  ansible.builtin.fail:
+    msg: "{{ (acme_renew.stdout_lines | default([]) + acme_renew.stderr_lines | default([]))[-15:] | map('replace', cloudflare_api_token, '<redacted>') | list }}"
+  when: acme_renew.rc | default(0) != 0
 
 # Compared with acme.sh's copy below, so a service left on an old certificate is caught even when acme.sh itself is current
 - name: Check installed key
