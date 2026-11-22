@@ -7,6 +7,7 @@ monitoring_server_grafana_version: "13.3.1"
 monitoring_server_loki_version: "3.7.10"
 monitoring_server_prometheus_version: "v3.16.0"
 monitoring_server_alloy_version: "v1.22.0"
+monitoring_server_pve_exporter_version: "3.12.0"
 
 # How long logs and metrics are kept
 monitoring_server_retention_days: 30
@@ -33,3 +34,10 @@ monitoring_server_syslog_listeners:
 # Extra Prometheus scrape jobs for services outside the stack, each {name, targets, metrics_path (default /metrics), scheme (default http)}
 # A job that needs a bearer token also sets vault_path and vault_field; app-monitoring.yaml loads the token into monitoring_server_scrape_tokens[name]
 monitoring_server_scrape_jobs: []
+
+# Proxmox VE node addresses; when set, a Proxmox exporter reports CPU, memory, disk and network for every node and guest
+# Needs a read-only (PVEAuditor) API token, loaded by app-monitoring.yaml into monitoring_server_pve_token_id (user@realm!name) and monitoring_server_pve_token_secret
+# Cluster-wide and guest metrics come from the first address, node metrics from each
+monitoring_server_pve_targets: []
+# Check the nodes' certificates; turn off only for nodes on Proxmox's self-signed certificate
+monitoring_server_pve_verify_ssl: true

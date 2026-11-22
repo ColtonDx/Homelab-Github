@@ -23,6 +23,28 @@ scrape_configs:
   - job_name: alloy
     static_configs:
       - targets: ["alloy:12345"]
+{% if monitoring_server_pve_targets %}
+  # Proxmox: cluster-wide and guest metrics from one node, node metrics from each, so nothing is collected twice
+{%   for pve_job in [{'name': 'pve_cluster', 'cluster': '1', 'node': '0', 'targets': monitoring_server_pve_targets[:1]},
+                     {'name': 'pve_node', 'cluster': '0', 'node': '1', 'targets': monitoring_server_pve_targets}] %}
+  - job_name: {{ pve_job.name }}
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ["{{ pve_job.cluster }}"]
+      node: ["{{ pve_job.node }}"]
+    static_configs:
+      - targets: {{ pve_job.targets | to_json }}
+    # Each target is a Proxmox node passed to the exporter, which Prometheus actually scrapes
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: pve-exporter:9221
+{%   endfor %}
+{% endif %}
 {% for job in monitoring_server_scrape_jobs %}
   - job_name: {{ job.name }}
     metrics_path: {{ job.metrics_path | default('/metrics') }}

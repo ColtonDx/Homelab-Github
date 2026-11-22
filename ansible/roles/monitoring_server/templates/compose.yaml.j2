@@ -83,6 +83,15 @@ services:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
     depends_on: [loki]
 
+{% if monitoring_server_pve_targets %}
+  # Reads the Proxmox API for Prometheus; reachable only on the stack's network
+  pve-exporter:
+    image: prompve/prometheus-pve-exporter:{{ monitoring_server_pve_exporter_version }}
+    container_name: pve-exporter
+    restart: unless-stopped
+    env_file: pve.env
+
+{% endif %}
 volumes:
   grafana:
   loki:
