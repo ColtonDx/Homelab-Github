@@ -2,6 +2,19 @@
 # Every alert goes to Discord; the webhook URL is read from the container's environment, which comes from Vault
 apiVersion: 1
 
+# Short Discord messages: one bold line per alert saying what is wrong, then the first thing to check
+{% raw %}
+templates:
+  - orgId: 1
+    name: discord
+    template: |
+      {{ define "discord.title" }}{{ if gt (len .Alerts.Firing) 0 }}🔴 {{ .CommonLabels.alertname }}{{ if gt (len .Alerts.Firing) 1 }} ({{ len .Alerts.Firing }}){{ end }}{{ else }}✅ Resolved: {{ .CommonLabels.alertname }}{{ end }}{{ end }}
+      {{ define "discord.message" }}{{ range .Alerts.Firing }}**{{ .Annotations.summary }}**
+      {{ .Annotations.description }}
+      {{ end }}{{ range .Alerts.Resolved }}✅ {{ .Labels.alertname }}{{ with .Labels.host }} on {{ . }}{{ end }}{{ with .Labels.mountpoint }} {{ . }}{{ end }}{{ with .Labels.failed_unit }} ({{ . }}){{ end }} is back to normal
+      {{ end }}{{ end }}
+{% endraw %}
+
 contactPoints:
   - orgId: 1
     name: discord
@@ -10,6 +23,10 @@ contactPoints:
         type: discord
         settings:
           url: $DISCORD_WEBHOOK_URL
+{% raw %}
+          title: '{{ template "discord.title" . }}'
+          message: '{{ template "discord.message" . }}'
+{% endraw %}
 
 # The whole policy tree, which replaces whatever Grafana had
 policies:
