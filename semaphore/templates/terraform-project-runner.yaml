@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Terraform | Project Runner; see semaphore/README.md for the project resources it names
+# Semaphore task template Terraform | Project Runner; see docs/semaphore/templates.md for the project resources it names
 name: Terraform | Project Runner
 description: Plans or applies a Terraform project; after an apply it installs what runs on the VMs
 view: Proxmox

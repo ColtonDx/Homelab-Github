@@ -1,5 +1,5 @@
 ---
-# Semaphore task template K3s | Ansible | Initialize; see semaphore/README.md for the project resources it names
+# Semaphore task template K3s | Ansible | Initialize; see docs/semaphore/templates.md for the project resources it names
 name: K3s | Ansible | Initialize
 view: Kubernetes
 app: ansible

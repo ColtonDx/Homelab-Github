@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Proxmox | Configure Nodes; see semaphore/README.md for the project resources it names
+# Semaphore task template Proxmox | Configure Nodes; see docs/semaphore/templates.md for the project resources it names
 name: Proxmox | Configure Nodes
 description: Repositories, NTP, DNS, cluster, ZFS and backup storage, backup schedule and ACME certificates; use Dry Run and Diff to preview
 view: Proxmox

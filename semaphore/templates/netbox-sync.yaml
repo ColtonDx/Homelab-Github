@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Netbox | Sync; see semaphore/README.md for the project resources it names
+# Semaphore task template Netbox | Sync; see docs/semaphore/templates.md for the project resources it names
 name: Netbox | Sync
 description: Syncs NetBox from the inventory, Proxmox and OPNsense in that order; each source only updates the records it owns
 view: Netbox

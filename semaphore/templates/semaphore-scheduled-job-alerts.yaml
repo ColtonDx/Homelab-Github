@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Semaphore | Scheduled Job Alerts; see semaphore/README.md for the project resources it names
+# Semaphore task template Semaphore | Scheduled Job Alerts; see docs/semaphore/templates.md for the project resources it names
 name: Semaphore | Scheduled Job Alerts
 description: Posts to Discord when a scheduled job starts failing or recovers, once per change; runs every 15 minutes, matching its alert window
 app: ansible

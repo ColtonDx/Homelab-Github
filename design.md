@@ -36,7 +36,7 @@ Every layer is backed up independently, so any application, VM or host can be re
 
 Some applications are configured mostly through their own UI or API, and that configuration is worth sharing on its own: anyone running the same tool can reuse it. Those configurations are kept in Git, PII-free, next to the code they run:
 
-- **Semaphore**: every task template, in `semaphore/templates/`, with the project resources they name described in `semaphore/README.md`
+- **Semaphore**: every task template, in `semaphore/templates/`, with the project resources they name described in `docs/semaphore/templates.md`
 - **Homepage**: the dashboard layout, in `docker/homepage/config/`, rendered from the inventory and pushed by `portainer/push-config.yaml`
 
 Git history makes these versioned backups as well, and a rebuilt application can be set up again from them.

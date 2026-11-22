@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Portainer | Push Config; see semaphore/README.md for the project resources it names
+# Semaphore task template Portainer | Push Config; see docs/semaphore/templates.md for the project resources it names
 name: Portainer | Push Config
 description: Renders docker/<app>/config/*.j2 from the inventory and copies it into the running container through Portainer
 app: ansible

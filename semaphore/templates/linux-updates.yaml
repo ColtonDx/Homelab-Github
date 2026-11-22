@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Linux Updates; see semaphore/README.md for the project resources it names
+# Semaphore task template Linux Updates; see docs/semaphore/templates.md for the project resources it names
 name: Linux Updates
 app: ansible
 playbook: ansible/playbooks/maintenance/update-linux.yaml

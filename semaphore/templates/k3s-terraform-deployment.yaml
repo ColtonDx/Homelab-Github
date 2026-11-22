@@ -1,5 +1,5 @@
 ---
-# Semaphore task template K3s | Terraform | Deployment; see semaphore/README.md for the project resources it names
+# Semaphore task template K3s | Terraform | Deployment; see docs/semaphore/templates.md for the project resources it names
 name: K3s | Terraform | Deployment
 description: Plans or applies the legacy K3s nodes through build-project.yaml; an apply then builds the cluster with k3s/initialize.yaml
 view: Kubernetes

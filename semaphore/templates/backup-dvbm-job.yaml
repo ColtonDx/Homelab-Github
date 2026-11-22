@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Backup | DVBM Job; see semaphore/README.md for the project resources it names
+# Semaphore task template Backup | DVBM Job; see docs/semaphore/templates.md for the project resources it names
 name: Backup | DVBM Job
 description: Runs one DVBMv3 backup job now and waits for it to finish
 view: Backups

@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Backup | Gitlab; see semaphore/README.md for the project resources it names
+# Semaphore task template Backup | Gitlab; see docs/semaphore/templates.md for the project resources it names
 name: Backup | Gitlab
 view: Backups
 app: ansible
