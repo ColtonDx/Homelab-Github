@@ -27,10 +27,10 @@
 - name: Install Docker on Debian/Ubuntu
   when: ansible_facts.os_family == "Debian"
   block:
-    # Refreshes a stale or empty package cache so a fresh host can install anything; python3-apt lets Ansible list installed packages
+    # Refreshes a stale or empty package cache so a fresh host can install anything; python3-apt lets Ansible list installed packages, and apt_repository needs gpg, which minimal cloud images leave out
     - name: Install prerequisites (Debian/Ubuntu)
       ansible.builtin.apt:
-        name: [ca-certificates, python3-apt]
+        name: [ca-certificates, gnupg, python3-apt]
         state: present
         update_cache: true
         cache_valid_time: 3600
