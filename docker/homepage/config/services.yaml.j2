@@ -198,6 +198,11 @@
             icon: uptime-kuma.svg
             description: Uptime Monitoring
             siteMonitor: https://kuma.{{ docker_domain }}
+        - Grafana:
+            href: {{ host_url('monitoring') }}
+            icon: grafana.svg
+            description: Metrics and Logs Dashboards
+            siteMonitor: {{ host_url('monitoring') }}/api/health
         - Crowdsec:
             href: https://app.crowdsec.net/
             icon: crowdsec.svg
