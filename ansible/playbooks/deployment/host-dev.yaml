@@ -1,0 +1,11 @@
+---
+# Prepares development hosts: build tools, mise, rootless Podman, lingering, a privileged-group check, and on test hosts one user per project
+# Inventory: hosts in dev_hosts (or target_hosts); every setting is in ansible/roles/dev_host/defaults/main.yaml and docs/inventory/dev-hosts.md
+- name: Prepare development hosts
+  hosts: "{{ target_hosts | default('dev_hosts') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    # A path rather than a name, so the role resolves however Semaphore starts the run
+    - role: ../../roles/dev_host  # noqa: role-name[path]

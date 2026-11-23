@@ -1,0 +1,12 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: dev_host
+  author: homelab
+  description: Prepares Debian development hosts with build tools, mise and rootless Podman, and optionally one user per project for test deploys
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

@@ -1,0 +1,19 @@
+---
+# Semaphore task template Host | Dev; see docs/semaphore/templates.md for the project resources it names
+name: Host | Dev
+app: ansible
+playbook: ansible/playbooks/deployment/host-dev.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Empty
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: Which development hosts to prepare; a host or group name from the inventory
+    type: enum
+    required: true
+    default_value: dev_hosts
+    values:
+      - name: 'Group: Development hosts'
+        value: dev_hosts

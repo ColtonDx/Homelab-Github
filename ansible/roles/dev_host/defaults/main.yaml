@@ -1,0 +1,52 @@
+---
+# Every setting the dev_host role reads; override any of them in the inventory
+
+# Build tools for compiling language runtimes and native packages, plus rootless Podman and what it needs: uidmap for user namespaces, passt for networking, dbus-user-session for systemctl --user
+dev_host_packages:
+  - git
+  - build-essential
+  - pkg-config
+  - curl
+  - unzip
+  - ca-certificates
+  - podman
+  - uidmap
+  - passt
+  - dbus-user-session
+
+# mise release installed to /usr/local/bin; changing it needs its sha256 added to dev_host_mise_checksums
+dev_host_mise_version: "2026.11.5"
+# sha256 of each release binary by version and CPU, from the release's SHASUMS256.txt and checked against the download, so a swapped file on the release server is refused
+dev_host_mise_checksums:
+  "2026.11.5":
+    x64: 7a5b051d6f17d335c502f8047a5175cf3103f347d91942771c60da4e302ebcb0
+    arm64: 3cb907fc1d3f033afab40b4a8efca4fd71440bf91b63bfca3beb3302b0f3a6d5
+
+# PATH for SSH and login sessions, set through pam_env so non-interactive commands find mise's shims; @{HOME} is expanded per user by pam_env
+dev_host_pam_path: "@{HOME}/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Subordinate ID ranges useradd hands out automatically, so every new user can run rootless containers
+dev_host_subid_min: 100000
+dev_host_subid_max: 600100000
+dev_host_subid_count: 65536
+
+# Accounts in this UID range are people or project users: they get lingering and are checked for privileged groups
+dev_host_uid_min: 1000
+dev_host_uid_max: 59999
+
+# Groups that give root or near-root access; the run fails if a user in the range above is in one
+dev_host_privileged_groups: [sudo, docker, adm, disk, lxd, libvirt, wheel]
+# Accounts left out of that check, such as the admin account Ansible logs in as
+dev_host_admin_users: []
+
+# True on hosts where this role owns the project users below; false leaves every account alone
+dev_host_manage_users: false
+# One user per project, dev-<name>: a list of { name, port_base }; port_base starts that project's block of ports and is set explicitly, so reordering never renumbers them
+dev_host_projects: []
+# Ports each project gets from its port_base, and the range every block must sit in
+dev_host_port_block: 10
+dev_host_port_range: [20000, 29999]
+# Public key every project user accepts, for the deploy job; empty means no SSH key logins to project users
+dev_host_deploy_key: ""
+# Address the deploy key may connect from (authorized_keys from=); required when dev_host_deploy_key is set
+dev_host_deploy_key_from: ""

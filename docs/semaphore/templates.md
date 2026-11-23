@@ -51,6 +51,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](../../semaphore/templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](../../semaphore/templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
 | Host \| Docker | (none) | [host-docker.yaml](../../semaphore/templates/host-docker.yaml) | `ansible/playbooks/deployment/host-docker.yaml` |
+| Host \| Dev | (none) | [host-dev.yaml](../../semaphore/templates/host-dev.yaml) | `ansible/playbooks/deployment/host-dev.yaml` |
 | Linux Disk Utilization Check | (none) | [linux-disk-utilization-check.yaml](../../semaphore/templates/linux-disk-utilization-check.yaml) | `ansible/playbooks/maintenance/disk-usage-alert.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](../../semaphore/templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](../../semaphore/templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |
