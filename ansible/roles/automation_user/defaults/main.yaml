@@ -1,0 +1,7 @@
+---
+# Account the automation runner connects as
+automation_user_name: ansible
+# Public key(s) allowed to log in as it: one string (several keys on separate lines) or a list. They replace the account's
+# authorized_keys, so any other key stops working. Defaults to the inventory's ssh_public_key_<user>, the same variable
+# rotate-ssh-keys.yaml reads, so a key rotation and a rerun of this role agree
+automation_user_keys: "{{ lookup('ansible.builtin.vars', 'ssh_public_key_' ~ (automation_user_name | regex_replace('[^A-Za-z0-9_]', '_')), default='') }}"
