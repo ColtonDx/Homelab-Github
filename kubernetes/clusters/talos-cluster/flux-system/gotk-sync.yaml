@@ -10,6 +10,11 @@ spec:
   ref:
     branch: main
   url: https://github.com/ColtonDx/Homelab-Github.git
+  # Only a main whose head commit GitHub signed is applied; anything pushed around the pull-request flow is refused
+  verify:
+    mode: HEAD
+    secretRef:
+      name: github-signing-key
 ---
 # Applies this cluster's folder, which in turn applies Flux itself, the infrastructure and the apps
 apiVersion: kustomize.toolkit.fluxcd.io/v1
