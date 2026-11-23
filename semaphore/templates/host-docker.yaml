@@ -1,0 +1,17 @@
+---
+# Semaphore task template Host | Docker; see docs/semaphore/templates.md for the project resources it names
+name: Host | Docker
+app: ansible
+playbook: ansible/playbooks/deployment/host-docker.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: Which hosts get Docker; a host or group name from the inventory
+    type: enum
+    required: true
+    default_value: docker
+    values:
+      - name: 'Group: Docker hosts'
+        value: docker
