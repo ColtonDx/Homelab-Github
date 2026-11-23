@@ -2,15 +2,34 @@ services:
   docker-socket-proxy:
     container_name: docker-socket-proxy
     restart: unless-stopped
-    image: tecnativa/docker-socket-proxy:latest
+    # Filters Docker API requests by method, path and source address; pinned by digest so updates are deliberate
+    image: wollomatic/socket-proxy:1.13.2@sha256:ff95d6ff6c27853005ef85eb8f4ab5923dc3d2f1e055f98fb6aeeaceec3fe848
+    # Root only to open the root-owned socket; every capability is dropped and the filesystem is read-only
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
-      # Read-only: listing and inspecting containers is all Uptime Kuma's container checks need; everything else, including every write, stays refused
-      - CONTAINERS=1
-      - INFO=1
-      - POST=0
+      # Only the addresses allowed to call the API (Uptime Kuma), from the inventory; everyone else is refused
+      SP_ALLOWFROM: ${DOCKER_API_CLIENTS}
+      # Exactly the two calls Uptime Kuma makes: list containers, and inspect one container; every other path and method is refused
+      SP_ALLOW_GET: (/v[0-9.]+)?/containers(/[a-zA-Z0-9_.-]+)?/json
+      SP_LISTENIP: 0.0.0.0
+      SP_ALLOWHEALTHCHECK: "true"
+      # Exits if the Docker socket stops answering, so the restart policy brings it back
+      SP_WATCHDOGINTERVAL: "3600"
+      SP_STOPONWATCHDOG: "true"
+      # Refused requests are logged with their source, which shows who tried
+      SP_LOGLEVEL: INFO
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro # The host's Docker API, read through the proxy only
     ports:
-      - "2375:2375" # Uptime Kuma connects here; the one stack besides Nginx Proxy Manager that publishes a port, since Kuma runs on another host
+      # IPv4 only: IPv6 connections would arrive from Docker's own proxy, hiding the real source address from the allowlist
+      - "0.0.0.0:2375:2375"
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
     labels:
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
