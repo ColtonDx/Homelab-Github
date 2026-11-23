@@ -166,6 +166,6 @@ jobs:
           echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
           tar -xzf trivy.tar.gz trivy && rm trivy.tar.gz
 
-      # Accepted findings, each with its reason, live in .trivyignore
+      # Accepted findings, each limited to its files and with its reason, live in .trivyignore.yaml
       - name: Scan the infrastructure code
-        run: ./trivy config --skip-check-update --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore .
+        run: ./trivy config --skip-check-update --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml .
