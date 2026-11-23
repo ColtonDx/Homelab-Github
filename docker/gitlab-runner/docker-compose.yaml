@@ -2,7 +2,8 @@ services:
   gitlab-runner:
     container_name: gitlab-runner
     restart: unless-stopped
-    image: gitlab/gitlab-runner:latest
+    # Pinned by digest to the version that was running; updates arrive as reviewed changes
+    image: gitlab/gitlab-runner:v19.6.0@sha256:fb454a097fd26ea329b0234d6d82b53ae25f672bd625c278eaaee683a00f2507
     environment:
       # GitLab's address, from docker_app_vars.gitlab-runner in the inventory
       - GITLAB_URL=${GITLAB_URL}
