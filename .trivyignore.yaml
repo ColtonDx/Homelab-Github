@@ -1,3 +1,4 @@
+---
 # Accepted trivy config findings, each limited to the files it covers and with the reason it is accepted
 # The same finding anywhere else still fails CI
 misconfigurations:
