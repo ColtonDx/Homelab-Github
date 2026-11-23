@@ -24,8 +24,6 @@ survey_vars:
         value: terraform/proxmox/vault
       - name: Talos cluster
         value: terraform/proxmox/talos
-      - name: K3s nodes (legacy)
-        value: terraform/proxmox/k3s
       - name: Malcolm VM
         value: terraform/proxmox/malcolm
   - name: tf_action

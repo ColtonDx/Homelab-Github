@@ -15,7 +15,7 @@ PY
 # An empty inventory with the groups the playbooks target, so host patterns resolve without the private inventory
 inventory=$(mktemp)
 trap 'rm -f "$inventory"' EXIT
-printf '[proxmox]\n[talos_cluster]\n[k3s_nodes]\n[linux]\n[docker]\n[firewalls]\n' > "$inventory"
+printf '[proxmox]\n[talos_cluster]\n[linux]\n[docker]\n[firewalls]\n' > "$inventory"
 
 status=0
 for playbook in $playbooks; do

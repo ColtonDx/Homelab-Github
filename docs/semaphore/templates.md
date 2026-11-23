@@ -45,9 +45,6 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Proxmox \| Terraform - Delete PVE VM | Proxmox | [proxmox-terraform-delete-pve-vm.yaml](../../semaphore/templates/proxmox-terraform-delete-pve-vm.yaml) | `ansible/playbooks/terraform-adhoc-vm/delete-vm.yaml` |
 | Proxmox \| Update Nodes | Proxmox | [proxmox-update-nodes.yaml](../../semaphore/templates/proxmox-update-nodes.yaml) | `ansible/playbooks/proxmox/update-proxmox.yaml` |
 | Terraform \| Project Runner | Proxmox | [terraform-project-runner.yaml](../../semaphore/templates/terraform-project-runner.yaml) | `ansible/playbooks/terraform/build-project.yaml` |
-| K3s \| Ansible \| Configure Cluster | Kubernetes | [k3s-ansible-configure-cluster.yaml](../../semaphore/templates/k3s-ansible-configure-cluster.yaml) | `ansible/playbooks/k3s/configure-cluster.yaml` |
-| K3s \| Ansible \| Initialize | Kubernetes | [k3s-ansible-initialize.yaml](../../semaphore/templates/k3s-ansible-initialize.yaml) | `ansible/playbooks/k3s/initialize.yaml` |
-| K3s \| Terraform \| Deployment | Kubernetes | [k3s-terraform-deployment.yaml](../../semaphore/templates/k3s-terraform-deployment.yaml) | `ansible/playbooks/terraform/build-project.yaml` |
 | Netbox \| Seed | Netbox | [netbox-seed.yaml](../../semaphore/templates/netbox-seed.yaml) | `ansible/playbooks/netbox/seed.yaml` |
 | Netbox \| Sync | Netbox | [netbox-sync.yaml](../../semaphore/templates/netbox-sync.yaml) | `ansible/playbooks/netbox/sync-netbox.yaml` |
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](../../semaphore/templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
