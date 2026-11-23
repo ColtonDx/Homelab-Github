@@ -116,11 +116,15 @@
     # Runs still going, and the recent successful runs of their templates to compare against; usually there are none
     - name: Collect the runs still in progress
       ansible.builtin.set_fact:
-        sj_active: "{{ sj_active | default([]) + (item.json | default([]) | selectattr('status', 'in', ['starting', 'running']) | selectattr('start', 'string') | list) }}"
-        sj_recent: "{{ sj_recent | default([]) + (item.json | default([]) | selectattr('status', 'equalto', 'success') | selectattr('start', 'string') | selectattr('end', 'string') | list)[:10] }}"
+        sj_active: "{{ sj_active | default([]) + sj_item_active }}"
+        sj_recent: "{{ sj_recent | default([]) + sj_item_recent }}"
       loop: "{{ sj_runs.results }}"
       loop_control:
         label: "{{ item.item.project }}/{{ item.item.template }}"
+      # Worked out per template in vars, the same way as the pairing step above, which renders reliably on newer ansible-core
+      vars:
+        sj_item_active: "{{ item.json | selectattr('status', 'in', ['starting', 'running']) | selectattr('start', 'string') | list }}"
+        sj_item_recent: "{{ (item.json | selectattr('status', 'equalto', 'success') | selectattr('start', 'string') | selectattr('end', 'string') | list)[:10] }}"
 
     # The longest recent successful run per template, only for templates with a run in progress
     - name: Work out how long each busy template usually takes
