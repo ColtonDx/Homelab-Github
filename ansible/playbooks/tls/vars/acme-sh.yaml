@@ -1,0 +1,5 @@
+---
+# The acme.sh release installed on hosts that do not have it yet, and the sha256 of its GitHub source archive
+# A new version needs both values updated together; the download is refused when the checksum does not match
+acme_sh_version: "3.1.6"
+acme_sh_sha256: "0d3f9000ac44a6331314742a88c475f79134e24fc991997883652adc59efc486"

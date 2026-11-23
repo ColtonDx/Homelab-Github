@@ -66,11 +66,18 @@
     group: root
     mode: "0700"
 
-# Fetch acme.sh on first run only
+# The pinned acme.sh release and its checksum
+- name: Load the pinned acme.sh version
+  ansible.builtin.include_vars:
+    file: ../vars/acme-sh.yaml
+  when: not acme_sh_stat.stat.exists
+
+# Fetch the pinned release on first run only; a tampered or corrupted download fails the checksum
 - name: Download acme.sh source archive
   ansible.builtin.get_url:
-    url: https://github.com/acmesh-official/acme.sh/archive/master.tar.gz
+    url: "https://github.com/acmesh-official/acme.sh/archive/refs/tags/{{ acme_sh_version }}.tar.gz"
     dest: /root/.acme.sh/acme.tar.gz
+    checksum: "sha256:{{ acme_sh_sha256 }}"
     mode: "0600"
   when: not acme_sh_stat.stat.exists
 
