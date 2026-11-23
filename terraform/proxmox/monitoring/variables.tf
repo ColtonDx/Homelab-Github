@@ -69,6 +69,12 @@ variable "description" {
   default     = "Central logging and monitoring (Grafana, Loki, Prometheus), managed by Terraform"
 }
 
+variable "tags" {
+  type        = string
+  description = "Semicolon-separated Proxmox tags"
+  default     = "terraform"
+}
+
 variable "cores" {
   type        = number
   description = "CPU cores"
