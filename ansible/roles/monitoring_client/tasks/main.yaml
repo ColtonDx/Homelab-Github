@@ -5,7 +5,8 @@
     that:
       - monitoring_client_server | length > 0
       - ansible_facts.os_family == 'Debian'
-    fail_msg: "Set monitoring_client_server to the monitoring server's address; only Debian and Ubuntu hosts are supported."
+      - monitoring_client_scheme != 'https' or monitoring_client_push_password | length > 0
+    fail_msg: "Set monitoring_client_server to the monitoring server's address and, for https, load monitoring_client_push_password from Vault; only Debian and Ubuntu hosts are supported."
     quiet: true
 
 # gnupg lets apt_repository check the key, which minimal cloud images leave out
@@ -76,6 +77,8 @@
     mode: "0640"
     # Alloy's own parser rejects a broken file before it replaces the working one
     validate: alloy fmt %s
+  # The file holds the push password, so its content never reaches the run output
+  no_log: true
   notify: Restart alloy
 
 # The package restarts Alloy on failure; this makes sure it is on and starts at boot

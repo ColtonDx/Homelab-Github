@@ -42,8 +42,10 @@ services:
     container_name: loki
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yaml"]
+{% if not monitoring_server_gateway | bool %}
     ports:
       - "{{ monitoring_server_loki_port }}:3100"
+{% endif %}
     volumes:
       - loki:/loki
       - ./loki/config.yaml:/etc/loki/config.yaml:ro
@@ -58,8 +60,10 @@ services:
       - --storage.tsdb.retention.time={{ monitoring_server_retention_days }}d
       # Clients' Alloy agents push metrics here instead of being scraped
       - --web.enable-remote-write-receiver
+{% if not monitoring_server_gateway | bool %}
     ports:
       - "{{ monitoring_server_prometheus_port }}:9090"
+{% endif %}
     volumes:
       - prometheus:/prometheus
       - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
@@ -83,6 +87,26 @@ services:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
     depends_on: [loki]
 
+{% if monitoring_server_gateway | bool %}
+  # The only way in to Loki and Prometheus from outside the stack: HTTPS with Grafana's certificate, and basic auth split into push and read
+  gateway:
+    image: {{ monitoring_server_gateway_image }}
+    container_name: monitoring-gateway
+    restart: unless-stopped
+    ports:
+      - "{{ monitoring_server_loki_port }}:3100"
+      - "{{ monitoring_server_prometheus_port }}:9090"
+    volumes:
+      - ./gateway/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      - {{ monitoring_server_tls_dir }}:/etc/nginx/tls:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--no-check-certificate", "https://127.0.0.1:9090/gateway-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on: [loki, prometheus]
+
+{% endif %}
 {% if monitoring_server_pve_targets %}
   # Reads the Proxmox API for Prometheus; reachable only on the stack's network
   pve-exporter:

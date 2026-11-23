@@ -1,10 +1,22 @@
 ---
 # Installs Grafana Alloy on Linux hosts so they ship metrics and logs (journal, plus Docker containers where present) to the monitoring server; safe to re-run
+# Vault: MONITORING_PUSH_PASSWORD at monitoring (vault_monitoring_path renames it) when sending over https; connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_clients (or target_hosts) and monitoring_client_server; every setting is in ansible/roles/monitoring_client/defaults/main.yaml
 - name: Ship host metrics and logs to the monitoring server
   hosts: "{{ target_hosts | default('monitoring_clients') }}"
   become: true
   gather_facts: true
+  vars:
+    vault_secrets:
+      - path: "{{ vault_monitoring_path | default('monitoring') }}"
+        field: MONITORING_PUSH_PASSWORD
+        var: monitoring_client_push_password
+
+  pre_tasks:
+    # The push password for the server's gateway
+    - name: Load the push password from Vault
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      when: monitoring_client_scheme | default('https') == 'https'
 
   roles:
     # A path rather than a name, so the role resolves however Semaphore starts the run

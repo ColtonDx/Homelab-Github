@@ -36,7 +36,14 @@ prometheus.remote_write "server" {
   external_labels = { host = "{{ monitoring_client_host_label }}" }
 
   endpoint {
-    url = "http://{{ monitoring_client_server }}:{{ monitoring_client_prometheus_port }}/api/v1/write"
+    url = "{{ monitoring_client_scheme }}://{{ monitoring_client_server }}:{{ monitoring_client_prometheus_port }}/api/v1/write"
+{% if monitoring_client_scheme == 'https' %}
+
+    basic_auth {
+      username = "push"
+      password = {{ monitoring_client_push_password | to_json }}
+    }
+{% endif %}
   }
 }
 
@@ -44,7 +51,14 @@ loki.write "server" {
   external_labels = { host = "{{ monitoring_client_host_label }}" }
 
   endpoint {
-    url = "http://{{ monitoring_client_server }}:{{ monitoring_client_loki_port }}/loki/api/v1/push"
+    url = "{{ monitoring_client_scheme }}://{{ monitoring_client_server }}:{{ monitoring_client_loki_port }}/loki/api/v1/push"
+{% if monitoring_client_scheme == 'https' %}
+
+    basic_auth {
+      username = "push"
+      password = {{ monitoring_client_push_password | to_json }}
+    }
+{% endif %}
   }
 }
 

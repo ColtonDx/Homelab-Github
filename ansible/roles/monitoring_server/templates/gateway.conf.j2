@@ -1,0 +1,69 @@
+# {{ ansible_managed }}
+# HTTPS gateway in front of Loki and Prometheus: the push user may only send metrics and logs, the read user may only query
+
+# 1 when the request carries the push or read credentials; compared as whole Authorization headers, so no password file is needed
+map $http_authorization $gateway_push {
+    default 0;
+    "Basic {{ ('push:' ~ monitoring_server_push_password) | b64encode }}" 1;
+}
+map $http_authorization $gateway_read {
+    default 0;
+    "Basic {{ ('read:' ~ monitoring_server_read_password) | b64encode }}" 1;
+}
+
+# Settings both listeners share; the certificate is Grafana's, renewed by acme.sh, which restarts this container afterwards
+ssl_certificate /etc/nginx/tls/tls.crt;
+ssl_certificate_key /etc/nginx/tls/tls.key;
+ssl_protocols TLSv1.2 TLSv1.3;
+proxy_http_version 1.1;
+proxy_set_header Host $host;
+proxy_read_timeout 300s;
+# Batches of metrics and logs can be several megabytes
+client_max_body_size 64m;
+
+# Prometheus: remote write from the hosts' Alloy agents, queries and the UI for the read user
+server {
+    listen 9090 ssl;
+    server_name _;
+
+    # Unauthenticated, for the container's own health check; reveals nothing
+    location = /gateway-health {
+        return 200 "ok\n";
+    }
+
+    location = /api/v1/write {
+        if ($gateway_push = 0) {
+            return 401;
+        }
+        proxy_pass http://prometheus:9090;
+    }
+
+    location / {
+        if ($gateway_read = 0) {
+            add_header WWW-Authenticate 'Basic realm="prometheus"' always;
+            return 401;
+        }
+        proxy_pass http://prometheus:9090;
+    }
+}
+
+# Loki: log pushes from the hosts' Alloy agents, queries for the read user
+server {
+    listen 3100 ssl;
+    server_name _;
+
+    location = /loki/api/v1/push {
+        if ($gateway_push = 0) {
+            return 401;
+        }
+        proxy_pass http://loki:3100;
+    }
+
+    location / {
+        if ($gateway_read = 0) {
+            add_header WWW-Authenticate 'Basic realm="loki"' always;
+            return 401;
+        }
+        proxy_pass http://loki:3100;
+    }
+}

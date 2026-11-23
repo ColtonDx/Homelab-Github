@@ -1,6 +1,9 @@
 ---
-# Address of the monitoring server (its Loki and Prometheus ports); required
+# Address of the monitoring server (its Loki and Prometheus ports); required. With HTTPS it must be the name on the server's certificate
 monitoring_client_server: ""
+# https sends to the server's gateway with the push user's password (from Vault: MONITORING_PUSH_PASSWORD at monitoring); http for a server without one
+monitoring_client_scheme: https
+monitoring_client_push_password: ""
 monitoring_client_loki_port: 3100
 monitoring_client_prometheus_port: 9090
 
