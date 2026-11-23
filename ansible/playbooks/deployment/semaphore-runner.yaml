@@ -19,6 +19,17 @@
     # talosctl should be within one minor release of the cluster, and kubectl within one of Kubernetes
     runner_talosctl_version: "1.14.1"
     runner_kubectl_version: "1.37.1"
+    # sha256 of each download, by tool, version and CPU, recorded here so a compromised release server cannot swap both
+    # file and checksum; a version without an entry fails. Terraform's came from HashiCorp's GPG-signed SHA256SUMS
+    runner_checksums:
+      terraform:
+        "1.16.4": {amd64: dc94af0eef1147718ad7c8daea792ed199e3e0492eec180d0adafa2a65a879df, arm64: 8263f301cb1a24489a4adeed147bf28504053f77237b3ea97a0ef2972659de30}
+      talosctl:
+        "1.14.1": {amd64: 7233ece94c94296a033a6ddb5efe0baf508a94c71de7e6c7b286500705924208, arm64: 812406cfc3bd83a937108d5f4872a48645b96de3c01e1f3d82445e8cbd1e7a21}
+      kubectl:
+        "1.37.1": {amd64: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8, arm64: ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7}
+      semaphore:
+        "2.19.12": {amd64: 1e8e283bc822191e2ea10127996e35cbc2f77577ed8b15474c65375b0e1104d2, arm64: 75a930c8bc8a96a5fa2199bafb6f969fd5ada58f1e215c6a63ea074778cef7ac}
     # ansible-core 2.20 and later need Python 3.12, so hosts on Python 3.11 (e.g. Debian 12) get the 2.19 series
     runner_python_packages:
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
@@ -160,7 +171,7 @@
       failed_when: false
       check_mode: false
 
-    # Verified against HashiCorp's published checksums
+    # Verified against the checksum recorded in runner_checksums
     - name: Install Terraform
       when: (runner_terraform_current.stdout | default('{}', true) | from_json).terraform_version | default('') != runner_terraform_version
       block:
@@ -168,7 +179,7 @@
         - name: Download Terraform
           ansible.builtin.get_url:
             url: "{{ base }}_linux_{{ runner_arch }}.zip"
-            checksum: "sha256:{{ base }}_SHA256SUMS"
+            checksum: "sha256:{{ runner_checksums.terraform[runner_terraform_version][runner_arch] }}"
             dest: "{{ runner_opt }}/terraform.zip"
             mode: "0644"
           vars:
@@ -192,11 +203,11 @@
       failed_when: false
       check_mode: false
 
-    # A single binary, verified against the release's published checksums
+    # A single binary, verified against the checksum recorded in runner_checksums
     - name: Install talosctl
       ansible.builtin.get_url:
         url: "{{ base }}/talosctl-linux-{{ runner_arch }}"
-        checksum: "sha256:{{ base }}/sha256sum.txt"
+        checksum: "sha256:{{ runner_checksums.talosctl[runner_talosctl_version][runner_arch] }}"
         dest: /usr/local/bin/talosctl
         mode: "0755"
         force: true
@@ -213,11 +224,11 @@
       failed_when: false
       check_mode: false
 
-    # A single binary, verified against the checksum published beside it
+    # A single binary, verified against the checksum recorded in runner_checksums
     - name: Install kubectl
       ansible.builtin.get_url:
         url: "{{ base }}/kubectl"
-        checksum: "sha256:{{ base }}/kubectl.sha256"
+        checksum: "sha256:{{ runner_checksums.kubectl[runner_kubectl_version][runner_arch] }}"
         dest: /usr/local/bin/kubectl
         mode: "0755"
         force: true
@@ -234,7 +245,7 @@
       failed_when: false
       check_mode: false
 
-    # Verified against the release's published checksums
+    # Verified against the checksum recorded in runner_checksums
     - name: Install Semaphore
       when: runner_semaphore_current.stdout | default('') is not match(runner_semaphore_version | regex_escape ~ '-')
       block:
@@ -242,7 +253,7 @@
         - name: Download Semaphore
           ansible.builtin.get_url:
             url: "{{ base }}/semaphore_{{ runner_semaphore_version }}_linux_{{ runner_arch }}.tar.gz"
-            checksum: "sha256:{{ base }}/semaphore_{{ runner_semaphore_version }}_checksums.txt"
+            checksum: "sha256:{{ runner_checksums.semaphore[runner_semaphore_version][runner_arch] }}"
             dest: "{{ runner_opt }}/semaphore.tar.gz"
             mode: "0644"
           vars:
