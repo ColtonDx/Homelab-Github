@@ -73,14 +73,15 @@
     stack_missing: "{{ compose_vars | reject('in', stack_values) | list }}"
   when: not (allow_missing_vars | default(false) | bool)
 
-# Portainer takes the env as a list of name and value pairs
+# Portainer takes the env as a list of name and value pairs and hands it to Compose as an unquoted env file,
+# where $ starts a variable; doubling it keeps values such as bcrypt hashes intact
 - name: Build Portainer env list
   ansible.builtin.set_fact:
     stack_env: >-
       {%- set env_list = [] -%}
       {%- for var in compose_vars -%}
         {%- if var in stack_values -%}
-          {%- set _ = env_list.append({'name': var, 'value': stack_values[var] | string}) -%}
+          {%- set _ = env_list.append({'name': var, 'value': stack_values[var] | string | replace('$', '$$')}) -%}
         {%- endif -%}
       {%- endfor -%}
       {{ env_list }}
