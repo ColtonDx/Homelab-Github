@@ -1,0 +1,71 @@
+---
+# Installs an APT repository's signing key only when its fingerprint is one recorded in code, so a key swapped on a compromised download server is refused
+# Needs: apt_key_url, apt_key_dest, apt_key_fingerprints (allowed primary key fingerprints, 40 hex characters, no spaces)
+# Fetched on every run: a vendor's key rotation fails here with the new fingerprint until it is checked and recorded
+# Sets: apt_key_install, whose changed status says whether the trusted key file changed
+
+# gpg reads the downloaded key's fingerprint
+- name: Ensure gpg is installed
+  ansible.builtin.apt:
+    name: gnupg
+    state: present
+
+# A scratch copy that is checked before it can replace the trusted key
+- name: Create a scratch file for the downloaded key
+  ansible.builtin.tempfile:
+    suffix: .asc
+  register: apt_key_tmp
+  changed_when: false
+  check_mode: false
+
+# Download, check the fingerprint, then install; the scratch copy is removed whatever happens
+- name: Fetch and verify the signing key
+  block:
+    - name: Download the signing key
+      ansible.builtin.get_url:
+        url: "{{ apt_key_url }}"
+        dest: "{{ apt_key_tmp.path }}"
+        mode: "0644"
+        force: true
+      changed_when: false
+      check_mode: false
+
+    - name: Read the downloaded key's fingerprints
+      ansible.builtin.command:
+        argv: [gpg, --show-keys, --with-colons, "{{ apt_key_tmp.path }}"]
+      register: apt_key_show
+      changed_when: false
+      check_mode: false
+
+    # In gpg's colon output a primary key's fingerprint line directly follows its pub line; subkeys follow sub lines
+    - name: Refuse a key whose fingerprint is not recorded
+      ansible.builtin.assert:
+        that:
+          - apt_key_found | length > 0
+          - apt_key_found | difference(apt_key_fingerprints) | length == 0
+        fail_msg: >-
+          The signing key at {{ apt_key_url }} has fingerprint(s) {{ apt_key_found | join(', ') }},
+          expected one of {{ apt_key_fingerprints | join(', ') }}. If the vendor rotated its key,
+          confirm the new fingerprint on the vendor's site before recording it.
+        quiet: true
+      vars:
+        apt_key_found: "{{ apt_key_show.stdout | regex_findall('(?m)^pub:[^\\n]*\\nfpr:+([0-9A-F]{40}):') }}"
+
+    # Only a different key counts as a change
+    - name: Install the verified signing key
+      ansible.builtin.copy:
+        src: "{{ apt_key_tmp.path }}"
+        dest: "{{ apt_key_dest }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      register: apt_key_install
+
+  always:
+    - name: Remove the scratch copy of the key
+      ansible.builtin.file:
+        path: "{{ apt_key_tmp.path }}"
+        state: absent
+      changed_when: false
+      check_mode: false

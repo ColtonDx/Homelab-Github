@@ -24,13 +24,13 @@
     group: root
     mode: "0755"
 
-# Downloaded once; force: false keeps re-runs from fetching it again
+# Installed only when its fingerprint matches Grafana's current key; gpg.key holds only that key, unlike gpg-full.key
 - name: Add Grafana's apt signing key
-  ansible.builtin.get_url:
-    url: https://apt.grafana.com/gpg.key
-    dest: /etc/apt/keyrings/grafana.asc
-    mode: "0644"
-    force: false
+  ansible.builtin.include_tasks: ../../../tasks/apt_signing_key.yaml
+  vars:
+    apt_key_url: https://apt.grafana.com/gpg.key
+    apt_key_dest: /etc/apt/keyrings/grafana.asc
+    apt_key_fingerprints: [B53AE77BADB630A683046005963FA27710458545]
 
 - name: Add Grafana's apt repository
   ansible.builtin.apt_repository:
