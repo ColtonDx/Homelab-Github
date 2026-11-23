@@ -145,8 +145,10 @@
         ANSIBLE_COLLECTIONS_PATH: "{{ runner_collections }}"
       register: runner_galaxy_list
       changed_when: false
+      # Read-only, so it also runs in check mode
+      check_mode: false
 
-    # Names each pin that is missing or at another version, with what ansible-galaxy printed
+    # Names each pin that is missing or at another version, with what ansible-galaxy printed; skipped in check mode, where nothing was installed
     - name: Require every pinned collection
       ansible.builtin.assert:
         that:
@@ -155,6 +157,7 @@
           Not installed at the pinned version: {{ runner_galaxy_missing | join(', ') }}.
           ansible-galaxy said: {{ (runner_galaxy.stdout ~ ' ' ~ runner_galaxy.stderr) | trim | truncate(800) }}
         quiet: true
+      when: not ansible_check_mode
       vars:
         runner_galaxy_found: "{{ runner_galaxy_list.stdout | from_json | dict2items | map(attribute='value') | combine }}"
         runner_galaxy_missing: >-
@@ -282,6 +285,8 @@
       register: runner_existing_exec
       changed_when: false
       failed_when: false
+      # Read-only, so check mode also sees the existing registration
+      check_mode: false
       when: not runner_token_existing.stat.exists
 
     # Only a runner set up some other way has a config somewhere else; runner_previous_config names it when systemd has already reloaded the new unit
