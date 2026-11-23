@@ -12,14 +12,10 @@ services:
       - MIGRATE_ENCRYPTED_DB=true
 
       # ── Allowed hosts / CORS ──────────────────────────────────────────────
-      # Restrict which Host header values are accepted (default: any).
-      # Include every hostname/IP used to reach this container, e.g.:
-      #   ALLOWED_HOSTS=myhost.example.com,localhost
-      # - ALLOWED_HOSTS=*
-      #
-      # Restrict CORS origins (default: any).
-      #   ALLOWED_ORIGINS=https://myhost.example.com
-      # - ALLOWED_ORIGINS=*
+      # Host names DVBM answers to and origins its API accepts, from the inventory; both default to any, so a redeploy before the
+      # values are pushed keeps working. The built-in health check calls 127.0.0.1, so the host list must include it
+      - ALLOWED_HOSTS=${DVBM_ALLOWED_HOSTS:-*}
+      - ALLOWED_ORIGINS=${DVBM_ALLOWED_ORIGINS:-*}
 
       # ── HTTPS / TLS ───────────────────────────────────────────────────────
       # Enabled by default. A self-signed cert is generated on first start

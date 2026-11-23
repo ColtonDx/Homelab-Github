@@ -1,6 +1,6 @@
 ---
 # Creates a DVBMv3 backup job for a stack's Backup label, unless a job of that name already exists
-# Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_storage_id, dvbm_schedule_id, dvbm_retention_id, dvbm_validate_certs (default false)
+# Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_storage_id, dvbm_schedule_id, dvbm_retention_id, dvbm_validate_certs (default true; set false only for a self-signed DVBM)
 
 # Log in with the app password to get a bearer token
 - name: Authenticate with DVBMv3
@@ -11,7 +11,7 @@
     body:
       password: "{{ dvbm_password }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_auth
   retries: 5
   delay: 3
@@ -32,7 +32,7 @@
     headers:
       Authorization: "Bearer {{ dvbm_token }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_jobs
 
 # Empty when this stack has no job yet
@@ -66,7 +66,7 @@
         | combine({'retention_id': dvbm_retention_id} if dvbm_retention_id is defined else {})
       }}
     status_code: 201
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_create_result
   when: dvbm_existing_job == {}
   no_log: true
