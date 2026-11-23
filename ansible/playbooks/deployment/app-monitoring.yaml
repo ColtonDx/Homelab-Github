@@ -4,6 +4,8 @@
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
 # With a Grafana domain: MONITORING_PUSH_PASSWORD and MONITORING_READ_PASSWORD at monitoring (vault_monitoring_path renames it) for the Loki/Prometheus gateway
 # Proxmox metrics: set monitoring_server_pve_targets; needs PROXMOX_GRAFANA_TOKEN_ID and PROXMOX_GRAFANA_TOKEN_SECRET (a read-only PVEAuditor token) at proxmox
+# OPNsense metrics: set monitoring_server_opnsense_address; needs OPNSENSE_GRAFANA_API_KEY and OPNSENSE_GRAFANA_API_SECRET (a read-only API user) at opnsense
+# GeoIP for firewall logs: set monitoring_server_geoip; needs MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY at maxmind
 # Extra scrape jobs (monitoring_server_scrape_jobs) can name a bearer token by vault_path and vault_field
 # HTTPS: set monitoring_server_grafana_domain and this issues Grafana's certificate with ACME, which also needs CF_API and CF_EMAIL at cloudflare
 - name: Install the monitoring stack
@@ -17,6 +19,8 @@
       {{ monitoring_vault_secrets
          + (monitoring_acme_secrets + monitoring_gateway_secrets if monitoring_server_grafana_domain | default('') | length > 0 else [])
          + (monitoring_pve_secrets if monitoring_server_pve_targets | default([]) | length > 0 else [])
+         + (monitoring_opnsense_secrets if monitoring_server_opnsense_address | default('') | length > 0 else [])
+         + (monitoring_maxmind_secrets if monitoring_server_geoip | default(false) | bool else [])
          + monitoring_scrape_secrets | default([]) }}
     monitoring_pve_secrets:
       - path: "{{ vault_proxmox_path | default('proxmox') }}"
@@ -25,6 +29,21 @@
       - path: "{{ vault_proxmox_path | default('proxmox') }}"
         field: PROXMOX_GRAFANA_TOKEN_SECRET
         var: monitoring_server_pve_token_secret
+    # A separate read-only OPNsense API user for the exporter, not the automation user
+    monitoring_opnsense_secrets:
+      - path: "{{ vault_opnsense_path | default('opnsense') }}"
+        field: OPNSENSE_GRAFANA_API_KEY
+        var: monitoring_server_opnsense_api_key
+      - path: "{{ vault_opnsense_path | default('opnsense') }}"
+        field: OPNSENSE_GRAFANA_API_SECRET
+        var: monitoring_server_opnsense_api_secret
+    monitoring_maxmind_secrets:
+      - path: "{{ vault_maxmind_path | default('maxmind') }}"
+        field: MAXMIND_ACCOUNT_ID
+        var: monitoring_server_maxmind_account_id
+      - path: "{{ vault_maxmind_path | default('maxmind') }}"
+        field: MAXMIND_LICENSE_KEY
+        var: monitoring_server_maxmind_license_key
     monitoring_vault_secrets:
       - path: "{{ vault_grafana_path | default('grafana') }}"
         field: GRAFANA_ADMIN_PASSWORD

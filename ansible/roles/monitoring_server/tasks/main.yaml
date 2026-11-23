@@ -10,8 +10,23 @@
       - monitoring_server_pve_targets | length == 0 or '!' in monitoring_server_pve_token_id | default('')
       - monitoring_server_pve_targets | length == 0 or monitoring_server_pve_token_secret | default('') | length > 0
       - not monitoring_server_gateway | bool or (monitoring_server_push_password | length > 0 and monitoring_server_read_password | length > 0)
-    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url, each scrape job's token, with Proxmox targets the Proxmox token id (user@realm!name) and secret, and with the gateway the push and read passwords (from Vault) before applying this role."
+      - monitoring_server_opnsense_address | length == 0
+        or (monitoring_server_opnsense_api_key | default('') | length > 0 and monitoring_server_opnsense_api_secret | default('') | length > 0)
+      - not monitoring_server_geoip | bool
+        or (monitoring_server_maxmind_account_id | default('') | string | length > 0 and monitoring_server_maxmind_license_key | default('') | length > 0)
+    fail_msg: >-
+      Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url, each scrape job's token, with Proxmox targets the Proxmox token id
+      (user@realm!name) and secret, with the gateway the push and read passwords, with an OPNsense address its API key and secret, and with GeoIP the
+      MaxMind account ID and license key (from Vault) before applying this role."
     quiet: true
+
+# The country label is only added on the WAN interfaces, so GeoIP without them would download a database nothing uses
+- name: Check the WAN interfaces are set for GeoIP
+  ansible.builtin.assert:
+    that: monitoring_server_filterlog_wan_interfaces | length > 0
+    fail_msg: "Set monitoring_server_filterlog_wan_interfaces to the firewall's WAN interface names when monitoring_server_geoip is on."
+    quiet: true
+  when: monitoring_server_geoip | bool
 
 # Grafana won't start over HTTPS without its certificate, so stop here rather than leave it restarting
 - name: Check Grafana's certificate is installed
@@ -36,7 +51,7 @@
     owner: root
     group: root
     mode: "0755"
-  loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting, gateway]
+  loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting, gateway, geoip]
 
 # Secrets for the containers, readable by root only; a change recreates Grafana at the compose step, since a restart would keep the old values
 - name: Write the environment file
@@ -58,6 +73,28 @@
     mode: "0600"
   no_log: true
   when: monitoring_server_pve_targets | length > 0
+
+# The OPNsense exporter's API key and secret, kept in their own file so only that container sees them
+- name: Write the OPNsense exporter's environment file
+  ansible.builtin.template:
+    src: opnsense.env.j2
+    dest: "{{ monitoring_server_dir }}/opnsense.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: monitoring_server_opnsense_address | length > 0
+
+# The MaxMind account the GeoIP updater downloads with
+- name: Write the GeoIP updater's environment file
+  ansible.builtin.template:
+    src: geoip.env.j2
+    dest: "{{ monitoring_server_dir }}/geoip.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: monitoring_server_geoip | bool
 
 - name: Write the Compose file
   ansible.builtin.template:
@@ -158,6 +195,34 @@
     group: root
     mode: "0644"
   notify: Restart grafana
+
+# Alloy cannot start its GeoIP stage without the database, so the first download happens before the stack starts
+- name: Download the GeoIP database
+  ansible.builtin.command:
+    argv: [docker, compose, run, --rm, geoipupdate]
+    chdir: "{{ monitoring_server_dir }}"
+    creates: "{{ monitoring_server_dir }}/geoip/GeoLite2-City.mmdb"
+  when: monitoring_server_geoip | bool and not ansible_check_mode
+
+# Weekly refresh: downloads a newer database if there is one and restarts Alloy only when the file changed, since Alloy reads it at start.
+# A failed refresh leaves a failed systemd unit, which the failed-unit alert reports
+- name: Install the GeoIP refresh service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [monitoring-geoip-update.service, monitoring-geoip-update.timer]
+  when: monitoring_server_geoip | bool
+
+- name: Enable the GeoIP refresh timer
+  ansible.builtin.systemd_service:
+    name: monitoring-geoip-update.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: monitoring_server_geoip | bool
 
 # Pulls missing images and starts or recreates any service whose Compose definition changed; reports a change only when a container was created or started
 - name: Start the monitoring stack

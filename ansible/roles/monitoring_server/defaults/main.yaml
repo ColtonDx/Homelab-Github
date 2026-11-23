@@ -10,6 +10,9 @@ monitoring_server_alloy_version: "v1.22.0"
 monitoring_server_pve_exporter_version: "3.12.0"
 # nginx for the gateway in front of Loki and Prometheus, pinned by digest
 monitoring_server_gateway_image: "nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94"
+# OPNsense exporter and MaxMind's GeoIP database updater, pinned by digest
+monitoring_server_opnsense_exporter_image: "ghcr.io/athennamind/opnsense-exporter:0.0.19@sha256:e1f79c770dba7d3165e12836e4b6f849be93a8b2a25116b7ea11c5da8c3ad2db"
+monitoring_server_geoipupdate_image: "ghcr.io/maxmind/geoipupdate:v8.0.0@sha256:51e70dd6f16cd3e4d845ac02d09940b10772a75b9d741427d235a78570923c1d"
 
 # How long logs and metrics are kept
 monitoring_server_retention_days: 30
@@ -54,3 +57,21 @@ monitoring_server_log_alerts: []
 monitoring_server_pve_targets: []
 # Check the nodes' certificates; turn off only for nodes on Proxmox's self-signed certificate
 monitoring_server_pve_verify_ssl: true
+
+# OPNsense API address (host or host:port); when set, an exporter reports interfaces, gateways, firewall and service metrics as Prometheus job opnsense
+# Needs a read-only API user's key and secret, loaded by app-monitoring.yaml into monitoring_server_opnsense_api_key and monitoring_server_opnsense_api_secret
+monitoring_server_opnsense_address: ""
+# Check the firewall's certificate; turn off only for a self-signed one
+monitoring_server_opnsense_verify_ssl: true
+# Exporter collectors to switch off (names from its --exporter.disable-* flags); the defaults keep firewall, pf states, Unbound and Kea DHCPv4
+# Unbound's metrics need Extended Statistics turned on in OPNsense
+monitoring_server_opnsense_disabled_collectors: [arp-table, cron-table, wireguard, openvpn, ipsec, firmware, kea-dhcpv6, carp, mbuf, temperature]
+
+# Firewall logs: syslog lines from OPNsense's filterlog are parsed into action, direction and interface labels.
+# With GeoIP on, outbound lines on these WAN interfaces (the firewall's own names, e.g. igb0) to public addresses also get a geoip_country_code label
+monitoring_server_filterlog_wan_interfaces: []
+# Download MaxMind's GeoLite2-City database (and refresh it weekly) for the country label; needs a free MaxMind account,
+# loaded by app-monitoring.yaml into monitoring_server_maxmind_account_id and monitoring_server_maxmind_license_key
+monitoring_server_geoip: false
+# When the weekly refresh runs (systemd calendar format); MaxMind publishes GeoLite2 on Tuesdays and Fridays
+monitoring_server_geoip_schedule: "Wed *-*-* 04:00:00"

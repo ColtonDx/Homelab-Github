@@ -85,6 +85,9 @@ services:
 {% endfor %}
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+{% if monitoring_server_geoip | bool %}
+      - ./geoip:/etc/alloy/geoip:ro
+{% endif %}
     depends_on: [loki]
 
 {% if monitoring_server_gateway | bool %}
@@ -114,6 +117,31 @@ services:
     container_name: pve-exporter
     restart: unless-stopped
     env_file: pve.env
+
+{% endif %}
+{% if monitoring_server_opnsense_address %}
+  # Reads the OPNsense API for Prometheus; reachable only on the stack's network. A distroless image with no shell,
+  # so its health is the opnsense scrape job, which the scrape-target-down alert watches
+  opnsense-exporter:
+    image: {{ monitoring_server_opnsense_exporter_image }}
+    container_name: opnsense-exporter
+    restart: unless-stopped
+    env_file: opnsense.env
+    command:
+      - --web.disable-exporter-metrics
+{% for collector in monitoring_server_opnsense_disabled_collectors %}
+      - --exporter.disable-{{ collector }}
+{% endfor %}
+
+{% endif %}
+{% if monitoring_server_geoip | bool %}
+  # Downloads GeoLite2-City into ./geoip once and exits; started by the weekly timer, never by "up"
+  geoipupdate:
+    image: {{ monitoring_server_geoipupdate_image }}
+    profiles: [geoip-update]
+    env_file: geoip.env
+    volumes:
+      - ./geoip:/usr/share/GeoIP
 
 {% endif %}
 volumes:

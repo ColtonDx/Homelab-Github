@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+# Refreshes the GeoLite2-City database for the syslog receiver and restarts Alloy when it changed
+[Unit]
+Description=Refresh the monitoring stack's GeoIP database
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ monitoring_server_dir }}
+ExecStart=/bin/sh -c 'before=$$(sha256sum geoip/GeoLite2-City.mmdb 2>/dev/null); docker compose run --rm geoipupdate && if [ "$$before" != "$$(sha256sum geoip/GeoLite2-City.mmdb)" ]; then docker compose restart alloy; fi'
