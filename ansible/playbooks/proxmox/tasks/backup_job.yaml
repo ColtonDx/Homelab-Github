@@ -1,0 +1,65 @@
+---
+# Creates or updates one scheduled backup job; included by backup.yaml once per job, with proxmox_bk_job_item holding that job's settings
+# Needs: proxmox_bk (the backup settings with defaults) and proxmox_bk_jobs (Proxmox's current job list), both set by backup.yaml
+
+# This job's settings: the shared ones from proxmox_bk, overridden by the job's own, with its retention in Proxmox's sorted key=value form
+- name: Work out the settings for job {{ proxmox_bk_job_item.job_id }}
+  ansible.builtin.set_fact:
+    proxmox_bk_j: "{{ job }}"
+    proxmox_bk_prune: "{{ job.retention | dictsort | map('join', '=') | sort | join(',') }}"
+    proxmox_bk_existing: "{{ proxmox_bk_jobs.stdout | from_json | selectattr('id', 'equalto', job.job_id) | first | default({}) }}"
+  vars:
+    job: >-
+      {{ proxmox_bk | dict2items | selectattr('key', 'in', ['storage_id', 'mode', 'compress', 'vmids', 'exclude', 'notification_mode', 'mailto'])
+         | items2dict | combine(proxmox_bk_job_item) }}
+  run_once: true
+
+# The arguments the job should have, in the form Proxmox's API takes them
+- name: Work out the arguments for job {{ proxmox_bk_job_item.job_id }}
+  ansible.builtin.set_fact:
+    proxmox_bk_args: >-
+      {{ ['--schedule', proxmox_bk_j.schedule, '--storage', proxmox_bk_j.storage_id, '--mode', proxmox_bk_j.mode,
+          '--compress', proxmox_bk_j.compress, '--prune-backups', proxmox_bk_prune, '--enabled', '1']
+         + (['--vmid', proxmox_bk_j.vmids | join(','), '--all', '0'] if proxmox_bk_j.vmids | length > 0 else ['--all', '1'])
+         + (['--exclude', proxmox_bk_j.exclude | join(',')] if proxmox_bk_j.exclude | length > 0 and proxmox_bk_j.vmids | length == 0 else [])
+         + (['--notification-mode', proxmox_bk_j.notification_mode] if proxmox_bk_j.notification_mode | length > 0 else [])
+         + (['--mailto', proxmox_bk_j.mailto, '--mailnotification', 'failure'] if proxmox_bk_j.mailto | length > 0 else []) }}
+  run_once: true
+
+# Retention comes back as either a string or a dict depending on the Proxmox release, so both are normalised before comparing
+- name: Compare with what it should be, job {{ proxmox_bk_job_item.job_id }}
+  ansible.builtin.set_fact:
+    proxmox_bk_differs: >-
+      {{ proxmox_bk_existing == {}
+         or proxmox_bk_existing.schedule | default('') != proxmox_bk_j.schedule
+         or proxmox_bk_existing.storage | default('') != proxmox_bk_j.storage_id
+         or proxmox_bk_existing.mode | default('') != proxmox_bk_j.mode
+         or proxmox_bk_existing.compress | default('') != proxmox_bk_j.compress
+         or (proxmox_bk_existing.enabled | default(1) | int) != 1
+         or (proxmox_bk_j.notification_mode | length > 0 and proxmox_bk_existing['notification-mode'] | default('auto') != proxmox_bk_j.notification_mode)
+         or (existing_prune if existing_prune is string else existing_prune | dictsort | map('join', '=') | join(','))
+            .split(',') | sort | join(',') != proxmox_bk_prune
+         or (proxmox_bk_existing.all | default(0) | int) != (0 if proxmox_bk_j.vmids | length > 0 else 1)
+         or (proxmox_bk_existing.vmid | default('') | string) != (proxmox_bk_j.vmids | join(','))
+         or (proxmox_bk_existing.exclude | default('') | string) != (proxmox_bk_j.exclude | join(',') if proxmox_bk_j.vmids | length == 0 else '') }}
+  vars:
+    existing_prune: "{{ proxmox_bk_existing['prune-backups'] | default('') }}"
+  run_once: true
+
+# A new job
+- name: Create backup job {{ proxmox_bk_job_item.job_id }}
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'create', '/cluster/backup', '--id', proxmox_bk_j.job_id] + proxmox_bk_args }}"
+  when: proxmox_bk_existing == {}
+  changed_when: true
+  run_once: true
+
+# An existing job with different settings
+- name: Update backup job {{ proxmox_bk_job_item.job_id }}
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'set', '/cluster/backup/' ~ proxmox_bk_j.job_id] + proxmox_bk_args }}"
+  when:
+    - proxmox_bk_existing != {}
+    - proxmox_bk_differs | bool
+  changed_when: true
+  run_once: true
