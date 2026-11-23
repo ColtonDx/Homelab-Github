@@ -1,6 +1,6 @@
 ---
 # Empties one node before its reboot, for update_node.yaml: moves the running guests that can move, and shuts down the ones that should stay
-# A guest stays when it has a tag in proxmox_stay_tags (default talos, k3s) or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
+# A guest stays when it has a tag in proxmox_stay_tags (default talos) or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
 
 # Running VMs on this node
 - name: List the node's VMs
@@ -55,7 +55,7 @@
          | selectattr('stdout', 'search', '"(hostpci|usb)[0-9]+"') | map(attribute='item.vmid') | list }}
     proxmox_stay_tag_ids: >-
       {{ proxmox_running | selectattr('tags', 'defined')
-         | selectattr('tags', 'search', '(^|;)(' ~ (proxmox_stay_tags | default(['talos', 'k3s']) | join('|')) ~ ')(;|$)')
+         | selectattr('tags', 'search', '(^|;)(' ~ (proxmox_stay_tags | default(['talos']) | join('|')) ~ ')(;|$)')
          | map(attribute='vmid') | list }}
 
 # The two lists, with the reason each stays

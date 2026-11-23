@@ -37,7 +37,7 @@
       - uptime-kuma-api2==2.9.0
       - httpx==0.28.1
       - pynetbox==7.8.0
-    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the K3s data-disk mount
+    # community.general for the terraform and archive modules, community.hashi_vault for tasks/var_lookup.yaml, ansible.posix for the Malcolm data-disk mount
     # lucasheld.uptime_kuma for the uptime-kuma playbooks, on uptime-kuma-api2 above since its own library stopped at Kuma 1.x; oxlorg.opnsense, with httpx above, for Dnsmasq reservations
     # netbox.netbox, with pynetbox above, for netbox/seed.yaml
     runner_collection_pins:
