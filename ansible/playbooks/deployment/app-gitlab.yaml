@@ -2,7 +2,10 @@
 # Installs GitLab from GitLab's apt repository, or updates it to gitlab_version, starts it, then issues its certificate and switches it to HTTPS; safe to re-run
 # Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce), gitlab_version (e.g. 18.4.1) to install or move to that release
 # Without gitlab_version an installed GitLab is left alone; upgrades must follow GitLab's upgrade path, so step through its required stops
+# The TLS keys written below (gitlab_rails['nginx'], registry['nginx']) need GitLab 19.2 or later
 # The certificate needs the Vault connection and Vault fields CF_API and CF_EMAIL at cloudflare; gitlab_rb_path and gitlab_ssl_dir override the default locations
+# Container registry (off by default): gitlab_registry_domain (e.g. registry.example.com) turns it on behind its own HTTPS nginx with its own certificate
+# gitlab_registry_cert_file and gitlab_registry_key_file override where that certificate is installed (default gitlab_ssl_dir/<registry domain>.crt and .key)
 # The first install writes a random root password to /etc/gitlab/initial_root_password, which GitLab deletes after 24 hours
 - name: Install GitLab on Debian/Ubuntu
   hosts: gitlab
@@ -144,12 +147,16 @@
     - name: Load Vault secrets
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
 
-    # One place for every path, so the certificate lands where the URL block points
+    # One place for every path, so the certificates land where the URL block points
     - name: Set GitLab config and certificate paths
       ansible.builtin.set_fact:
         gitlab_rb_file: "{{ gitlab_rb_path | default('/etc/gitlab/gitlab.rb') }}"
         gitlab_cert_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.crt"
         gitlab_key_file: "{{ gitlab_ssl_dir | default('/etc/gitlab/ssl') }}/{{ gitlab_domain }}.key"
+        # An empty registry domain leaves the container registry off
+        gitlab_registry_host: "{{ gitlab_registry_domain | default('') }}"
+        gitlab_registry_crt: "{{ gitlab_registry_cert_file | default((gitlab_ssl_dir | default('/etc/gitlab/ssl')) ~ '/' ~ (gitlab_registry_domain | default('')) ~ '.crt') }}"
+        gitlab_registry_key: "{{ gitlab_registry_key_file | default((gitlab_ssl_dir | default('/etc/gitlab/ssl')) ~ '/' ~ (gitlab_registry_domain | default('')) ~ '.key') }}"
 
     # Installed at the paths the URL block expects; every renewal reloads nginx only, so GitLab stays up
     - name: Issue and install GitLab's certificate
@@ -161,6 +168,17 @@
         acme_fullchain_path: "{{ gitlab_cert_file }}"
         acme_reloadcmd: "gitlab-ctl hup nginx"
 
+    # The registry has its own host name, so it gets its own certificate; renewals reload the same nginx
+    - name: Issue and install the container registry's certificate
+      ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
+      vars:
+        acme_domain: "{{ gitlab_registry_host }}"
+        acme_ssl_dir: "{{ gitlab_registry_crt | dirname }}"
+        acme_key_path: "{{ gitlab_registry_key }}"
+        acme_fullchain_path: "{{ gitlab_registry_crt }}"
+        acme_reloadcmd: "gitlab-ctl hup nginx"
+      when: gitlab_registry_host | length > 0
+
     # Earlier versions wrote TLS settings in a separate block, which the managed block below replaces
     - name: Remove the TLS block written by earlier versions
       ansible.builtin.blockinfile:
@@ -169,7 +187,8 @@
         state: absent
       notify: Reconfigure GitLab
 
-    # This play owns the URL once it has run; written at the end of gitlab.rb so it overrides any earlier external_url
+    # This play owns the URLs once it has run; written at the end of gitlab.rb so it overrides any earlier external_url
+    # GitLab 19.2 moved the main nginx keys from nginx[...] to gitlab_rails['nginx'][...] and registry_nginx[...] to registry['nginx'][...]
     - name: Point GitLab at the certificate
       ansible.builtin.blockinfile:
         path: "{{ gitlab_rb_file }}"
@@ -177,8 +196,14 @@
         block: |
           external_url "https://{{ gitlab_domain }}"
           letsencrypt['enable'] = false
-          nginx['ssl_certificate'] = "{{ gitlab_cert_file }}"
-          nginx['ssl_certificate_key'] = "{{ gitlab_key_file }}"
+          gitlab_rails['nginx']['ssl_certificate'] = "{{ gitlab_cert_file }}"
+          gitlab_rails['nginx']['ssl_certificate_key'] = "{{ gitlab_key_file }}"
+          {% if gitlab_registry_host | length > 0 %}
+          registry_external_url "https://{{ gitlab_registry_host }}"
+          registry['nginx']['enable'] = true
+          registry['nginx']['ssl_certificate'] = "{{ gitlab_registry_crt }}"
+          registry['nginx']['ssl_certificate_key'] = "{{ gitlab_registry_key }}"
+          {% endif %}
       notify: Reconfigure GitLab
 
     # Comment out any other external_url so gitlab.rb has exactly one; the before match keeps the managed block untouched
@@ -188,6 +213,20 @@
         regexp: '^(external_url\s.*)$'
         replace: '# \1  # superseded by the managed block below'
         before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+      notify: Reconfigure GitLab
+
+    # Same for registry_external_url, on both sides of the managed block, so a hand-set one cannot override it
+    - name: Disable registry_external_url lines outside the managed block
+      ansible.builtin.replace:
+        path: "{{ gitlab_rb_file }}"
+        regexp: '^(registry_external_url\s.*)$'
+        replace: '# \1  # superseded by the managed block'
+        before: "{{ item.before | default(omit) }}"
+        after: "{{ item.after | default(omit) }}"
+      loop:
+        - before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+        - after: "# END ANSIBLE MANAGED URL AND TLS CONFIG"
+      when: gitlab_registry_host | length > 0
       notify: Reconfigure GitLab
 
   handlers:
