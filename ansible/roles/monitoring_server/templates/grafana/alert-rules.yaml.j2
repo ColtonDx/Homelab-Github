@@ -210,3 +210,40 @@ groups:
           summary: "{{ $labels.host }} had {{ $values.A.Value }} failed SSH logins in 10 minutes"
           description: "See who and from where with `journalctl -u ssh --since -15min | grep -E 'Failed|Invalid|closed by authenticating'`; an unknown source address means look now."
 {% endraw %}
+{% if monitoring_server_log_alerts %}
+
+  # Site-specific log alerts from monitoring_server_log_alerts: each fires when its LogQL count is above its threshold
+  - orgId: 1
+    name: site-logs
+    folder: Alerts
+    interval: 1m
+    rules:
+{% for alert in monitoring_server_log_alerts %}
+      - uid: {{ alert.uid | to_json }}
+        title: {{ alert.title | to_json }}
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: {{ alert.window_seconds | default(900) | int }}, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: {{ alert.expr | to_json }}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [{{ alert.threshold | default(0) }}]}
+        for: {{ alert.for | default('0s') }}
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: {{ alert.severity | default('warning') }}}
+        annotations:
+          summary: {{ alert.summary | to_json }}
+          description: {{ alert.description | to_json }}
+{% endfor %}
+{% endif %}
