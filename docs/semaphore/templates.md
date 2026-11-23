@@ -50,6 +50,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](../../semaphore/templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](../../semaphore/templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](../../semaphore/templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
+| Host \| Docker | (none) | [host-docker.yaml](../../semaphore/templates/host-docker.yaml) | `ansible/playbooks/deployment/host-docker.yaml` |
 | Linux Disk Utilization Check | (none) | [linux-disk-utilization-check.yaml](../../semaphore/templates/linux-disk-utilization-check.yaml) | `ansible/playbooks/maintenance/disk-usage-alert.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](../../semaphore/templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](../../semaphore/templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |
@@ -70,4 +71,4 @@ Each file follows the fields of Semaphore's template API (`/api/project/{id}/tem
 - `task_params` and `allow_override_args_in_task` control what can be changed when starting a task.
 - `survey_vars` are the questions asked when starting a task; for an Ansible template each answer becomes an extra variable of the same name, and for a Bash template the survey name is the script's flag, such as `--proxmox-host`.
 
-Templates for jobs that still run from the old GitLab repo (Host | Docker, Build Container Registry Image) are not copied here until their playbooks move to this repo.
+Templates for jobs that still run from the old GitLab repo (Build Container Registry Image) are not copied here until their playbooks move to this repo.

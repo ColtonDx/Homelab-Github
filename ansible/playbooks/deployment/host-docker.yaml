@@ -1,0 +1,12 @@
+---
+# Installs Docker Engine with the Compose and Buildx plugins on Linux hosts; safe to re-run
+# Inventory: hosts in docker (or target_hosts); docker_users (a list) are added to the docker group
+- name: Install Docker
+  hosts: "{{ target_hosts | default('docker') }}"
+  become: true
+  gather_facts: true
+
+  tasks:
+    # The shared install task, also used by the app playbooks, so every host gets Docker the same way
+    - name: Install Docker
+      ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
