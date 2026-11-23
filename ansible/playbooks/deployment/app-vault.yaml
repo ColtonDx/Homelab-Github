@@ -63,14 +63,13 @@
         state: directory
         mode: "0755"
 
-    # Fetched every run so a rotated HashiCorp signing key is picked up; only a different key counts as a change
+    # Installed only when its fingerprint matches HashiCorp's current Linux package key (hashicorp.com/trust/security)
     - name: Add HashiCorp repository signing key
-      ansible.builtin.get_url:
-        url: https://apt.releases.hashicorp.com/gpg
-        dest: "{{ vault_keyring_path }}"
-        mode: "0644"
-        force: true
-      register: vault_signing_key
+      ansible.builtin.include_tasks: ../../tasks/apt_signing_key.yaml
+      vars:
+        apt_key_url: https://apt.releases.hashicorp.com/gpg
+        apt_key_dest: "{{ vault_keyring_path }}"
+        apt_key_fingerprints: [D55C0D1AC78A8D8126CB631CFC9CA96ACA026560]
 
     # Refreshes the package cache only when the source entry is added or changes
     - name: Add HashiCorp apt repository
@@ -85,7 +84,7 @@
     - name: Refresh the package cache for the new signing key
       ansible.builtin.apt:
         update_cache: true
-      when: vault_signing_key is changed and vault_apt_source is not changed
+      when: apt_key_install is changed and vault_apt_source is not changed
 
     # Tells a brand-new host, whose packaged config can be replaced freely, from one that already ran Vault
     - name: Check whether Vault was already installed

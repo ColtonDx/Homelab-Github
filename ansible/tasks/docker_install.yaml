@@ -86,13 +86,13 @@
              | select('search', '^[A-Z_]+=') | map('regex_replace', '"', '')
              | map('split', '=', 1)) }}
 
-    # Downloaded once; force: false keeps re-runs from fetching it again
+    # Installed only when its fingerprint matches Docker's published one (docs.docker.com, "Install using the apt repository")
     - name: Add Docker official GPG key (Debian/Ubuntu)
-      ansible.builtin.get_url:
-        url: "https://download.docker.com/linux/{{ docker_apt_distro }}/gpg"
-        dest: /etc/apt/keyrings/docker.asc
-        mode: "0644"
-        force: false
+      ansible.builtin.include_tasks: apt_signing_key.yaml
+      vars:
+        apt_key_url: "https://download.docker.com/linux/{{ docker_apt_distro }}/gpg"
+        apt_key_dest: /etc/apt/keyrings/docker.asc
+        apt_key_fingerprints: [9DC858229FC7DD38854AE2D88D81803C0EBFCD88]
 
     # Refreshes the package cache only when the source entry is added or changes
     - name: Add Docker apt repository (Debian/Ubuntu)
