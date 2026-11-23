@@ -1,6 +1,6 @@
 ---
 # Task file: reserves addresses in OPNsense Dnsmasq, one host record per entry giving both the DNS name and the DHCP reservation; called after Terraform applies and by dnsmasq-reserve-ip.yaml
-# Needs opnsense_reservations, a list of {name, ip, mac}; an empty list does nothing; domain (from the inventory) is the record's domain unless opnsense_domain is set
+# Needs opnsense_reservations, a list of {name, ip, mac} with an optional domain each; an empty list does nothing; otherwise opnsense_domain, else domain from the inventory, is the record's domain
 # Records are matched by their description, which is the full name, so a re-run updates the record in place, including a new IP or MAC
 # Firewall: opnsense_firewall, else the firewalls group's first host's ansible_host; opnsense_ssl_verify (default true)
 # Vault: FIREWALL_KEY and FIREWALL_SECRET at opnsense (vault_opnsense_path renames it); reads Vault through VAULT_ADDR and VAULT_TOKEN
@@ -59,9 +59,9 @@
         api_key: "{{ opnsense_api_key }}"
         api_secret: "{{ opnsense_api_secret }}"
         ssl_verify: "{{ opnsense_ssl_verify | default(true) | bool }}"
-        description: "{{ item.name }}.{{ opnsense_domain | default(domain) }}"
+        description: "{{ item.name }}.{{ item.domain | default(opnsense_domain | default(domain)) }}"
         host: "{{ item.name }}"
-        domain: "{{ opnsense_domain | default(domain) }}"
+        domain: "{{ item.domain | default(opnsense_domain | default(domain)) }}"
         ip: ["{{ item.ip }}"]
         hardware_addr: ["{{ item.mac | lower | replace('-', ':') }}"]
         comments: "Managed by Ansible after a Terraform build"

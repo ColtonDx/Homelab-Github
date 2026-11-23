@@ -1,26 +1,52 @@
 ---
-# Reserves one address in OPNsense Dnsmasq by hand: a host record giving the DNS name and the DHCP reservation; Terraform builds do this themselves after an apply
-# Required: reserve_name (host name without the domain), reserve_ip, reserve_mac; optional opnsense_domain (default domain from the inventory)
+# Reserves addresses in OPNsense Dnsmasq by hand: a host record giving the DNS name and the DHCP reservation; Terraform builds do this themselves after an apply
+# Either reserve_hosts, inventory host names (a list or comma-separated) whose dnsmasq_reservation the inventory sets, or reserve_name (host name without the domain), reserve_ip and reserve_mac for one address
+# An inventory host's dnsmasq_reservation holds mac and optional name (default the inventory name) and domain (default opnsense_domain, else domain); the address is its ansible_host
 # Re-running with the same name updates its address or MAC; firewall and Vault settings are listed in tasks/dnsmasq_reserve_ip.yaml
-- name: Reserve an address in OPNsense Dnsmasq
+- name: Reserve addresses in OPNsense Dnsmasq
   hosts: localhost
   connection: local
   gather_facts: false
 
+  vars:
+    # A survey passes a comma-separated string; a list from extra vars is used as it is
+    reserve_host_list: "{{ (reserve_hosts | default('') | split(',') if reserve_hosts | default('') is string else reserve_hosts) | map('trim') | select | list }}"
+
   tasks:
-    # All three are needed, and the task file checks their format
+    # Either the inventory hosts or all three single-address values are needed, and the task file checks their format
     - name: Validate the inputs
       ansible.builtin.assert:
         that:
-          - reserve_name | default('') | length > 0
-          - reserve_ip | default('') | length > 0
-          - reserve_mac | default('') | length > 0
-        fail_msg: "Set reserve_name, reserve_ip and reserve_mac."
+          - >-
+            (reserve_hosts | default('') | length > 0)
+            or (reserve_name | default('') | length > 0 and reserve_ip | default('') | length > 0 and reserve_mac | default('') | length > 0)
+        fail_msg: "Set reserve_hosts, or reserve_name, reserve_ip and reserve_mac."
         quiet: true
 
-    # Writes the record and reloads Dnsmasq
-    - name: Reserve the address
+    # Each named host must be in the inventory with a reservation, or its entry would be half empty
+    - name: Check the inventory hosts
+      ansible.builtin.assert:
+        that:
+          - item in hostvars
+          - hostvars[item].dnsmasq_reservation.mac | default('') | length > 0
+        fail_msg: "{{ item }} needs to be an inventory host with dnsmasq_reservation.mac set."
+        quiet: true
+      loop: "{{ reserve_host_list }}"
+
+    # One entry per inventory host, with the defaults filled in
+    - name: List the inventory hosts' reservations
+      ansible.builtin.set_fact:
+        reserve_entries: "{{ reserve_entries | default([]) + [reserve_entry] }}"
+      loop: "{{ reserve_host_list }}"
+      vars:
+        reserve_entry:
+          name: "{{ hostvars[item].dnsmasq_reservation.name | default(item) }}"
+          ip: "{{ hostvars[item].ansible_host }}"
+          mac: "{{ hostvars[item].dnsmasq_reservation.mac }}"
+          domain: "{{ hostvars[item].dnsmasq_reservation.domain | default(opnsense_domain | default(domain)) }}"
+
+    # Writes the records and reloads Dnsmasq once
+    - name: Reserve the addresses
       ansible.builtin.include_tasks: tasks/dnsmasq_reserve_ip.yaml
       vars:
-        opnsense_reservations:
-          - { name: "{{ reserve_name }}", ip: "{{ reserve_ip }}", mac: "{{ reserve_mac }}" }
+        opnsense_reservations: "{{ reserve_entries | default([{'name': reserve_name, 'ip': reserve_ip, 'mac': reserve_mac}]) }}"
