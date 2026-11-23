@@ -1,0 +1,14 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: automation_user
+  author: homelab
+  description: Creates a key-only SSH account with passwordless sudo for an automation runner to connect as
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

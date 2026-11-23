@@ -1,0 +1,96 @@
+---
+# Creates the automation account: key-only SSH with the runner's public key(s), no usable password, passwordless sudo
+# Safe to re-run: an existing account is brought back to this state, so a hand-made one is adopted as it is
+
+# Accept one key, several keys on separate lines, or a list
+- name: Normalise the keys into a list
+  ansible.builtin.set_fact:
+    automation_user_key_list: >-
+      {{ (automation_user_keys if automation_user_keys is not string else automation_user_keys.splitlines())
+         | map('trim') | reject('equalto', '') | list }}
+
+# Parse each key with ssh-keygen on the controller, which rejects truncated or malformed pastes
+- name: Validate each key with ssh-keygen
+  ansible.builtin.command:
+    cmd: ssh-keygen -l -f /dev/stdin
+    stdin: "{{ item }}"
+  loop: "{{ automation_user_key_list }}"
+  loop_control:
+    label: "{{ item | truncate(40) }}"
+  register: automation_user_key_checks
+  changed_when: false
+  failed_when: false
+  # Read-only, so it runs in check mode too and a dry run catches bad keys
+  check_mode: false
+  delegate_to: localhost
+  become: false
+
+# Refuse to write anything unless every key parsed, since a bad value would lock the runner out
+- name: Check every value is a valid SSH public key
+  ansible.builtin.assert:
+    that:
+      - automation_user_key_list | length > 0
+      - automation_user_key_checks.results | default([]) | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0) | list | length == automation_user_key_list | length
+    fail_msg: >-
+      No valid SSH public key for {{ automation_user_name }}: set automation_user_keys or
+      ssh_public_key_{{ automation_user_name | regex_replace('[^A-Za-z0-9_]', '_') }} in the inventory. Nothing was changed.
+
+# Proxmox and minimal Debian installs ship without sudo
+- name: Install sudo
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+
+# The password field is set to "*", which matches no password, so only keys can log in; "!" would lock the account,
+# which sshd treats as no login at all on hosts without PAM
+- name: Create the account with no usable password
+  ansible.builtin.user:
+    name: "{{ automation_user_name }}"
+    shell: /bin/bash
+    create_home: true
+    password: "*"
+    update_password: always
+
+# Find the real home directory and primary group rather than assuming /home/<user>
+- name: Look up the account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ automation_user_name }}"
+    fail_key: false
+
+# In check mode a new account does not exist yet, so fall back to the defaults the user module would use
+- name: Record the home directory and primary group
+  ansible.builtin.set_fact:
+    automation_user_home: "{{ (ansible_facts.getent_passwd[automation_user_name] or [none, none, none, automation_user_name, none, '/home/' ~ automation_user_name])[4] | regex_replace('/+$', '') }}"
+    automation_user_gid: "{{ (ansible_facts.getent_passwd[automation_user_name] or [none, none, automation_user_name])[2] }}"
+
+# sshd ignores the key file unless .ssh is owned by the user and not writable by others
+- name: Create the .ssh directory
+  ansible.builtin.file:
+    path: "{{ automation_user_home }}/.ssh"
+    state: directory
+    owner: "{{ automation_user_name }}"
+    group: "{{ automation_user_gid }}"
+    mode: "0700"
+
+# Replaces the whole file, so only the listed keys can log in; the old file is backed up alongside it
+- name: Write authorized_keys
+  ansible.builtin.copy:
+    dest: "{{ automation_user_home }}/.ssh/authorized_keys"
+    content: "{{ automation_user_key_list | join('\n') }}\n"
+    owner: "{{ automation_user_name }}"
+    group: "{{ automation_user_gid }}"
+    mode: "0600"
+    backup: true
+
+# A drop-in file, checked with visudo before it is put in place, so a bad rule cannot break sudo
+- name: Allow passwordless sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ automation_user_name | regex_replace('[^A-Za-z0-9_-]', '_') }}"
+    content: |
+      # Managed by Ansible (role automation_user)
+      {{ automation_user_name }} ALL=(ALL:ALL) NOPASSWD: ALL
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
