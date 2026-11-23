@@ -1,7 +1,7 @@
 ---
 # Task file: syncs OPNsense's DHCP leases into NetBox IPAM: records new lease addresses, refreshes the ones it owns, deletes DHCP records whose lease is gone and binds leases to the VM holding them; needs connect_netbox.yaml first
 # Firewall: opnsense_firewall, else the firewalls group's first host's ansible_host; validate_certs (default true) for the firewall's API
-# Vault: FIREWALL_KEY and FIREWALL_SECRET at opnsense (vault_opnsense_path renames it)
+# Vault: netbox-sync/API_KEY and netbox-sync/API_SECRET at opnsense (vault_opnsense_path renames it), a read-only key whose user has only "Services: Dnsmasq DNS/DHCP: Settings"
 # Status rules: an address that is some host's ansible_host, or a DHCP reservation, is active; any other lease is dhcp; reserved and deprecated are never overwritten
 # Runs after the inventory and Proxmox steps, so a lease only fills in what they have not recorded; each step is a file in tasks/opnsense/
 
@@ -23,8 +23,8 @@
   ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
   vars:
     vault_secrets:
-      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_KEY, var: firewall_key }
-      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: FIREWALL_SECRET, var: firewall_secret }
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: netbox-sync/API_KEY, var: firewall_key }
+      - { path: "{{ vault_opnsense_path | default('opnsense') }}", field: netbox-sync/API_SECRET, var: firewall_secret }
 
 # The leases, what NetBox holds for each, and which addresses the inventory accounts for
 - name: Read the leases

@@ -4,7 +4,7 @@
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
 # With a Grafana domain: MONITORING_PUSH_PASSWORD and MONITORING_READ_PASSWORD at monitoring (vault_monitoring_path renames it) for the Loki/Prometheus gateway
 # Proxmox metrics: set monitoring_server_pve_targets; needs PROXMOX_GRAFANA_TOKEN_ID and PROXMOX_GRAFANA_TOKEN_SECRET (a read-only PVEAuditor token) at proxmox
-# OPNsense metrics: set monitoring_server_opnsense_address; needs OPNSENSE_GRAFANA_API_KEY and OPNSENSE_GRAFANA_API_SECRET (a read-only API user) at opnsense
+# OPNsense metrics: set monitoring_server_opnsense_address; needs grafana/API_KEY and grafana/API_SECRET (a read-only API user) at opnsense
 # GeoIP for firewall logs: set monitoring_server_geoip; needs MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY at maxmind
 # Extra scrape jobs (monitoring_server_scrape_jobs) can name a bearer token by vault_path and vault_field
 # HTTPS: set monitoring_server_grafana_domain and this issues Grafana's certificate with ACME, which also needs CF_API and CF_EMAIL at cloudflare
@@ -32,10 +32,10 @@
     # A separate read-only OPNsense API user for the exporter, not the automation user
     monitoring_opnsense_secrets:
       - path: "{{ vault_opnsense_path | default('opnsense') }}"
-        field: OPNSENSE_GRAFANA_API_KEY
+        field: grafana/API_KEY
         var: monitoring_server_opnsense_api_key
       - path: "{{ vault_opnsense_path | default('opnsense') }}"
-        field: OPNSENSE_GRAFANA_API_SECRET
+        field: grafana/API_SECRET
         var: monitoring_server_opnsense_api_secret
     monitoring_maxmind_secrets:
       - path: "{{ vault_maxmind_path | default('maxmind') }}"
