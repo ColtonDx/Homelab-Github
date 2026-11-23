@@ -7,8 +7,9 @@ services:
     networks:
       - reverseproxy-nw
     environment:
-      GARAGE_NODE_ID: GarageS3
-      GARAGE_CLUSTER_KEY: ${GARAGE_KEY}
+      # From Vault (garage); these override the same settings in garage.toml, so the file needs no secrets
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
     volumes:
       - data:/var/lib/garage
       - etc:/etc
@@ -28,9 +29,9 @@ services:
       S3_ENDPOINT_URL: "http://garage:3900"
       # Web UI login as username:bcrypt-hash, from Vault (garage / GARAGE_AUTH_PASS); without it the UI is open
       AUTH_USER_PASS: ${GARAGE_AUTH_PASS}
-    volumes:
-      # TrueNAS path to the etc volume's garage.toml; change for other hosts
-      - /mnt/.ix-apps/docker/volumes/garage_etc/_data/garage.toml:/etc/garage.toml:ro
+      # The admin token and region the UI would otherwise read from garage.toml, which it no longer mounts
+      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN}
+      S3_REGION: ${GARAGE_S3_REGION:-garage}
     labels:
       - "Backup=garage" # Sets the DVBM Backup Job Label
       - "AppPort=3909" # Sets the Application Port for the Reverse Proxy Job
