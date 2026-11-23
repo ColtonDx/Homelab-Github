@@ -52,8 +52,8 @@
     # so a new variable can be added with a safe default and a GitOps redeploy before its value is pushed never starts the stack with it empty
     - name: Find the variables the compose file uses
       ansible.builtin.set_fact:
-        compose_vars: "{{ compose_text | regex_findall('\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}') | unique | sort }}"
-        compose_optional_vars: "{{ compose_text | regex_findall('\\$\\{([A-Za-z_][A-Za-z0-9_]*):?-[^}]*\\}') | unique | sort }}"
+        compose_vars: "{{ compose_text | regex_findall('(?<!\\$)\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}') | unique | sort }}"
+        compose_optional_vars: "{{ compose_text | regex_findall('(?<!\\$)\\$\\{([A-Za-z_][A-Za-z0-9_]*):?-[^}]*\\}') | unique | sort }}"
         stack_containers: "{{ services | dict2items | map(attribute='value') | map(attribute='container_name', default='') | select | list }}"
         stack_proxy_container: ""
         stack_proxy_port: ""
