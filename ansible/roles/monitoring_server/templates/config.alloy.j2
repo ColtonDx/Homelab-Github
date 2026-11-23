@@ -38,5 +38,62 @@ loki.source.syslog "devices" {
 
 {% endfor %}
   relabel_rules = loki.relabel.syslog.rules
-  forward_to    = [loki.write.local.receiver]
+  forward_to    = [loki.process.syslog.receiver]
+}
+
+// OPNsense firewall log lines (filterlog, comma-separated) get action, direction and interface labels; every other line passes through untouched
+loki.process "syslog" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.match {
+    selector = "{app=\"filterlog\"}"
+
+    // Field order: rule, sub-rule, anchor, tracker, interface, reason, action, direction, IP version, then version-specific fields up to the destination
+    stage.regex {
+      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),4,(?:[^,]*,){10}(?P<fl_dst>[^,]*)`
+    }
+
+    stage.regex {
+      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),6,(?:[^,]*,){7}(?P<fl_dst>[^,]*)`
+    }
+
+    stage.labels {
+      values = { action = "fl_action", direction = "fl_direction", interface = "fl_interface" }
+    }
+{% if monitoring_server_geoip | bool %}
+
+    // Outbound WAN traffic gets the destination's country; private, loopback, link-local and multicast destinations are skipped
+    stage.match {
+      selector = "{direction=\"out\", interface=~\"{{ monitoring_server_filterlog_wan_interfaces | join('|') }}\"}"
+
+      stage.template {
+        source   = "fl_dst_scope"
+        template = `{% raw %}{{ if regexMatch "^(10[.]|127[.]|0[.]|169[.]254[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|2(2[4-9]|[3-5][0-9])[.]|f[cd]|fe[89ab]|ff|::)" .fl_dst }}private{{ else }}public{{ end }}{% endraw %}`
+      }
+
+      stage.labels {
+        values = { dst_scope = "fl_dst_scope" }
+      }
+
+      stage.match {
+        selector = "{dst_scope=\"public\"}"
+
+        // The database is read when Alloy starts; the weekly refresh restarts Alloy after a new download
+        stage.geoip {
+          db      = "/etc/alloy/geoip/GeoLite2-City.mmdb"
+          db_type = "city"
+          source  = "fl_dst"
+        }
+
+        stage.labels {
+          values = { geoip_country_code = "" }
+        }
+      }
+
+      stage.label_drop {
+        values = ["dst_scope"]
+      }
+    }
+{% endif %}
+  }
 }

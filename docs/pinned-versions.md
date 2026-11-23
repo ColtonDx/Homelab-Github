@@ -62,7 +62,7 @@ Each is verified against a sha256 or fingerprint recorded in this repository, no
 | Terraform (runner) | 1.16.4 | same | sha256 from HashiCorp's GPG-signed checksum list |
 | talosctl, kubectl (runner) | 1.14.1, 1.37.1 | same | sha256 per version and CPU |
 | Proxmox Terraform provider | 3.0.2-rc06 | `.terraform.lock.hcl` in each `terraform/proxmox/*` project | provider hashes for every platform |
-| Monitoring stack (Grafana, Loki, Prometheus, Alloy, Proxmox exporter) | see role defaults | `ansible/roles/monitoring_server/defaults/main.yaml`, `ansible/roles/monitoring_client/defaults/main.yaml` | exact version tags; Alloy packages from Grafana's signed APT repository |
+| Monitoring stack (Grafana, Loki, Prometheus, Alloy, Proxmox exporter, gateway, OPNsense exporter, GeoIP updater) | see role defaults | `ansible/roles/monitoring_server/defaults/main.yaml`, `ansible/roles/monitoring_client/defaults/main.yaml` | exact version tags (gateway, OPNsense exporter and GeoIP updater also by digest); Alloy packages from Grafana's signed APT repository |
 | APT repository keys (Docker, Grafana, HashiCorp, GitLab) | n/a | `apt_key_fingerprints` where each key is added | key fingerprint, checked by `ansible/tasks/apt_signing_key.yaml` |
 
 The Semaphore runner is one patch release behind the server because the server's version has no published runner binaries; move the runner to the server's version once it is released.

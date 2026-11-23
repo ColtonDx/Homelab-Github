@@ -45,6 +45,13 @@ scrape_configs:
         replacement: pve-exporter:9221
 {%   endfor %}
 {% endif %}
+{% if monitoring_server_opnsense_address %}
+  # The firewall, read through the exporter's API calls
+  - job_name: opnsense
+    scrape_timeout: 30s
+    static_configs:
+      - targets: ["opnsense-exporter:8080"]
+{% endif %}
 {% for job in monitoring_server_scrape_jobs %}
   - job_name: {{ job.name }}
     metrics_path: {{ job.metrics_path | default('/metrics') }}

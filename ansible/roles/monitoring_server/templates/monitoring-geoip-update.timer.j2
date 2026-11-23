@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# Weekly GeoIP refresh; a missed run (host off) happens at the next boot
+[Unit]
+Description=Weekly refresh of the monitoring stack's GeoIP database
+
+[Timer]
+OnCalendar={{ monitoring_server_geoip_schedule }}
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target
