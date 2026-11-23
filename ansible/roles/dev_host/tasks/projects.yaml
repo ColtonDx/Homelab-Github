@@ -1,0 +1,147 @@
+---
+# One user per project in dev_host_projects, named dev-<name>; users this role created are marked in their comment field, so it only ever removes its own
+
+# Fail before changing anything when names or port blocks repeat, or the deploy key has no source address
+- name: Check the project list as a whole
+  ansible.builtin.assert:
+    that:
+      - dev_host_projects | map(attribute='name') | unique | length == dev_host_projects | length
+      - dev_host_projects | map(attribute='port_base') | unique | length == dev_host_projects | length
+      - dev_host_deploy_key | length == 0 or dev_host_deploy_key_from | length > 0
+    fail_msg: "Project names and port_base values must be unique, and dev_host_deploy_key needs dev_host_deploy_key_from."
+    quiet: true
+
+# Each name must make a valid user name, and each port block must start on a block boundary inside the range
+- name: Check each project
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z0-9][a-z0-9-]{0,27}$')
+      - item.port_base is integer
+      - item.port_base % (dev_host_port_block | int) == 0
+      - item.port_base >= dev_host_port_range[0] | int
+      - item.port_base + (dev_host_port_block | int) - 1 <= dev_host_port_range[1] | int
+    fail_msg: >-
+      {{ item.name | default('?') }}: name must be lower-case letters, digits and hyphens, and port_base an integer that is a multiple of
+      {{ dev_host_port_block }} with its whole block inside {{ dev_host_port_range | join('-') }}.
+    quiet: true
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+
+# The comment field marks accounts this role owns
+- name: Read the user database
+  ansible.builtin.getent:
+    database: passwd
+
+# Users this role created earlier whose project has left the list
+- name: Find project users to remove
+  ansible.builtin.set_fact:
+    dev_host_stale_users: >-
+      {% set stale = [] %}{% for name, entry in ansible_facts.getent_passwd.items()
+      if entry[3] == dev_host_user_marker and name not in dev_host_wanted_users %}{% set _ = stale.append(name) %}{% endfor %}{{ stale | sort }}
+  vars:
+    dev_host_wanted_users: "{{ dev_host_projects | map(attribute='name') | map('regex_replace', '^', 'dev-') | list }}"
+
+# Lingering and running user services would keep the account in use, so both stop before the user is removed
+- name: Stop the removed projects' user services
+  ansible.builtin.command:
+    cmd: "loginctl {{ item.1 }} {{ item.0 }}"
+  loop: "{{ dev_host_stale_users | product(['disable-linger', 'terminate-user']) | list }}"
+  changed_when: true
+  failed_when: false
+
+# Removes the account, its home and its containers' storage
+- name: Remove the users of removed projects
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+  loop: "{{ dev_host_stale_users }}"
+
+# useradd allocates the subordinate ID ranges set in login.defs; no password, so the deploy key is the only way in
+- name: Create the project users
+  ansible.builtin.user:
+    name: "dev-{{ item.name }}"
+    comment: "{{ dev_host_user_marker }}"
+    shell: /bin/bash
+    create_home: true
+    password: "!"
+    update_password: on_create
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+
+# Projects cannot read each other's files
+- name: Make each project's home private
+  ansible.builtin.file:
+    path: "/home/dev-{{ item.name }}"
+    state: directory
+    owner: "dev-{{ item.name }}"
+    group: "dev-{{ item.name }}"
+    mode: "0700"
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+
+# Holds authorized_keys below
+- name: Create each project's .ssh directory
+  ansible.builtin.file:
+    path: "/home/dev-{{ item.name }}/.ssh"
+    state: directory
+    owner: "dev-{{ item.name }}"
+    group: "dev-{{ item.name }}"
+    mode: "0700"
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+
+# Only the deploy key, only from its one address, with no forwarding or terminal; an empty key removes the file so no stale key keeps access
+- name: Set each project's deploy key
+  ansible.builtin.copy:
+    dest: "/home/dev-{{ item.name }}/.ssh/authorized_keys"
+    content: |
+      restrict,from="{{ dev_host_deploy_key_from }}" {{ dev_host_deploy_key }}
+    owner: "dev-{{ item.name }}"
+    group: "dev-{{ item.name }}"
+    mode: "0600"
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+  when: dev_host_deploy_key | length > 0
+
+# Same file, removed while no deploy key is set
+- name: Remove project keys while no deploy key is set
+  ansible.builtin.file:
+    path: "/home/dev-{{ item.name }}/.ssh/authorized_keys"
+    state: absent
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+  when: dev_host_deploy_key | length == 0
+
+# The project's ports reach its user services (Quadlet units included) through systemd's environment.d, so deploy scripts never hard-code them
+- name: Create each project's environment.d directory
+  ansible.builtin.file:
+    path: "/home/dev-{{ item.name }}/.config/environment.d"
+    state: directory
+    owner: "dev-{{ item.name }}"
+    group: "dev-{{ item.name }}"
+    mode: "0755"
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"
+
+# Rewritten on every run, so a changed port_base reaches the project at its next login or deploy
+- name: Publish each project's port block
+  ansible.builtin.copy:
+    dest: "/home/dev-{{ item.name }}/.config/environment.d/50-dev-host.conf"
+    content: |
+      # Written by the dev_host role: this project's ports are DEV_HOST_PORT_BASE to DEV_HOST_PORT_BASE + DEV_HOST_PORT_COUNT - 1
+      DEV_HOST_PORT_BASE={{ item.port_base }}
+      DEV_HOST_PORT_COUNT={{ dev_host_port_block }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ dev_host_projects }}"
+  loop_control:
+    label: "dev-{{ item.name }}"

@@ -1,0 +1,95 @@
+---
+# Prepares a development host: build tools, mise, rootless Podman and lingering for every user, then fails if any user holds a privileged group
+# Users are only created or removed when dev_host_manage_users is true (see projects.yaml); otherwise accounts are left exactly as they are
+
+# Stop with a clear message on a distribution this role does not handle
+- name: Check the host runs Debian or a derivative
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == "Debian"
+    fail_msg: "dev_host supports Debian-family hosts only, not {{ ansible_facts.os_family }}."
+
+# Build tools and rootless Podman from the distribution, so they get its security updates
+- name: Install the base packages
+  ansible.builtin.apt:
+    name: "{{ dev_host_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# A pinned release checked against its recorded sha256; a matching file already in place is not downloaded again
+- name: Install mise
+  ansible.builtin.get_url:
+    url: "https://github.com/jdx/mise/releases/download/v{{ dev_host_mise_version }}/mise-v{{ dev_host_mise_version }}-linux-{{ dev_host_mise_arch }}"
+    dest: /usr/local/bin/mise
+    checksum: "sha256:{{ dev_host_mise_checksums[dev_host_mise_version][dev_host_mise_arch] }}"
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    dev_host_mise_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
+
+# Interactive bash login shells get mise's full activation; other shells rely on the shims on PATH below
+- name: Activate mise in login shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/mise.sh
+    content: |
+      # Activates mise for interactive bash shells; written by the dev_host role
+      if [ -n "${BASH_VERSION:-}" ] && [ -x /usr/local/bin/mise ]; then
+        eval "$(/usr/local/bin/mise activate bash)"
+      fi
+    owner: root
+    group: root
+    mode: "0644"
+
+# pam_env sets PATH for SSH and login sessions, including non-interactive commands; /etc/environment cannot expand the home directory
+- name: Put mise's shims on PATH for SSH sessions
+  ansible.builtin.lineinfile:
+    path: /etc/security/pam_env.conf
+    regexp: '^PATH\s'
+    line: "PATH DEFAULT={{ dev_host_pam_path }}"
+
+# useradd then gives each new user its own subordinate ID range, which rootless Podman needs
+- name: Set the subordinate ID ranges for new users
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^#?\s*{{ item.key }}\s'
+    line: "{{ item.key }} {{ item.value }}"
+  loop:
+    - { key: SUB_UID_MIN, value: "{{ dev_host_subid_min }}" }
+    - { key: SUB_UID_MAX, value: "{{ dev_host_subid_max }}" }
+    - { key: SUB_UID_COUNT, value: "{{ dev_host_subid_count }}" }
+    - { key: SUB_GID_MIN, value: "{{ dev_host_subid_min }}" }
+    - { key: SUB_GID_MAX, value: "{{ dev_host_subid_max }}" }
+    - { key: SUB_GID_COUNT, value: "{{ dev_host_subid_count }}" }
+  loop_control:
+    label: "{{ item.key }}"
+
+# Project users, only on hosts that hand this role their accounts
+- name: Manage the project users
+  ansible.builtin.include_tasks: projects.yaml
+  when: dev_host_manage_users | bool
+
+# Read after any user changes above, for the lingering and group checks below
+- name: Read the user and group databases
+  ansible.builtin.getent:
+    database: "{{ item }}"
+  loop: [passwd, group]
+
+# Every account in the user range, whoever created it
+- name: List the non-system users
+  ansible.builtin.set_fact:
+    dev_host_users: >-
+      {% set users = [] %}{% for name, entry in ansible_facts.getent_passwd.items()
+      if dev_host_uid_min | int <= entry[1] | int <= dev_host_uid_max | int %}{% set _ = users.append(name) %}{% endfor %}{{ users | sort }}
+
+# Lingering keeps each user's systemd manager running without a login, so systemctl --user and user services work over SSH and after a reboot
+- name: Enable lingering for every non-system user
+  ansible.builtin.command:
+    cmd: "loginctl enable-linger {{ item }}"
+    creates: "/var/lib/systemd/linger/{{ item }}"
+  loop: "{{ dev_host_users }}"
+
+# Read-only: a user in sudo, docker or similar could take over the host, so the run fails until it is removed from the group
+- name: Check no user holds a privileged group
+  ansible.builtin.include_tasks: check.yaml
