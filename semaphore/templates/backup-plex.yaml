@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Backup | Plex; see semaphore/README.md for the project resources it names
+# Semaphore task template Backup | Plex; see docs/semaphore/templates.md for the project resources it names
 name: Backup | Plex
 view: Backups
 app: ansible

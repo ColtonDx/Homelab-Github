@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Proxmox | Terraform - Build a PVE VM; see semaphore/README.md for the project resources it names
+# Semaphore task template Proxmox | Terraform - Build a PVE VM; see docs/semaphore/templates.md for the project resources it names
 name: Proxmox | Terraform - Build a PVE VM
 view: Proxmox
 app: ansible

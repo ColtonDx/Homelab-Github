@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Portainer Stack Update; see semaphore/README.md for the project resources it names
+# Semaphore task template Portainer Stack Update; see docs/semaphore/templates.md for the project resources it names
 name: Portainer Stack Update
 description: 'Updates a deployed Portainer stack: DVBM backup gate, redeploy pulling newer images, health poll, rollback on failure. First-time deploys use Portainer Stack Creation instead.'
 app: ansible

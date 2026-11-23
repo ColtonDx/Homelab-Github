@@ -1,5 +1,5 @@
 ---
-# Semaphore task template SSH Key Rotation; see semaphore/README.md for the project resources it names
+# Semaphore task template SSH Key Rotation; see docs/semaphore/templates.md for the project resources it names
 name: SSH Key Rotation
 app: ansible
 playbook: ansible/playbooks/maintenance/rotate-ssh-keys.yaml

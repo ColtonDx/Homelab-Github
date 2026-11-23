@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Proxmox | Update Nodes; see semaphore/README.md for the project resources it names
+# Semaphore task template Proxmox | Update Nodes; see docs/semaphore/templates.md for the project resources it names
 name: Proxmox | Update Nodes
 description: Updates the nodes one at a time; with Restart hosts on, each node is emptied first and guests are moved back at the end
 view: Proxmox

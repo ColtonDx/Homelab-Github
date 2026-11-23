@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Uptime Kuma | Maintenance Window; see semaphore/README.md for the project resources it names
+# Semaphore task template Uptime Kuma | Maintenance Window; see docs/semaphore/templates.md for the project resources it names
 name: Uptime Kuma | Maintenance Window
 description: Silences Uptime Kuma monitors for planned work; the window ends by itself after the set minutes, or end it early by its title
 app: ansible

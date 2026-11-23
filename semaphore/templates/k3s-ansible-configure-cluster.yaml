@@ -1,5 +1,5 @@
 ---
-# Semaphore task template K3s | Ansible | Configure Cluster; see semaphore/README.md for the project resources it names
+# Semaphore task template K3s | Ansible | Configure Cluster; see docs/semaphore/templates.md for the project resources it names
 name: K3s | Ansible | Configure Cluster
 view: Kubernetes
 app: ansible

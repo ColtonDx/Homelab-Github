@@ -1,5 +1,5 @@
 ---
-# Semaphore task template Portainer Stack Creation; see semaphore/README.md for the project resources it names
+# Semaphore task template Portainer Stack Creation; see docs/semaphore/templates.md for the project resources it names
 name: Portainer Stack Creation
 app: ansible
 playbook: ansible/playbooks/portainer/deploy-stack.yaml

@@ -1,5 +1,5 @@
 ---
-# Semaphore task template TLS | Renew Certificates; see semaphore/README.md for the project resources it names
+# Semaphore task template TLS | Renew Certificates; see docs/semaphore/templates.md for the project resources it names
 name: TLS | Renew Certificates
 description: Renews the acme.sh certificates that expire within acme_renew_days, or all with acme_force; each service's app playbook issues them first
 app: ansible
