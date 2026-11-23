@@ -10,6 +10,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbi_existing_ips
+  retries: 3
+  delay: 5
+  until: nbi_existing_ips is not failed
   no_log: true
 
 # Keyed on the address without its mask, so the same address with a different prefix still matches
@@ -102,6 +105,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbi_all_ips
+  retries: 3
+  delay: 5
+  until: nbi_all_ips is not failed
   no_log: true
 
 # eth0's address becomes the primary, as the NIC cloud-init configures first
@@ -127,3 +133,6 @@
   loop_control:
     label: "{{ item.assigned_object.virtual_machine.name }} -> {{ item.address }}"
   register: nbi_primary_set
+  retries: 3
+  delay: 5
+  until: nbi_primary_set is not failed

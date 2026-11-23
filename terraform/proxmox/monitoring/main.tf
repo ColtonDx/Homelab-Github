@@ -39,6 +39,7 @@ resource "proxmox_vm_qemu" "monitoring" {
   vmid        = var.vm_id
   target_node = var.target_node
   description = var.description
+  tags        = var.tags
 
   # Cloned once from the template; ignored afterwards, see lifecycle below
   clone      = var.template_name
@@ -46,6 +47,9 @@ resource "proxmox_vm_qemu" "monitoring" {
 
   # On by default, so monitoring comes back by itself after a node reboot
   start_at_node_boot = var.start_at_node_boot
+
+  # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
+  startup_shutdown {}
 
   os_type    = "cloud-init"
   qemu_os    = "other"

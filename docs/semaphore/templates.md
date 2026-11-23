@@ -51,6 +51,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](../../semaphore/templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](../../semaphore/templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
 | Host \| Docker | (none) | [host-docker.yaml](../../semaphore/templates/host-docker.yaml) | `ansible/playbooks/deployment/host-docker.yaml` |
+| Host \| Dev | (none) | [host-dev.yaml](../../semaphore/templates/host-dev.yaml) | `ansible/playbooks/deployment/host-dev.yaml` |
 | Linux Disk Utilization Check | (none) | [linux-disk-utilization-check.yaml](../../semaphore/templates/linux-disk-utilization-check.yaml) | `ansible/playbooks/maintenance/disk-usage-alert.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](../../semaphore/templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](../../semaphore/templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |
@@ -61,6 +62,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | TLS \| Renew Certificates | (none) | [tls-renew-certificates.yaml](../../semaphore/templates/tls-renew-certificates.yaml) | `ansible/playbooks/tls/renew-certificates.yaml` |
 | Uptime Kuma \| Sync Monitors | (none) | [uptime-kuma-sync-monitors.yaml](../../semaphore/templates/uptime-kuma-sync-monitors.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` |
 | Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](../../semaphore/templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/set-maintenance-window.yaml` |
+| OPNsense \| Reserve IP | (none) | [opnsense-dnsmasq-reserve-ip.yaml](../../semaphore/templates/opnsense-dnsmasq-reserve-ip.yaml) | `ansible/playbooks/opnsense/dnsmasq-reserve-ip.yaml` |
 
 ## File format
 
@@ -69,6 +71,7 @@ Each file follows the fields of Semaphore's template API (`/api/project/{id}/tem
 - `repository`, `inventory`, `environments` and `view` name the resources above.
 - `arguments` are extra command-line arguments, such as a fixed `-e tf_project=...`.
 - `task_params` and `allow_override_args_in_task` control what can be changed when starting a task.
+- `allow_override_branch_in_task` lets a task run another branch of the repository than its default (`main`); I only use it for check-mode runs of a PR branch before merge.
 - `survey_vars` are the questions asked when starting a task; for an Ansible template each answer becomes an extra variable of the same name, and for a Bash template the survey name is the script's flag, such as `--proxmox-host`.
 
 Templates for jobs that still run from the old GitLab repo (Build Container Registry Image) are not copied here until their playbooks move to this repo.

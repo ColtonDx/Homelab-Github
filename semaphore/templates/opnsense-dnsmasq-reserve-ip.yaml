@@ -1,0 +1,15 @@
+---
+# Semaphore task template OPNsense | Reserve IP; see docs/semaphore/templates.md for the project resources it names
+name: OPNsense | Reserve IP
+description: Writes a Dnsmasq DHCP reservation and DNS record in OPNsense for each named inventory host that sets dnsmasq_reservation; re-runs update the records in place
+app: ansible
+playbook: ansible/playbooks/opnsense/dnsmasq-reserve-ip.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: reserve_hosts
+    title: Hosts
+    description: Inventory host names to reserve, comma-separated; each needs dnsmasq_reservation in the inventory
+    required: true

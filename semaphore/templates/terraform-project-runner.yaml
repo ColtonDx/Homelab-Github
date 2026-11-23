@@ -7,6 +7,8 @@ app: ansible
 playbook: ansible/playbooks/terraform/build-project.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
+# A task may run another branch, for check-mode runs of a PR before merge; real runs use main
+allow_override_branch_in_task: true
 environments:
   - Hashicorp Secrets
 survey_vars:
@@ -26,6 +28,14 @@ survey_vars:
         value: terraform/proxmox/talos
       - name: Malcolm VM
         value: terraform/proxmox/malcolm
+      - name: Git-Dev-Runner VM
+        value: terraform/proxmox/git-dev-runner
+      - name: Monitoring VM
+        value: terraform/proxmox/monitoring
+      - name: Dev 1 VM
+        value: terraform/proxmox/dev-1
+      - name: Dev 2 VM
+        value: terraform/proxmox/dev-2
   - name: tf_action
     title: Action
     description: plan reviews, apply builds then installs, install reruns only the install playbook

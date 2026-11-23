@@ -1,7 +1,7 @@
 ---
-# Seeds NetBox with the curated records the syncs cannot discover: manufacturers, device roles, platforms, VLANs, prefixes and static IP addresses
-# Data: netbox_manufacturers, netbox_device_roles, netbox_platforms, netbox_vlans, netbox_prefixes and netbox_ip_addresses from the inventory; any that is unset is skipped
-# Manufacturers, roles, platforms and VLANs are created or updated; prefixes and IP addresses are create-only, so curated records in NetBox are never overwritten
+# Seeds NetBox with the curated records the syncs cannot discover: manufacturers, device roles, platforms, device types, VLANs, prefixes, static IP addresses and physical devices
+# Data: netbox_manufacturers, netbox_device_roles, netbox_platforms, netbox_device_types, netbox_vlans, netbox_prefixes, netbox_ip_addresses and netbox_devices from the inventory; any that is unset is skipped
+# Manufacturers, roles, platforms, device types and VLANs are created or updated; prefixes, IP addresses and devices are create-only, so curated records in NetBox are never overwritten
 # Connection: netbox_url in the inventory or NETBOX_URL in the environment; Vault: NETBOX_TOKEN at netbox (vault_netbox_path renames it)
 - name: Seed NetBox from the inventory
   hosts: localhost
@@ -73,6 +73,20 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # Hardware models a device can be; after manufacturers, which each one names
+    - name: Seed device types
+      netbox.netbox.netbox_device_type:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          manufacturer: "{{ item.manufacturer }}"
+          model: "{{ item.model }}"
+          slug: "{{ item.slug }}"
+        state: present
+      loop: "{{ netbox_device_types | default([]) }}"
+      loop_control:
+        label: "{{ item.manufacturer }} {{ item.model }}"
+
     # Before prefixes, which attach to a VLAN by vid and site
     - name: Seed VLANs
       netbox.netbox.netbox_vlan:
@@ -91,13 +105,13 @@
         label: "{{ item.vid }} {{ item.name }}"
 
     # Read first, so the create-only steps below can skip what NetBox already holds
-    - name: Read the prefixes and addresses NetBox holds
+    - name: Read the prefixes, addresses and devices NetBox holds
       ansible.builtin.uri:
-        url: "{{ seed_url }}/api/ipam/{{ item }}/?limit=0"
+        url: "{{ seed_url }}/api/{{ item }}/?limit=0"
         headers:
           Authorization: "Token {{ seed_token }}"
           Accept: application/json
-      loop: [prefixes, ip-addresses]
+      loop: [ipam/prefixes, ipam/ip-addresses, dcim/devices]
       register: seed_existing
       retries: 5
       delay: 3
@@ -109,6 +123,7 @@
       ansible.builtin.set_fact:
         seed_have_prefixes: "{{ seed_existing.results[0].json.results | map(attribute='prefix') | list }}"
         seed_have_addresses: "{{ seed_existing.results[1].json.results | map(attribute='address') | map('regex_replace', '/.*$', '') | list }}"
+        seed_have_devices: "{{ seed_existing.results[2].json.results | map(attribute='name') | list }}"
 
     # Create-only: an existing prefix keeps whatever was curated on it in NetBox
     - name: Seed prefixes
@@ -142,3 +157,23 @@
       loop_control:
         label: "{{ item.address }}"
       when: item.address | regex_replace('/.*$', '') not in seed_have_addresses
+
+    # Create-only, matched by name: an existing device keeps its curated interfaces, primary address and rack position
+    - name: Seed devices
+      netbox.netbox.netbox_device:
+        netbox_url: "{{ seed_url }}"
+        netbox_token: "{{ seed_token }}"
+        data:
+          name: "{{ item.name }}"
+          device_type: "{{ item.device_type }}"
+          role: "{{ item.role }}"
+          site: "{{ item.site }}"
+          platform: "{{ item.platform | default(omit) }}"
+          cluster: "{{ item.cluster | default(omit) }}"
+          status: "{{ item.status | default('active') }}"
+          description: "{{ item.description | default(omit) }}"
+        state: present
+      loop: "{{ netbox_devices | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in seed_have_devices

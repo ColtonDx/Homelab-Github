@@ -1,0 +1,26 @@
+---
+# Fails the run when a non-system user is in a privileged group, either as a member or as its primary group; changes nothing
+# Expects dev_host_users and the getent passwd and group facts from main.yaml
+
+# Each offending user and group, as "user (group)"; groups that do not exist on the host are skipped
+- name: Find users in privileged groups
+  ansible.builtin.set_fact:
+    dev_host_privileged_members: >-
+      {%- set found = [] -%}
+      {%- for group in dev_host_privileged_groups if group in ansible_facts.getent_group -%}
+      {%- set gid = ansible_facts.getent_group[group][1] -%}
+      {%- set members = ansible_facts.getent_group[group][2].split(',') | select | list -%}
+      {%- for user in dev_host_users if user not in dev_host_admin_users
+          and (user in members or ansible_facts.getent_passwd[user][2] == gid) -%}
+      {%- set _ = found.append(user ~ ' (' ~ group ~ ')') -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ found }}
+
+# The fix is removing the user from the group, by whatever created the account; this role never edits accounts it did not create
+- name: Fail if any user holds a privileged group
+  ansible.builtin.assert:
+    that:
+      - dev_host_privileged_members | length == 0
+    fail_msg: "Users in privileged groups: {{ dev_host_privileged_members | join(', ') }}. Remove them from those groups, or list an admin account in dev_host_admin_users."
+    quiet: true

@@ -69,6 +69,12 @@ variable "description" {
   default     = "Development VM 2"
 }
 
+variable "tags" {
+  type        = string
+  description = "Semicolon-separated Proxmox tags"
+  default     = "terraform"
+}
+
 variable "cores" {
   type        = number
   description = "CPU cores"
@@ -97,4 +103,10 @@ variable "start_at_node_boot" {
   type        = bool
   description = "Start the VM when its Proxmox node boots"
   default     = false
+}
+
+variable "adopt_existing_vm" {
+  type        = bool
+  description = "Import the VM that already has vm_id on target_node instead of creating it; set false when building it from scratch"
+  default     = true
 }

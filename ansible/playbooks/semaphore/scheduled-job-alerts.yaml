@@ -2,15 +2,21 @@
 # Posts to Discord when a scheduled Semaphore job starts failing or recovers, once per change rather than once per failed run; meant to run on its own schedule
 # Watches every template with an active schedule in every project; a run counts once, in the alert_window_minutes (default 15) after it finished, so that must match this job's schedule
 # A failed run alerts only when the run before it succeeded (or there was none); a successful run after a failure posts a recovery; anything else stays quiet
+# A run still going after four times its template's longest recent successful run (at least 30 minutes) alerts once, so a hung job is noticed the same day
 # Address: semaphore_url, else https://semaphore.<docker_domain>; Vault: SEMAPHORE_API_TOKEN at semaphore and DISCORD_WEBHOOK_URL at discord (vault_semaphore_path and vault_discord_path rename them)
 - name: Alert on scheduled job failures
   hosts: localhost
   connection: local
   gather_facts: false
+  # Fails any step that runs longer than this, so a Semaphore or Discord call that never returns cannot hang this job too
+  timeout: 120
 
   vars:
     sj_url: "{{ (semaphore_url | default('https://semaphore.' ~ docker_domain if docker_domain is defined else '', true)) | regex_replace('/+$', '') }}"
     sj_window: "{{ (alert_window_minutes | default(15) | int) * 60 }}"
+    # A run is overdue after this many times the longest of its template's last ten successful runs, and never before sj_overdue_floor seconds
+    sj_overdue_factor: 4
+    sj_overdue_floor: 1800
 
   tasks:
     # Semaphore's address comes from the inventory, so a missing one is a setup problem
@@ -107,10 +113,47 @@
         - sj_age | float <= sj_window | float
         - (item.0.status == 'error' and sj_prev != 'error') or (item.0.status == 'success' and sj_prev == 'error')
 
+    # Runs still going, and the recent successful runs of their templates to compare against; usually there are none
+    - name: Collect the runs still in progress
+      ansible.builtin.set_fact:
+        sj_active: "{{ sj_active | default([]) + (item.json | default([]) | selectattr('status', 'in', ['starting', 'running']) | selectattr('start', 'string') | list) }}"
+        sj_recent: "{{ sj_recent | default([]) + (item.json | default([]) | selectattr('status', 'equalto', 'success') | selectattr('start', 'string') | selectattr('end', 'string') | list)[:10] }}"
+      loop: "{{ sj_runs.results }}"
+      loop_control:
+        label: "{{ item.item.project }}/{{ item.item.template }}"
+
+    # The longest recent successful run per template, only for templates with a run in progress
+    - name: Work out how long each busy template usually takes
+      ansible.builtin.set_fact:
+        sj_usual: "{{ sj_usual | default({}) | combine({sj_key: [sj_usual[sj_key] | default(0), sj_took] | max}) }}"
+      loop: "{{ sj_recent | default([]) | selectattr('template_id', 'in', sj_active | default([]) | map(attribute='template_id') | list) | list }}"
+      loop_control:
+        label: "#{{ item.id }}"
+      vars:
+        sj_key: "{{ item.project_id }}/{{ item.template_id }}"
+        sj_took: >-
+          {{ ((item.end | regex_replace('(\.[0-9]+)?Z$', '') | to_datetime('%Y-%m-%dT%H:%M:%S'))
+              - (item.start | regex_replace('(\.[0-9]+)?Z$', '') | to_datetime('%Y-%m-%dT%H:%M:%S'))).total_seconds() | int }}
+
+    # Each overdue run counts once, in the window just after it passed its limit, so a hung run alerts once rather than every 15 minutes
+    - name: Find runs taking far longer than usual
+      ansible.builtin.set_fact:
+        sj_overdue: "{{ sj_overdue | default([]) + [{'name': item.tpl_alias | default('template ' ~ item.template_id), 'project': item.project_id, 'template': item.template_id, 'task': item.id, 'minutes': (sj_age | int) // 60, 'usual': (sj_usual[sj_key] | default(0) | int + 59) // 60}] }}"
+      loop: "{{ sj_active | default([]) }}"
+      loop_control:
+        label: "#{{ item.id }}"
+      vars:
+        sj_key: "{{ item.project_id }}/{{ item.template_id }}"
+        sj_age: "{{ (now(utc=true) - (item.start | regex_replace('(\\.[0-9]+)?Z$', '') | to_datetime('%Y-%m-%dT%H:%M:%S'))).total_seconds() }}"
+        sj_limit: "{{ [sj_overdue_floor | int, (sj_usual[sj_key] | default(0) | int) * (sj_overdue_factor | int)] | max }}"
+      when:
+        - sj_age | float >= sj_limit | float
+        - sj_age | float < sj_limit | float + sj_window | float
+
     # Nothing changed is the usual result, so it is only noted in the log
     - name: Report the result
       ansible.builtin.debug:
-        msg: "{{ (sj_events | default([]) | length) ~ ' change(s) to post across ' ~ (sj_templates | default([]) | length) ~ ' scheduled template(s)' }}"
+        msg: "{{ (sj_events | default([]) | length) ~ ' change(s) and ' ~ (sj_overdue | default([]) | length) ~ ' overdue run(s) to post across ' ~ (sj_templates | default([]) | length) ~ ' scheduled template(s)' }}"
 
     # Red for a new failure, green for a recovery, each linking to the template's run history
     - name: Build a message per change
@@ -122,6 +165,21 @@
                'url': sj_url ~ '/project/' ~ item.project ~ '/templates/' ~ item.template,
                'color': 15158332 if item.failed else 3066993}] }}
       loop: "{{ sj_events | default([]) }}"
+      loop_control:
+        label: "{{ item.name }} #{{ item.task }}"
+
+    # Orange for a run that looks hung, with how long it has run against how long it usually takes and what to look at first
+    - name: Build a message per overdue run
+      ansible.builtin.set_fact:
+        sj_embeds: >-
+          {{ sj_embeds | default([]) + [{
+               'title': '🟠 Running long: ' ~ item.name,
+               'description': 'Run #' ~ item.task ~ ' has been running for ' ~ item.minutes ~ ' minutes'
+                 ~ ('; its recent successful runs took up to ' ~ item.usual ~ ' minutes' if item.usual > 0 else '; it has no recent successful run to compare with')
+                 ~ '. Check the last step in its output: a step with no new output is waiting on something that is not answering. Stop the run in Semaphore once you know why.',
+               'url': sj_url ~ '/project/' ~ item.project ~ '/templates/' ~ item.template,
+               'color': 15105570}] }}
+      loop: "{{ sj_overdue | default([]) }}"
       loop_control:
         label: "{{ item.name }} #{{ item.task }}"
 

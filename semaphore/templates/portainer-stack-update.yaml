@@ -6,6 +6,8 @@ app: ansible
 playbook: ansible/playbooks/portainer/update-stack.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
+# A task may run another branch, for check-mode runs of a PR before merge; real runs use main
+allow_override_branch_in_task: true
 environments:
   - Hashicorp Secrets
 survey_vars:

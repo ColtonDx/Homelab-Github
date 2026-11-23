@@ -9,6 +9,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: netbox_binding_lookups
+  retries: 3
+  delay: 5
+  until: netbox_binding_lookups is not failed
   loop:
     - dcim/mac-addresses/
     - virtualization/interfaces/
@@ -71,6 +74,9 @@
   loop_control:
     label: "{{ item.address }} -> interface {{ item.iface_id }}"
   register: lease_assign_results
+  retries: 3
+  delay: 5
+  until: lease_assign_results is not failed
 
 # Only where it differs, so a stable lease is not rewritten every run and the count means changed rather than seen
 - name: Update primary IPv4 where the lease no longer matches it
@@ -86,3 +92,6 @@
   loop_control:
     label: "VM {{ item.vm_id }} -> {{ item.address }}"
   register: lease_primary_results
+  retries: 3
+  delay: 5
+  until: lease_primary_results is not failed

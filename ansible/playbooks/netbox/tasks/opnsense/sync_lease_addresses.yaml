@@ -68,4 +68,7 @@
   loop_control:
     label: "{{ item.address }} {{ item.body | list | join(',') }}"
   register: update_results
+  retries: 3
+  delay: 5
+  until: update_results is not failed
   no_log: true

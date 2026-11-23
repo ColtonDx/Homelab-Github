@@ -50,6 +50,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbr_ips
+  retries: 3
+  delay: 5
+  until: nbr_ips is not failed
   no_log: true
 
 # Only Dynamic-tagged records are deletion candidates
@@ -60,6 +63,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbr_macs
+  retries: 3
+  delay: 5
+  until: nbr_macs is not failed
   no_log: true
 
 # Only Dynamic-tagged records are deletion candidates
@@ -70,6 +76,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbr_disks
+  retries: 3
+  delay: 5
+  until: nbr_disks is not failed
   no_log: true
 
 # Only Dynamic-tagged records are deletion candidates
@@ -80,6 +89,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbr_ifaces
+  retries: 3
+  delay: 5
+  until: nbr_ifaces is not failed
   no_log: true
 
 # Only Dynamic-tagged records are deletion candidates
@@ -90,6 +102,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbr_vms
+  retries: 3
+  delay: 5
+  until: nbr_vms is not failed
   no_log: true
 
 # Children first and parents last, so an address is never orphaned by deleting its interface first
