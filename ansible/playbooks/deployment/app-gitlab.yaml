@@ -50,13 +50,13 @@
         state: directory
         mode: "0755"
 
-    # Downloaded once; force: false keeps re-runs from fetching it again
+    # Installed only when its fingerprint matches GitLab's package signing key (docs.gitlab.com, package signatures)
     - name: Add GitLab repository signing key
-      ansible.builtin.get_url:
-        url: "https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_ed }}/gpgkey"
-        dest: "{{ gitlab_keyring_path }}"
-        mode: "0644"
-        force: false
+      ansible.builtin.include_tasks: ../../tasks/apt_signing_key.yaml
+      vars:
+        apt_key_url: "https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_ed }}/gpgkey"
+        apt_key_dest: "{{ gitlab_keyring_path }}"
+        apt_key_fingerprints: [F6403F6544A38863DAA0B6E03F01618A51312F3F]
 
     # Refreshes the package cache only when the source entry is added or changes
     - name: Add GitLab apt repository
