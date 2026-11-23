@@ -48,17 +48,22 @@ loki.process "syslog" {
   stage.match {
     selector = "{app=\"filterlog\"}"
 
-    // Field order: rule, sub-rule, anchor, tracker, interface, reason, action, direction, IP version, then version-specific fields up to the destination
+    // Field order: rule, sub-rule, anchor, tracker, interface, reason, action, direction, IP version, then version-specific fields up to the destination and, for TCP and UDP, its port
     stage.regex {
-      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),4,(?:[^,]*,){10}(?P<fl_dst>[^,]*)`
+      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),4,(?:[^,]*,){7}(?P<fl_proto>[^,]*),[^,]*,[^,]*,(?P<fl_dst>[^,]*)(?:,[0-9]+,(?P<fl_dport>[0-9]+))?`
     }
 
     stage.regex {
-      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),6,(?:[^,]*,){7}(?P<fl_dst>[^,]*)`
+      expression = `^[^,]*,[^,]*,[^,]*,[^,]*,(?P<fl_interface>[^,]*),[^,]*,(?P<fl_action>[^,]*),(?P<fl_direction>[^,]*),6,(?:[^,]*,){3}(?P<fl_proto>[^,]*),[^,]*,[^,]*,[^,]*,(?P<fl_dst>[^,]*)(?:,[0-9]+,(?P<fl_dport>[0-9]+))?`
     }
 
     stage.labels {
       values = { action = "fl_action", direction = "fl_direction", interface = "fl_interface" }
+    }
+
+    // Per-connection detail kept beside each line rather than as labels, so it adds no streams
+    stage.structured_metadata {
+      values = { dst_ip = "fl_dst", dst_port = "fl_dport", proto = "fl_proto" }
     }
 {% if monitoring_server_geoip | bool %}
 
@@ -87,6 +92,11 @@ loki.process "syslog" {
 
         stage.labels {
           values = { geoip_country_code = "" }
+        }
+
+        // City and coordinates for map panels, as structured metadata since they vary too much to be labels
+        stage.structured_metadata {
+          values = { geoip_city_name = "", geoip_location_latitude = "", geoip_location_longitude = "" }
         }
       }
 
