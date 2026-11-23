@@ -121,10 +121,11 @@
       loop: "{{ sj_runs.results }}"
       loop_control:
         label: "{{ item.item.project }}/{{ item.item.template }}"
-      # Worked out per template in vars, the same way as the pairing step above, which renders reliably on newer ansible-core
+      # Worked out per template in vars like the pairing step above; a running task always has a start time and a successful one
+      # both times, so no attribute tests are needed (the string test failed to render on ansible-core 2.21)
       vars:
-        sj_item_active: "{{ item.json | selectattr('status', 'in', ['starting', 'running']) | selectattr('start', 'string') | list }}"
-        sj_item_recent: "{{ (item.json | selectattr('status', 'equalto', 'success') | selectattr('start', 'string') | selectattr('end', 'string') | list)[:10] }}"
+        sj_item_active: "{{ item.json | selectattr('status', 'in', ['running']) | list }}"
+        sj_item_recent: "{{ (item.json | selectattr('status', 'in', ['success']) | list)[:10] }}"
 
     # The longest recent successful run per template, only for templates with a run in progress
     - name: Work out how long each busy template usually takes
