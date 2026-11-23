@@ -34,7 +34,7 @@
     dvbm_token: "{{ dvbm_run_auth.json.token }}"
   no_log: true
 
-# Jobs are matched by name, which is the Backup label value
+# Jobs are matched by their Backup label (Backup=<value>), whatever they are named; a job named after the value also counts
 - name: Get all DVBMv3 backup jobs
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/jobs"
@@ -49,7 +49,8 @@
 - name: Find the backup job matching the Backup label value
   ansible.builtin.set_fact:
     dvbm_run_job: >-
-      {{ dvbm_run_jobs.json | selectattr('name', 'equalto', dvbm_backup_name) | list | first | default({}) }}
+      {{ ((dvbm_run_jobs.json | selectattr('label_key', 'equalto', 'Backup') | selectattr('label_value', 'equalto', dvbm_backup_name) | list)
+         + (dvbm_run_jobs.json | selectattr('name', 'equalto', dvbm_backup_name) | list)) | first | default({}) }}
 
 # deploy-stack.yaml registers the job only when run with dvbm_job=true (or DVBM_JOB=true), so it can be missing
 - name: Fail if no matching backup job exists
