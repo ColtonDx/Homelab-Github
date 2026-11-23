@@ -12,6 +12,10 @@ monitoring_client_alloy_version: "1.22.0"
 
 # Name every metric and log line from this host carries as its host label
 monitoring_client_host_label: "{{ inventory_hostname }}"
+# The host's virtual machine name (e.g. in Proxmox), added as a vm label so dashboards can join in-guest data to the hypervisor's view; empty adds none
+monitoring_client_vm_label: "{{ proxmox_vm_name | default('') }}"
+# Packages to remove because Alloy replaces them, such as an older log shipper; purged so their services stop failing
+monitoring_client_remove_packages: []
 
 # Also ship container logs when the host runs Docker; auto turns it on when the Docker socket exists
 monitoring_client_docker_logs: auto

@@ -166,6 +166,40 @@
             path: "{{ kasm_work_dir }}"
             state: absent
 
+# Kasm writes its own log files under its version folder and never trims them; a component stuck in a retry loop once filled the disk
+- name: Rotate Kasm's log files
+  hosts: kasm
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Debian installs logrotate by default; make sure it is there
+    - name: Install logrotate
+      ansible.builtin.apt:
+        name: logrotate
+        state: present
+
+    # Daily, a week kept compressed, and early when a file passes 200 MB; copytruncate because Kasm keeps its logs open
+    - name: Rotate the logs of the current Kasm version
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/kasm
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # {{ ansible_managed }}
+          /opt/kasm/current/log/*.log /opt/kasm/current/log/*/*.log {
+              daily
+              maxsize 200M
+              rotate 7
+              compress
+              delaycompress
+              missingok
+              notifempty
+              copytruncate
+          }
+        validate: logrotate --debug %s
+
 # Finish with the certificate in Kasm's nginx; renewals are tls/renew-certificates.yaml's job
 - name: Configure Kasm's TLS certificate
   hosts: kasm

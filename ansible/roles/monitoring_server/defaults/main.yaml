@@ -44,6 +44,10 @@ monitoring_server_syslog_listeners:
 # A job that needs a bearer token also sets vault_path and vault_field; app-monitoring.yaml loads the token into monitoring_server_scrape_tokens[name]
 monitoring_server_scrape_jobs: []
 
+# Extra Grafana alert rules on log lines, each {uid, title, expr (a LogQL count, e.g. sum(count_over_time({...} |= "..." [15m]))),
+# summary, description}, optionally threshold (fires above it, default 0), window_seconds (default 900), for (default 0s), severity (warning)
+monitoring_server_log_alerts: []
+
 # Proxmox VE node addresses; when set, a Proxmox exporter reports CPU, memory, disk and network for every node and guest
 # Needs a read-only (PVEAuditor) API token, loaded by app-monitoring.yaml into monitoring_server_pve_token_id (user@realm!name) and monitoring_server_pve_token_secret
 # Cluster-wide and guest metrics come from the first address, node metrics from each

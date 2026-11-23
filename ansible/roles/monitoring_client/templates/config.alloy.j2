@@ -33,7 +33,7 @@ prometheus.scrape "host" {
 }
 
 prometheus.remote_write "server" {
-  external_labels = { host = "{{ monitoring_client_host_label }}" }
+  external_labels = { host = "{{ monitoring_client_host_label }}"{% if monitoring_client_vm_label %}, vm = "{{ monitoring_client_vm_label }}"{% endif %} }
 
   endpoint {
     url = "{{ monitoring_client_scheme }}://{{ monitoring_client_server }}:{{ monitoring_client_prometheus_port }}/api/v1/write"
@@ -48,7 +48,7 @@ prometheus.remote_write "server" {
 }
 
 loki.write "server" {
-  external_labels = { host = "{{ monitoring_client_host_label }}" }
+  external_labels = { host = "{{ monitoring_client_host_label }}"{% if monitoring_client_vm_label %}, vm = "{{ monitoring_client_vm_label }}"{% endif %} }
 
   endpoint {
     url = "{{ monitoring_client_scheme }}://{{ monitoring_client_server }}:{{ monitoring_client_loki_port }}/loki/api/v1/push"

@@ -9,6 +9,14 @@
     fail_msg: "Set monitoring_client_server to the monitoring server's address and, for https, load monitoring_client_push_password from Vault; only Debian and Ubuntu hosts are supported."
     quiet: true
 
+# Older shippers Alloy replaces; purging them stops their failed services and frees what they held
+- name: Remove packages Alloy replaces
+  ansible.builtin.apt:
+    name: "{{ monitoring_client_remove_packages }}"
+    state: absent
+    purge: true
+  when: monitoring_client_remove_packages | length > 0
+
 # gnupg lets apt_repository check the key, which minimal cloud images leave out
 - name: Install prerequisites
   ansible.builtin.apt:
