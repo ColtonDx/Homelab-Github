@@ -55,13 +55,13 @@
     vault_lookup_mount: "{{ vault_kv_mount | default(lookup('ansible.builtin.env', 'VAULT_KV_MOUNT'), true) | default('secret', true) }}"
   no_log: true
 
-# Names the missing setting instead of failing inside the Vault module
+# Names the missing setting instead of failing inside the Vault module; https only, so the token and secrets never cross the network in clear text
 - name: Require the Vault connection
   assert:
     that:
-      - vault_lookup_addr is match('^https?://')
+      - vault_lookup_addr is match('^https://')
       - vault_lookup_token | length > 0
-    fail_msg: "Reading Vault needs VAULT_ADDR and VAULT_TOKEN in the environment (or vault_addr and vault_token set by the playbook)."
+    fail_msg: "Reading Vault needs VAULT_ADDR (an https:// address) and VAULT_TOKEN in the environment (or vault_addr and vault_token set by the playbook)."
     quiet: true
   when: vault_paths | length > 0
 
