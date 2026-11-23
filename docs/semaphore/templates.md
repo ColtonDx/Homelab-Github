@@ -69,6 +69,7 @@ Each file follows the fields of Semaphore's template API (`/api/project/{id}/tem
 - `repository`, `inventory`, `environments` and `view` name the resources above.
 - `arguments` are extra command-line arguments, such as a fixed `-e tf_project=...`.
 - `task_params` and `allow_override_args_in_task` control what can be changed when starting a task.
+- `allow_override_branch_in_task` lets a task run another branch of the repository than its default (`main`); I only use it for check-mode runs of a PR branch before merge.
 - `survey_vars` are the questions asked when starting a task; for an Ansible template each answer becomes an extra variable of the same name, and for a Bash template the survey name is the script's flag, such as `--proxmox-host`.
 
 Templates for jobs that still run from the old GitLab repo (Build Container Registry Image) are not copied here until their playbooks move to this repo.
