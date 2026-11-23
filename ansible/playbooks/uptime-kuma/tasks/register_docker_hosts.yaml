@@ -20,6 +20,10 @@
     dockerDaemon: "{{ item.url }}"
     state: present
   loop: "{{ kuma_docker_hosts | default([]) }}"
+  register: kuma_docker_host_results
+  retries: 3
+  delay: 5
+  until: kuma_docker_host_results is not failed
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost

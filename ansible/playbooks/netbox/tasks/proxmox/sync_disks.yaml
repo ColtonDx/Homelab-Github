@@ -24,6 +24,9 @@
     headers: "{{ netbox_headers }}"
     status_code: 200
   register: nbd_existing
+  retries: 3
+  delay: 5
+  until: nbd_existing is not failed
   no_log: true
 
 # Keyed by VM ID and disk name, since every VM has a scsi0
