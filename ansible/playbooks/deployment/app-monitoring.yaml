@@ -2,6 +2,7 @@
 # Installs Docker and the central monitoring stack (Grafana, Loki, Prometheus and a syslog receiver) on a dedicated VM; safe to re-run
 # Vault: GRAFANA_ADMIN_PASSWORD at grafana and DISCORD_WEBHOOK_URL at discord (vault_grafana_path and vault_discord_path rename them); connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_servers (or target_hosts); every setting is in ansible/roles/monitoring_server/defaults/main.yaml
+# With a Grafana domain: MONITORING_PUSH_PASSWORD and MONITORING_READ_PASSWORD at monitoring (vault_monitoring_path renames it) for the Loki/Prometheus gateway
 # Proxmox metrics: set monitoring_server_pve_targets; needs PROXMOX_GRAFANA_TOKEN_ID and PROXMOX_GRAFANA_TOKEN_SECRET (a read-only PVEAuditor token) at proxmox
 # Extra scrape jobs (monitoring_server_scrape_jobs) can name a bearer token by vault_path and vault_field
 # HTTPS: set monitoring_server_grafana_domain and this issues Grafana's certificate with ACME, which also needs CF_API and CF_EMAIL at cloudflare
@@ -14,7 +15,7 @@
     # The Cloudflare credentials for the certificate's DNS challenge are only read when Grafana serves HTTPS
     vault_secrets: >-
       {{ monitoring_vault_secrets
-         + (monitoring_acme_secrets if monitoring_server_grafana_domain | default('') | length > 0 else [])
+         + (monitoring_acme_secrets + monitoring_gateway_secrets if monitoring_server_grafana_domain | default('') | length > 0 else [])
          + (monitoring_pve_secrets if monitoring_server_pve_targets | default([]) | length > 0 else [])
          + monitoring_scrape_secrets | default([]) }}
     monitoring_pve_secrets:
@@ -31,6 +32,14 @@
       - path: "{{ vault_discord_path | default('discord') }}"
         field: DISCORD_WEBHOOK_URL
         var: monitoring_server_discord_webhook_url
+    # The gateway's push and read passwords, needed whenever Grafana has a domain (the gateway then fronts Loki and Prometheus)
+    monitoring_gateway_secrets:
+      - path: "{{ vault_monitoring_path | default('monitoring') }}"
+        field: MONITORING_PUSH_PASSWORD
+        var: monitoring_server_push_password
+      - path: "{{ vault_monitoring_path | default('monitoring') }}"
+        field: MONITORING_READ_PASSWORD
+        var: monitoring_server_read_password
     monitoring_acme_secrets:
       - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
         field: CF_API
@@ -78,7 +87,7 @@
         acme_reloadcmd: >-
           chown 472:0 {{ monitoring_tls_dir }}/tls.key {{ monitoring_tls_dir }}/tls.crt
           && chmod 0600 {{ monitoring_tls_dir }}/tls.key
-          && (test ! -f {{ monitoring_dir }}/compose.yaml || docker compose --project-directory {{ monitoring_dir }} restart grafana)
+          && (test ! -f {{ monitoring_dir }}/compose.yaml || docker compose --project-directory {{ monitoring_dir }} restart grafana gateway)
         acme_ssl_owner: "472"
         acme_ssl_group: root
       when: monitoring_server_grafana_domain | default('') | length > 0

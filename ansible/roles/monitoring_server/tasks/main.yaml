@@ -9,7 +9,8 @@
         | reject('in', monitoring_server_scrape_tokens | default({})) | list | length == 0
       - monitoring_server_pve_targets | length == 0 or '!' in monitoring_server_pve_token_id | default('')
       - monitoring_server_pve_targets | length == 0 or monitoring_server_pve_token_secret | default('') | length > 0
-    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url, each scrape job's token and, with Proxmox targets, the Proxmox token id (user@realm!name) and secret (from Vault) before applying this role."
+      - not monitoring_server_gateway | bool or (monitoring_server_push_password | length > 0 and monitoring_server_read_password | length > 0)
+    fail_msg: "Load monitoring_server_grafana_admin_password, monitoring_server_discord_webhook_url, each scrape job's token, with Proxmox targets the Proxmox token id (user@realm!name) and secret, and with the gateway the push and read passwords (from Vault) before applying this role."
     quiet: true
 
 # Grafana won't start over HTTPS without its certificate, so stop here rather than leave it restarting
@@ -35,7 +36,7 @@
     owner: root
     group: root
     mode: "0755"
-  loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting]
+  loop: ["", loki, prometheus, alloy, grafana, grafana/datasources, grafana/alerting, gateway]
 
 # Secrets for the containers, readable by root only; a change recreates Grafana at the compose step, since a restart would keep the old values
 - name: Write the environment file
@@ -116,6 +117,19 @@
   notify: Restart alloy
 
 # Data sources are provisioned, so Grafana is rebuilt from code with no clicking
+# The gateway's routes and credentials; readable by root only, since it holds both passwords
+- name: Write the gateway's configuration
+  ansible.builtin.template:
+    src: gateway.conf.j2
+    dest: "{{ monitoring_server_dir }}/gateway/gateway.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart gateway
+  when: monitoring_server_gateway | bool
+
+# Grafana reads Loki and Prometheus inside the stack, so it needs no gateway credentials
 - name: Write Grafana's data sources
   ansible.builtin.template:
     src: grafana/datasources.yaml.j2
@@ -165,14 +179,20 @@
     status_code: 200
     # Grafana's certificate names its domain, not the loopback address checked here
     validate_certs: false
+    # Behind the gateway, Loki and Prometheus answer only the read user
+    url_username: "{{ 'read' if item.gateway | default(false) else omit }}"
+    url_password: "{{ monitoring_server_read_password if item.gateway | default(false) else omit }}"
+    force_basic_auth: "{{ item.gateway | default(false) }}"
   register: monitoring_server_ready
   until: monitoring_server_ready.status == 200
   retries: 30
   delay: 5
   loop:
     - { port: "{{ monitoring_server_grafana_port }}", path: /api/health, scheme: "{{ 'https' if monitoring_server_grafana_domain else 'http' }}" }
-    - { port: "{{ monitoring_server_loki_port }}", path: /ready }
-    - { port: "{{ monitoring_server_prometheus_port }}", path: /-/ready }
+    - { port: "{{ monitoring_server_loki_port }}", path: /ready, scheme: "{{ 'https' if monitoring_server_gateway | bool else 'http' }}",
+        gateway: "{{ monitoring_server_gateway | bool }}" }
+    - { port: "{{ monitoring_server_prometheus_port }}", path: /-/ready, scheme: "{{ 'https' if monitoring_server_gateway | bool else 'http' }}",
+        gateway: "{{ monitoring_server_gateway | bool }}" }
   loop_control:
     label: "{{ item.path }} on {{ item.port }}"
   when: not ansible_check_mode

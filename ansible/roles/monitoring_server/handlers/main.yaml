@@ -24,3 +24,10 @@
     argv: [docker, compose, restart, alloy]
     chdir: "{{ monitoring_server_dir }}"
   changed_when: true
+
+# Reloads the gateway's routes, credentials or certificate
+- name: Restart gateway
+  ansible.builtin.command:
+    argv: [docker, compose, restart, gateway]
+    chdir: "{{ monitoring_server_dir }}"
+  changed_when: true

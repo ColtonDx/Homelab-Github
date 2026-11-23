@@ -8,6 +8,8 @@ monitoring_server_loki_version: "3.7.10"
 monitoring_server_prometheus_version: "v3.16.0"
 monitoring_server_alloy_version: "v1.22.0"
 monitoring_server_pve_exporter_version: "3.12.0"
+# nginx for the gateway in front of Loki and Prometheus, pinned by digest
+monitoring_server_gateway_image: "nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94"
 
 # How long logs and metrics are kept
 monitoring_server_retention_days: 30
@@ -21,6 +23,13 @@ monitoring_server_tls_dir: "{{ monitoring_server_dir }}/tls"
 monitoring_server_grafana_port: "{{ 443 if monitoring_server_grafana_domain | length > 0 else 3000 }}"
 monitoring_server_loki_port: 3100
 monitoring_server_prometheus_port: 9090
+
+# With a Grafana domain, Loki and Prometheus are reachable only through a gateway on those same ports, over HTTPS with Grafana's certificate
+# and basic auth: user "push" may only send metrics and logs, user "read" may only query. Grafana itself reads them inside the stack.
+# The passwords come from Vault (app-monitoring.yaml loads MONITORING_PUSH_PASSWORD and MONITORING_READ_PASSWORD)
+monitoring_server_gateway: "{{ monitoring_server_grafana_domain | length > 0 }}"
+monitoring_server_push_password: ""
+monitoring_server_read_password: ""
 
 # Grafana's first administrator; the password comes from Vault and only takes effect on the first start, after which it lives in Grafana's database
 monitoring_server_grafana_admin_user: admin
