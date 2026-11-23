@@ -1,9 +1,12 @@
-# Records development VM 1 as Terraform, matching the live VM, so it can be rebuilt or brought under Terraform later; not applied to the live VM today
+# Development VM 1 as Terraform, matching the live VM so that adopting it changes nothing
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
-# Bringing it in means importing the live VM into this state first (terraform import); a plain apply would try to create a second VM
+# The import block below adopts the existing VM on the first apply; set adopt_existing_vm to false to build a new VM instead
 
 terraform {
+  # The import block below uses for_each, which needs Terraform 1.7 or later
+  required_version = ">= 1.7.0"
+
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
   backend "s3" {
     bucket                      = "terraform"
@@ -39,12 +42,16 @@ resource "proxmox_vm_qemu" "dev_1" {
   vmid        = var.vm_id
   target_node = var.target_node
   description = var.description
+  tags        = var.tags
 
   # Cloned once from the template; ignored afterwards, see lifecycle below
   clone      = var.template_name
   full_clone = true
 
   start_at_node_boot = var.start_at_node_boot
+
+  # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
+  startup_shutdown {}
 
   os_type    = "cloud-init"
   qemu_os    = "other"
@@ -111,4 +118,11 @@ resource "proxmox_vm_qemu" "dev_1" {
     # The template only matters at creation
     ignore_changes = [clone, full_clone]
   }
+}
+
+# Takes the existing VM into state rather than creating a second one; does nothing once the VM is in state
+import {
+  for_each = var.adopt_existing_vm ? toset([tostring(var.vm_id)]) : toset([])
+  to       = proxmox_vm_qemu.dev_1
+  id       = "${var.target_node}/qemu/${each.value}"
 }
