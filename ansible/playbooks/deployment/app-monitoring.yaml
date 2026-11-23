@@ -95,7 +95,8 @@
       ansible.builtin.include_tasks: ../../tasks/docker_install.yaml
 
     # Issued before the stack starts, since Grafana needs it to serve HTTPS; Grafana runs as uid 472, so each install hands it the files,
-    # and renewals restart Grafana once the stack exists (renew-certificates.yaml and acme.sh's cron reuse this command)
+    # and renewals restart Grafana and the gateway once the stack exists (renew-certificates.yaml and acme.sh's cron reuse this command);
+    # the service list is piped to xargs rather than substituted with $(...), which the shell would expand before acme.sh stores the command
     - name: Issue and install Grafana's certificate
       ansible.builtin.include_tasks: ../tls/tasks/issue_certificate.yaml
       vars:
@@ -106,7 +107,7 @@
         acme_reloadcmd: >-
           chown 472:0 {{ monitoring_tls_dir }}/tls.key {{ monitoring_tls_dir }}/tls.crt
           && chmod 0600 {{ monitoring_tls_dir }}/tls.key
-          && (test ! -f {{ monitoring_dir }}/compose.yaml || docker compose --project-directory {{ monitoring_dir }} restart $(docker compose --project-directory {{ monitoring_dir }} ps --services | grep -xE 'grafana|gateway'))
+          && (test ! -f {{ monitoring_dir }}/compose.yaml || docker compose --project-directory {{ monitoring_dir }} ps --services | grep -xE 'grafana|gateway' | xargs -r docker compose --project-directory {{ monitoring_dir }} restart)
         acme_ssl_owner: "472"
         acme_ssl_group: root
       when: monitoring_server_grafana_domain | default('') | length > 0
