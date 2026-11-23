@@ -48,7 +48,7 @@ Databases and caches pinned to a major or minor version: patch releases within i
 ### Following `latest` on purpose
 
 - **Images built in our own development group** (WorkSuite, Docker Volume Backup Manager): they track `latest` so Portainer's GitOps re-pull deploys each release automatically.
-- **Stateless or low-stakes tools** (it-tools, excalidraw, omni-tools, searxng, kiwix, changedetection, withoutbg, aerofoil, homebox, karakeep, ntfy, homepage, nginx-proxy-manager): a bad update costs a restart or a rollback, not data, and staying current brings their fixes without extra work.
+- **Stateless or low-stakes tools** (it-tools, excalidraw, omni-tools, searxng, kiwix, changedetection, withoutbg, aerofoil, homebox, karakeep, homepage, nginx-proxy-manager): a bad update costs a restart or a rollback, not data, and staying current brings their fixes without extra work.
 
 ## Other pinned downloads
 
