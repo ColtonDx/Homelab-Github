@@ -38,12 +38,13 @@
 - name: Record where each compose variable comes from
   ansible.builtin.set_fact:
     stack_sources: "{{ stack_sources | combine({item: source}) }}"
-  loop: "{{ compose_vars }}"
+  loop: "{{ compose_vars + compose_optional_vars | default([]) }}"
   vars:
     source: >-
       {{ stack_app_kv_path if item in stack_app_secrets
          else 'inventory' if item in stack_inventory_vars
-         else 'MISSING' }}
+         else 'MISSING' if item in compose_vars
+         else 'compose default' }}
 
 # Only names are shown, never values
 - name: Report where each compose variable comes from
@@ -54,7 +55,7 @@
 - name: Warn about compose vars set in both the inventory and Vault
   ansible.builtin.debug:
     msg: "WARNING: '{{ item }}' is set in the inventory and in Vault; using '{{ stack_sources[item] }}'. Remove the stale copy."
-  loop: "{{ compose_vars }}"
+  loop: "{{ compose_vars + compose_optional_vars | default([]) }}"
   when:
     - item in stack_inventory_vars
     - item in stack_app_secrets
@@ -74,12 +75,12 @@
   when: not (allow_missing_vars | default(false) | bool)
 
 # Portainer takes the env as a list of name and value pairs and hands it to Compose as an unquoted env file,
-# where $ starts a variable; doubling it keeps values such as bcrypt hashes intact
+# where $ starts a variable; doubling it keeps values such as bcrypt hashes intact; optional variables are sent only when set
 - name: Build Portainer env list
   ansible.builtin.set_fact:
     stack_env: >-
       {%- set env_list = [] -%}
-      {%- for var in compose_vars -%}
+      {%- for var in (compose_vars + compose_optional_vars | default([])) | unique -%}
         {%- if var in stack_values -%}
           {%- set _ = env_list.append({'name': var, 'value': stack_values[var] | string | replace('$', '$$')}) -%}
         {%- endif -%}

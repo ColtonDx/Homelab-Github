@@ -1,6 +1,6 @@
 ---
 # Runs a stack's DVBMv3 backup job on demand and waits for it; used by backups/dvbm-backup.yaml and portainer/update-stack.yaml, and fails the play unless the backup succeeds
-# Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_backup_timeout (default 1800), dvbm_backup_interval (default 10), dvbm_validate_certs (default false)
+# Needs: dvbm_url, dvbm_password, dvbm_backup_name; optional dvbm_backup_timeout (default 1800), dvbm_backup_interval (default 10), dvbm_validate_certs (default true; set false only for a self-signed DVBM)
 # Sets: dvbm_backup_id, the backup record to restore from later
 
 # Stop early with a clear message when the inputs are missing
@@ -21,7 +21,7 @@
     body:
       password: "{{ dvbm_password }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_run_auth
   retries: 5
   delay: 3
@@ -42,7 +42,7 @@
     headers:
       Authorization: "Bearer {{ dvbm_token }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_run_jobs
 
 # Empty when no job exists for this stack
@@ -68,7 +68,7 @@
     headers:
       Authorization: "Bearer {{ dvbm_token }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_prior_backups
 
 # Zero when the job has never run
@@ -84,7 +84,7 @@
     headers:
       Authorization: "Bearer {{ dvbm_token }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_trigger_result
 
 # Say what is being waited on
@@ -100,7 +100,7 @@
     headers:
       Authorization: "Bearer {{ dvbm_token }}"
     status_code: 200
-    validate_certs: "{{ dvbm_validate_certs | default(false) }}"
+    validate_certs: "{{ dvbm_validate_certs | default(true) }}"
   register: dvbm_poll
   retries: "{{ ((dvbm_backup_timeout | default(1800) | int) / (dvbm_backup_interval | default(10) | int)) | round(0, 'ceil') | int }}"
   delay: "{{ dvbm_backup_interval | default(10) | int }}"
