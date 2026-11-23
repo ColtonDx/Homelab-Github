@@ -14,7 +14,7 @@
 
   vars:
     # The runner must match the Semaphore server's version
-    runner_semaphore_version: "2.19.12"
+    runner_semaphore_version: "2.20.23"
     runner_terraform_version: "1.16.4"
     # talosctl should be within one minor release of the cluster, and kubectl within one of Kubernetes
     runner_talosctl_version: "1.14.1"
@@ -29,7 +29,7 @@
       kubectl:
         "1.37.1": {amd64: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8, arm64: ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7}
       semaphore:
-        "2.19.12": {amd64: 1e8e283bc822191e2ea10127996e35cbc2f77577ed8b15474c65375b0e1104d2, arm64: 75a930c8bc8a96a5fa2199bafb6f969fd5ada58f1e215c6a63ea074778cef7ac}
+        "2.20.23": {amd64: 89cbee983255534e167f140b8c58b4e5973b761afdeeea3fd81a5809ff6a8318, arm64: 3a6cd34f8083ceb1f51953ae9d2022c8b82e232d9fa7789f2619f55a1b5db4c5}
     # ansible-core 2.20 and later need Python 3.12, so hosts on Python 3.11 (e.g. Debian 12) get the 2.19 series
     runner_python_packages:
       - "ansible-core=={{ '2.21.4' if ansible_facts.python.version.minor | int >= 12 else '2.19.13' }}"
