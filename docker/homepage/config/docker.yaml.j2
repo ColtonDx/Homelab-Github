@@ -7,5 +7,7 @@ my-unraid:
   host: {{ (hostvars['unraid'] | default({})).homepage_url | default(undefined) | mandatory('Set homepage_url on inventory host unraid') | urlsplit('hostname') }}
   port: 2375
 
+# This host's containers, through the filtering proxy in Homepage's own stack (status and stats only)
 my-docker:
-  socket: /var/run/docker.sock
+  host: homepage-docker-proxy
+  port: 2375
