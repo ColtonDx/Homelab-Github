@@ -27,7 +27,7 @@
   run_once: true
 
 # Retention comes back as either a string or a dict depending on the Proxmox release, so both are normalised before comparing
-- name: Compare job {{ proxmox_bk_job_item.job_id }} with what it should be
+- name: Compare with what it should be, job {{ proxmox_bk_job_item.job_id }}
   ansible.builtin.set_fact:
     proxmox_bk_differs: >-
       {{ proxmox_bk_existing == {}
