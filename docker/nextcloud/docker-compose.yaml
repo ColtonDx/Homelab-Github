@@ -2,7 +2,8 @@ services:
   nextcloud:
     container_name: nextcloud
     restart: unless-stopped
-    image: lscr.io/linuxserver/nextcloud:latest
+    # Pinned by digest to the version that was running; updates arrive as reviewed changes
+    image: lscr.io/linuxserver/nextcloud:35.0.3-ls4@sha256:c95efa1a926b652b737d9ea68197419bc9f432f93d31bb126fc2fc32e0c6f1b4
     networks:
       - reverseproxy-nw
     environment:

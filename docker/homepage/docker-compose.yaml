@@ -5,6 +5,7 @@ services:
     image: ghcr.io/gethomepage/homepage:latest
     networks:
       - reverseproxy-nw
+      - docker-api
     # Internal names in the dashboard resolve through the site's own DNS
     dns: ${DNS_SERVER}
     environment:
@@ -17,7 +18,6 @@ services:
       - HOMEPAGE_ALLOWED_HOSTS=home.${DOCKER_DOMAIN}
     volumes:
       - data:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       - "Backup=homepage" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job
@@ -26,9 +26,47 @@ services:
       - "ConfigPath=/app/config" # Sets where push-config.yaml writes docker/homepage/config
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
 
+  # Homepage's only way to the Docker API: container status and stats, nothing else, and only for Homepage
+  homepage-docker-proxy:
+    container_name: homepage-docker-proxy
+    restart: unless-stopped
+    # Same filtering proxy as the docker-socket-proxy stack, pinned by digest
+    image: wollomatic/socket-proxy:1.13.2@sha256:ff95d6ff6c27853005ef85eb8f4ab5923dc3d2f1e055f98fb6aeeaceec3fe848
+    # Root only to open the root-owned socket; every capability is dropped and the filesystem is read-only
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks:
+      - docker-api
+    environment:
+      # Only the Homepage container may connect
+      SP_ALLOWFROM: homepage
+      # The calls Homepage makes: list containers (status dots) and one container's stats; no inspect, so no environment
+      SP_ALLOW_GET: (/v[0-9.]+)?/containers/(json|[a-zA-Z0-9_.-]+/stats)
+      SP_LISTENIP: 0.0.0.0
+      SP_ALLOWHEALTHCHECK: "true"
+      # Exits if the Docker socket stops answering, so the restart policy brings it back
+      SP_WATCHDOGINTERVAL: "3600"
+      SP_STOPONWATCHDOG: "true"
+      # Refused requests are logged with their path, which shows a Homepage update that needs another call
+      SP_LOGLEVEL: INFO
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # The host's Docker API, read through this proxy only
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    labels:
+      - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
+
 networks:
   reverseproxy-nw: # Use the existing Reverse Proxy Network
     external: true
+  # Private to this stack and without outside access: Homepage and its Docker API proxy only
+  docker-api:
+    internal: true
 
 volumes:
   data:

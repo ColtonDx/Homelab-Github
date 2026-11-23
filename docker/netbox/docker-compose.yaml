@@ -2,7 +2,8 @@ services:
   netbox:
     container_name: netbox
     restart: unless-stopped
-    image: lscr.io/linuxserver/netbox:latest
+    # Pinned by digest to the version that was running; updates arrive as reviewed changes
+    image: lscr.io/linuxserver/netbox:v4.7.5-ls393@sha256:d0e271427d6d3fd32d2abf37bdb39a774cea3eb4f6f042224ad47292183de551
     networks:
       - default
       - reverseproxy-nw

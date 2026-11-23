@@ -2,7 +2,8 @@ services:
   bookstack:
     container_name: bookstack
     restart: unless-stopped
-    image: lscr.io/linuxserver/bookstack:latest
+    # Pinned by digest to the version that was running; updates arrive as reviewed changes
+    image: lscr.io/linuxserver/bookstack:v26.09.3-ls300@sha256:5e44313f320a8a6f92f171b1beca4748f3e0a5110a4f4c19047cb4b4e43695a2
     depends_on:
       - mariadb
     networks:
@@ -30,7 +31,8 @@ services:
   mariadb:
     container_name: bookstack_mariadb
     restart: unless-stopped
-    image: lscr.io/linuxserver/mariadb:latest
+    # Pinned by digest to the version that was running; updates arrive as reviewed changes
+    image: lscr.io/linuxserver/mariadb:11.8.10-r0-ls241@sha256:4d9fb8985c06b2099d8421fb4070c4db0f61f3973e3b6828f6607cb0853f292d
     networks:
       - default
     environment:
