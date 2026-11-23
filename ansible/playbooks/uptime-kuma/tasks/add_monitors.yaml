@@ -49,6 +49,9 @@
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
       register: kuma_docker_info
+      retries: 3
+      delay: 5
+      until: kuma_docker_info is not failed
       when: kuma_monitors | selectattr('type', 'defined') | selectattr('type', 'equalto', 'docker') | list | length > 0
 
     # Container checks on an unknown Docker host are set aside so the rest still sync
@@ -77,6 +80,9 @@
         api_url: "{{ kuma_api_url }}"
         api_token: "{{ kuma_login.token }}"
       register: kuma_notification_info
+      retries: 3
+      delay: 5
+      until: kuma_notification_info is not failed
       when: kuma_wanted_notifications | length > 0
 
     # Kept as facts for the monitor task below
@@ -115,6 +121,10 @@
         notificationIDList: []
         state: present
       loop: "{{ kuma_group_pairs | default([]) | unique }}"
+      register: kuma_group_results
+      retries: 3
+      delay: 5
+      until: kuma_group_results is not failed
       loop_control:
         label: "{{ item.split('|') | reverse | select | join(' > ') }}"
 
@@ -140,6 +150,10 @@
         notification_names: "{{ kuma_monitor_notifications if kuma_monitor_notifications | length > 0 else omit }}"
         state: present
       loop: "{{ kuma_ready }}"
+      register: kuma_monitor_results
+      retries: 3
+      delay: 5
+      until: kuma_monitor_results is not failed
       loop_control:
         label: "{{ item.name }}"
       vars:

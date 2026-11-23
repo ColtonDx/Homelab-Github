@@ -7,6 +7,12 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  # Fails any single step, or loop item, that runs longer than this, so an API call that never returns fails its source instead of hanging the run
+  timeout: 300
+  # Every NetBox, Proxmox and OPNsense call gives up on a silent connection after this many seconds; reads and updates also retry, creates and deletes do not
+  module_defaults:
+    ansible.builtin.uri:
+      timeout: 30
 
   vars:
     netbox_all_sources: [inventory, proxmox, opnsense]

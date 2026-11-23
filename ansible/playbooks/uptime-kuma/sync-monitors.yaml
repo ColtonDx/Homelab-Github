@@ -7,6 +7,9 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  # Fails any single step, or loop item, that runs longer than this, so a Kuma call that never returns fails the run instead of hanging it;
+  # each call normally takes a few seconds, and the collection's own 10-second api_timeout does not cover a module that never exits
+  timeout: 120
 
   vars:
     kuma_default_group: "{{ sync_group | default('') }}"

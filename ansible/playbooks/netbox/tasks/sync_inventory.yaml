@@ -26,6 +26,9 @@
   loop_control:
     label: "{{ item.host }} {{ item.ip }}"
   register: nis_found
+  retries: 3
+  delay: 5
+  until: nis_found is not failed
 
 # Only addresses NetBox does not hold yet need a prefix
 - name: Find each new address's prefix
@@ -37,6 +40,9 @@
     label: "{{ item.item.host }} {{ item.item.ip }}"
   when: item.json.count == 0
   register: nis_prefixes
+  retries: 3
+  delay: 5
+  until: nis_prefixes is not failed
 
 # The narrowest prefix gives the mask; without a description the host name says where the address came from
 - name: Create the new inventory addresses
@@ -79,6 +85,9 @@
     - nis_wanted != nis_current_same_keys
   changed_when: true
   register: nis_updated
+  retries: 3
+  delay: 5
+  until: nis_updated is not failed
 
 # Shown so the run log says how many addresses the inventory supplies
 - name: Report the inventory sync

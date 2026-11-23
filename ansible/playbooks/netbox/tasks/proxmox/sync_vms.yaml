@@ -92,3 +92,6 @@
     - netbox_dynamic_tag_id is defined
     - "'dynamic' not in (item.tags | map(attribute='slug') | list)"
   register: nb_tag_backfill
+  retries: 3
+  delay: 5
+  until: nb_tag_backfill is not failed
