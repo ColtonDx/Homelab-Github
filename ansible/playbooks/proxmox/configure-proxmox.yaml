@@ -73,7 +73,7 @@
           tags: [storage]
       tags: [storage]
 
-    # NFS backup storage on TrueNAS and the backup schedule
+    # Backup storage on TrueNAS (NFS or CIFS) and the backup schedule
     - name: Configure backups
       ansible.builtin.include_tasks:
         file: tasks/backup.yaml

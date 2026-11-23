@@ -1,7 +1,11 @@
 ---
-# Adds the TrueNAS NFS share as backup storage and sets the scheduled backup job; both are cluster-wide, so they are set once from the first node
-# Inventory: proxmox_backup with storage_id, nfs_server, nfs_export, and optionally nfs_options (vers=4.2), job_id (nightly), schedule (02:00),
-#   mode (snapshot), compress (zstd), retention (a dict such as {keep-daily: 7, keep-weekly: 4}), vmids (a list; default every guest), exclude (a list), mailto
+# Adds the TrueNAS share as backup storage and sets the scheduled backup job; both are cluster-wide, so they are set once from the first node
+# Inventory: proxmox_backup with storage_id, storage_type (nfs or cifs, default nfs), and for nfs: nfs_server, nfs_export, optionally nfs_options (vers=4.2);
+#   for cifs: cifs_server, cifs_share, whose username and password are read from Vault (CIFS_USERNAME, CIFS_PASSWORD at vault_proxmox_backup_path,
+#   default proxmox-backup) only when the storage has to be created
+# Optional: job_id (nightly; set it to adopt a job made in the web UI), schedule (02:00, written as Proxmox stores it, e.g. 1:00), mode (snapshot),
+#   compress (zstd), retention (a dict such as {keep-daily: 7, keep-weekly: 4}), vmids (a list; default every guest), exclude (a list),
+#   notification_mode (auto, or notification-system to use Proxmox's notification targets), mailto
 # Unset skips this step; the share must already be exported to the Proxmox nodes on TrueNAS
 
 # Nothing to do without backup settings
@@ -12,19 +16,21 @@
     - name: Work out the backup settings
       ansible.builtin.set_fact:
         proxmox_bk: >-
-          {{ {'nfs_options': 'vers=4.2', 'job_id': 'nightly', 'schedule': '02:00', 'mode': 'snapshot', 'compress': 'zstd',
-              'retention': {'keep-daily': 7, 'keep-weekly': 4, 'keep-monthly': 3}, 'vmids': [], 'exclude': [], 'mailto': ''}
+          {{ {'storage_type': 'nfs', 'nfs_options': 'vers=4.2', 'job_id': 'nightly', 'schedule': '02:00', 'mode': 'snapshot', 'compress': 'zstd',
+              'retention': {'keep-daily': 7, 'keep-weekly': 4, 'keep-monthly': 3}, 'vmids': [], 'exclude': [], 'notification_mode': '', 'mailto': ''}
              | combine(proxmox_backup) }}
       run_once: true
 
     # The storage and the job both need these
-    - name: Require the NFS share details
+    - name: Require the share details
       ansible.builtin.assert:
         that:
           - proxmox_bk.storage_id | default('') | length > 0
-          - proxmox_bk.nfs_server | default('') | length > 0
-          - proxmox_bk.nfs_export | default('') | length > 0
-        fail_msg: "proxmox_backup needs storage_id, nfs_server and nfs_export."
+          - proxmox_bk.storage_type in ['nfs', 'cifs']
+          - (proxmox_bk.nfs_server | default('') | length > 0 and proxmox_bk.nfs_export | default('') | length > 0)
+            if proxmox_bk.storage_type == 'nfs'
+            else (proxmox_bk.cifs_server | default('') | length > 0 and proxmox_bk.cifs_share | default('') | length > 0)
+        fail_msg: "proxmox_backup needs storage_id and either nfs_server and nfs_export, or storage_type cifs with cifs_server and cifs_share."
       run_once: true
 
     # Retention in the key=value form Proxmox uses, sorted so it compares reliably
@@ -52,11 +58,48 @@
     - name: Refuse to repoint an existing storage entry
       ansible.builtin.assert:
         that:
-          - proxmox_bk_storage == {} or (proxmox_bk_storage.type == 'nfs' and proxmox_bk_storage.server == proxmox_bk.nfs_server
-            and proxmox_bk_storage.export == proxmox_bk.nfs_export)
+          - >-
+            proxmox_bk_storage == {}
+            or (proxmox_bk.storage_type == 'nfs' and proxmox_bk_storage.type == 'nfs'
+                and proxmox_bk_storage.server == proxmox_bk.nfs_server and proxmox_bk_storage.export == proxmox_bk.nfs_export)
+            or (proxmox_bk.storage_type == 'cifs' and proxmox_bk_storage.type == 'cifs'
+                and proxmox_bk_storage.server == proxmox_bk.cifs_server and proxmox_bk_storage.share == proxmox_bk.cifs_share)
         fail_msg: >-
-          Storage {{ proxmox_bk.storage_id }} already exists as {{ proxmox_bk_storage.type | default('?') }} from
-          {{ proxmox_bk_storage.server | default('?') }}:{{ proxmox_bk_storage.export | default('?') }}; change it by hand, or pick another id.
+          Storage {{ proxmox_bk.storage_id }} already exists as {{ proxmox_bk_storage.type | default('?') }} on
+          {{ proxmox_bk_storage.server | default('?') }}; change it by hand, or pick another id.
+      run_once: true
+
+    # The share's login is only needed to create a CIFS storage entry; an existing one keeps the login Proxmox already holds
+    - name: Load the CIFS share login from Vault
+      ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - { path: "{{ vault_proxmox_backup_path | default('proxmox-backup') }}", field: CIFS_USERNAME, var: proxmox_bk_cifs_username }
+          - { path: "{{ vault_proxmox_backup_path | default('proxmox-backup') }}", field: CIFS_PASSWORD, var: proxmox_bk_cifs_password }
+      when: proxmox_bk.storage_type == 'cifs' and proxmox_bk_storage == {}
+      run_once: true
+
+    # Backups only, so nobody places VM disks on the share by mistake; the password goes on pvesm's command line, so the task is hidden
+    - name: Add the CIFS backup storage
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - cifs
+          - "{{ proxmox_bk.storage_id }}"
+          - --server
+          - "{{ proxmox_bk.cifs_server }}"
+          - --share
+          - "{{ proxmox_bk.cifs_share }}"
+          - --username
+          - "{{ proxmox_bk_cifs_username }}"
+          - --password
+          - "{{ proxmox_bk_cifs_password }}"
+          - --content
+          - backup
+      when: proxmox_bk.storage_type == 'cifs' and proxmox_bk_storage == {}
+      changed_when: true
+      no_log: true
       run_once: true
 
     # Backups only, so nobody places VM disks on the share by mistake
@@ -75,7 +118,7 @@
           - backup
           - --options
           - "{{ proxmox_bk.nfs_options }}"
-      when: proxmox_bk_storage == {}
+      when: proxmox_bk.storage_type == 'nfs' and proxmox_bk_storage == {}
       run_once: true
 
     # Only the mount options and content can change on an existing entry
@@ -83,6 +126,7 @@
       ansible.builtin.command:
         argv: [pvesm, set, "{{ proxmox_bk.storage_id }}", --content, backup, --options, "{{ proxmox_bk.nfs_options }}"]
       when:
+        - proxmox_bk.storage_type == 'nfs'
         - proxmox_bk_storage != {}
         - proxmox_bk_storage.content | default('') != 'backup' or proxmox_bk_storage.options | default('') != proxmox_bk.nfs_options
       run_once: true
@@ -103,8 +147,8 @@
     - name: Report a node that cannot mount the share
       ansible.builtin.debug:
         msg: >-
-          WARNING: {{ ansible_facts.hostname }} cannot mount {{ proxmox_bk.nfs_server }}:{{ proxmox_bk.nfs_export }};
-          check TrueNAS exports it to this node's address.
+          WARNING: {{ ansible_facts.hostname }} cannot mount backup storage {{ proxmox_bk.storage_id }};
+          check TrueNAS shares it with this node's address.
       when: proxmox_bk_status.stdout is not search('\\sactive\\s')
 
     # The scheduled jobs, to decide between creating and updating
@@ -125,6 +169,7 @@
               '--compress', proxmox_bk.compress, '--prune-backups', proxmox_bk_prune, '--enabled', '1']
              + (['--vmid', proxmox_bk.vmids | join(','), '--all', '0'] if proxmox_bk.vmids | length > 0 else ['--all', '1'])
              + (['--exclude', proxmox_bk.exclude | join(',')] if proxmox_bk.exclude | length > 0 and proxmox_bk.vmids | length == 0 else [])
+             + (['--notification-mode', proxmox_bk.notification_mode] if proxmox_bk.notification_mode | length > 0 else [])
              + (['--mailto', proxmox_bk.mailto, '--mailnotification', 'failure'] if proxmox_bk.mailto | length > 0 else []) }}
       run_once: true
 
@@ -138,6 +183,7 @@
              or proxmox_bk_existing.mode | default('') != proxmox_bk.mode
              or proxmox_bk_existing.compress | default('') != proxmox_bk.compress
              or (proxmox_bk_existing.enabled | default(1) | int) != 1
+             or (proxmox_bk.notification_mode | length > 0 and proxmox_bk_existing['notification-mode'] | default('auto') != proxmox_bk.notification_mode)
              or (existing_prune if existing_prune is string else existing_prune | dictsort | map('join', '=') | join(','))
                 .split(',') | sort | join(',') != proxmox_bk_prune
              or (proxmox_bk_existing.all | default(0) | int) != (0 if proxmox_bk.vmids | length > 0 else 1)
