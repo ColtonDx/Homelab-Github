@@ -19,3 +19,4 @@ talos/_out/
 
 # Local tooling
 id_rsa
+.ansible/
