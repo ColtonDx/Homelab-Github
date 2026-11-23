@@ -6,6 +6,9 @@
 # Optional: job_id (nightly; set it to adopt a job made in the web UI), schedule (02:00, written as Proxmox stores it, e.g. 1:00), mode (snapshot),
 #   compress (zstd), retention (a dict such as {keep-daily: 7, keep-weekly: 4}), vmids (a list; default every guest), exclude (a list),
 #   notification_mode (auto, or notification-system to use Proxmox's notification targets), mailto
+# Optional: sub_storages, a list of {id, subdir}: extra backup storages in folders of the same share, each only used while the share is mounted
+# Optional: jobs, a list of jobs, each {job_id, schedule, retention, storage_id (default storage_id)} plus any of the job settings above;
+#   when set it replaces the single job. A job's retention prunes every backup of a guest on its storage, so rotating jobs each need their own storage
 # Unset skips this step; the share must already be exported to the Proxmox nodes on TrueNAS
 
 # Nothing to do without backup settings
@@ -17,7 +20,8 @@
       ansible.builtin.set_fact:
         proxmox_bk: >-
           {{ {'storage_type': 'nfs', 'nfs_options': 'vers=4.2', 'job_id': 'nightly', 'schedule': '02:00', 'mode': 'snapshot', 'compress': 'zstd',
-              'retention': {'keep-daily': 7, 'keep-weekly': 4, 'keep-monthly': 3}, 'vmids': [], 'exclude': [], 'notification_mode': '', 'mailto': ''}
+              'retention': {'keep-daily': 7, 'keep-weekly': 4, 'keep-monthly': 3}, 'vmids': [], 'exclude': [], 'notification_mode': '', 'mailto': '',
+              'sub_storages': [], 'jobs': []}
              | combine(proxmox_backup) }}
       run_once: true
 
@@ -31,12 +35,6 @@
             if proxmox_bk.storage_type == 'nfs'
             else (proxmox_bk.cifs_server | default('') | length > 0 and proxmox_bk.cifs_share | default('') | length > 0)
         fail_msg: "proxmox_backup needs storage_id and either nfs_server and nfs_export, or storage_type cifs with cifs_server and cifs_share."
-      run_once: true
-
-    # Retention in the key=value form Proxmox uses, sorted so it compares reliably
-    - name: Format the retention setting
-      ansible.builtin.set_fact:
-        proxmox_bk_prune: "{{ proxmox_bk.retention | dictsort | map('join', '=') | sort | join(',') }}"
       run_once: true
 
     # Proxmox's storage list, to decide between adding and updating
@@ -151,6 +149,45 @@
           check TrueNAS shares it with this node's address.
       when: proxmox_bk_status.stdout is not search('\\sactive\\s')
 
+    # Each extra storage is a folder inside the mounted share; Proxmox treats it as offline whenever the share is not mounted, so it never fills a local disk
+    - name: Add the backup folders inside the share
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - dir
+          - "{{ item.id }}"
+          - --path
+          - "/mnt/pve/{{ proxmox_bk.storage_id }}/{{ item.subdir }}"
+          - --is_mountpoint
+          - "/mnt/pve/{{ proxmox_bk.storage_id }}"
+          - --create-base-path
+          - "1"
+          - --shared
+          - "1"
+          - --content
+          - backup
+      loop: "{{ proxmox_bk.sub_storages }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: item.id not in (proxmox_bk_storage_list.stdout | from_json | map(attribute='storage') | list)
+      changed_when: true
+      run_once: true
+
+    # An existing entry with the same name must be the same folder, or it is a conflict for a person to resolve
+    - name: Refuse to repoint an existing backup folder entry
+      ansible.builtin.assert:
+        that:
+          - existing == {} or (existing.type == 'dir' and existing.path == '/mnt/pve/' ~ proxmox_bk.storage_id ~ '/' ~ item.subdir)
+        fail_msg: "Storage {{ item.id }} already exists as {{ existing.type | default('?') }} at {{ existing.path | default('?') }}; change it by hand, or pick another id."
+        quiet: true
+      loop: "{{ proxmox_bk.sub_storages }}"
+      loop_control:
+        label: "{{ item.id }}"
+      vars:
+        existing: "{{ proxmox_bk_storage_list.stdout | from_json | selectattr('storage', 'equalto', item.id) | first | default({}) }}"
+      run_once: true
+
     # The scheduled jobs, to decide between creating and updating
     - name: Read the backup jobs
       ansible.builtin.command:
@@ -160,51 +197,12 @@
       check_mode: false
       run_once: true
 
-    # The settings the job should have, in the form Proxmox's API takes and reports them
-    - name: Work out the backup job
-      ansible.builtin.set_fact:
-        proxmox_bk_existing: "{{ proxmox_bk_jobs.stdout | from_json | selectattr('id', 'equalto', proxmox_bk.job_id) | first | default({}) }}"
-        proxmox_bk_args: >-
-          {{ ['--schedule', proxmox_bk.schedule, '--storage', proxmox_bk.storage_id, '--mode', proxmox_bk.mode,
-              '--compress', proxmox_bk.compress, '--prune-backups', proxmox_bk_prune, '--enabled', '1']
-             + (['--vmid', proxmox_bk.vmids | join(','), '--all', '0'] if proxmox_bk.vmids | length > 0 else ['--all', '1'])
-             + (['--exclude', proxmox_bk.exclude | join(',')] if proxmox_bk.exclude | length > 0 and proxmox_bk.vmids | length == 0 else [])
-             + (['--notification-mode', proxmox_bk.notification_mode] if proxmox_bk.notification_mode | length > 0 else [])
-             + (['--mailto', proxmox_bk.mailto, '--mailnotification', 'failure'] if proxmox_bk.mailto | length > 0 else []) }}
-      run_once: true
-
-    # Retention comes back as either a string or a dict depending on the Proxmox release, so both are normalised before comparing
-    - name: Compare the job with what it should be
-      ansible.builtin.set_fact:
-        proxmox_bk_differs: >-
-          {{ proxmox_bk_existing == {}
-             or proxmox_bk_existing.schedule | default('') != proxmox_bk.schedule
-             or proxmox_bk_existing.storage | default('') != proxmox_bk.storage_id
-             or proxmox_bk_existing.mode | default('') != proxmox_bk.mode
-             or proxmox_bk_existing.compress | default('') != proxmox_bk.compress
-             or (proxmox_bk_existing.enabled | default(1) | int) != 1
-             or (proxmox_bk.notification_mode | length > 0 and proxmox_bk_existing['notification-mode'] | default('auto') != proxmox_bk.notification_mode)
-             or (existing_prune if existing_prune is string else existing_prune | dictsort | map('join', '=') | join(','))
-                .split(',') | sort | join(',') != proxmox_bk_prune
-             or (proxmox_bk_existing.all | default(0) | int) != (0 if proxmox_bk.vmids | length > 0 else 1)
-             or (proxmox_bk_existing.vmid | default('') | string) != (proxmox_bk.vmids | join(','))
-             or (proxmox_bk_existing.exclude | default('') | string) != (proxmox_bk.exclude | join(',') if proxmox_bk.vmids | length == 0 else '') }}
-      vars:
-        existing_prune: "{{ proxmox_bk_existing['prune-backups'] | default('') }}"
-      run_once: true
-
-    # A new job
-    - name: Create the backup job
-      ansible.builtin.command:
-        argv: "{{ ['pvesh', 'create', '/cluster/backup', '--id', proxmox_bk.job_id] + proxmox_bk_args }}"
-      when: proxmox_bk_existing == {}
-      run_once: true
-
-    # An existing job with different settings
-    - name: Update the backup job
-      ansible.builtin.command:
-        argv: "{{ ['pvesh', 'set', '/cluster/backup/' ~ proxmox_bk.job_id] + proxmox_bk_args }}"
-      when:
-        - proxmox_bk_existing != {}
-        - proxmox_bk_differs | bool
-      run_once: true
+    # The jobs list, or the single job described by the top-level settings
+    - name: Create or update each backup job
+      ansible.builtin.include_tasks: backup_job.yaml
+      loop: >-
+        {{ proxmox_bk.jobs if proxmox_bk.jobs | length > 0
+           else [{'job_id': proxmox_bk.job_id, 'schedule': proxmox_bk.schedule, 'retention': proxmox_bk.retention}] }}
+      loop_control:
+        loop_var: proxmox_bk_job_item
+        label: "{{ proxmox_bk_job_item.job_id }}"
