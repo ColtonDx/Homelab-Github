@@ -1,9 +1,12 @@
 # Builds the GitLab VM on Proxmox from a cloud-init template; ansible/playbooks/terraform/build-project.yaml applies this and then installs GitLab with app-gitlab.yaml
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
-# Adopting an existing VM instead of building one: terraform import proxmox_vm_qemu.gitlab <target_node>/qemu/<vm_id>
+# The import block at the end adopts the existing VM on the first apply; set adopt_existing_vm to false to build a new VM instead
 
 terraform {
+  # The import block below uses for_each, which needs Terraform 1.7 or later
+  required_version = ">= 1.7.0"
+
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
   backend "s3" {
     bucket                      = "terraform"
@@ -39,7 +42,10 @@ resource "proxmox_vm_qemu" "gitlab" {
   vmid        = var.vm_id
   target_node = var.target_node
   description = var.description
-  tags        = var.tags
+
+  # Proxmox HA: the state the cluster keeps the VM in (e.g. started); null leaves it out of HA
+  hastate = var.ha_state
+  tags    = var.tags
 
   # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
   startup_shutdown {}
@@ -58,7 +64,7 @@ resource "proxmox_vm_qemu" "gitlab" {
   scsihw     = "virtio-scsi-pci"
   memory     = var.memory
   balloon    = 0
-  agent      = 0
+  agent      = var.qemu_agent ? 1 : 0
   hotplug    = "network,disk,usb"
   tablet     = true
   kvm        = true
@@ -112,10 +118,25 @@ resource "proxmox_vm_qemu" "gitlab" {
     macaddr = var.mac_address != "" ? var.mac_address : null
   }
 
+  # Never reboot the VM to apply a change; changes that need a restart wait for a planned one
+  automatic_reboot = false
+
   lifecycle {
-    # Destroying GitLab takes every repository and the CI history with it, so Terraform must never do it
+    # Refuse any plan that would destroy or replace this VM
     prevent_destroy = true
-    # The template only matters at creation, and an imported VM has none recorded
-    ignore_changes = [clone, full_clone]
+
+    # The template only matters at creation; the description, disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
+    ignore_changes = [
+      clone, full_clone, description,
+      disks, network, ipconfig0, ciupgrade, os_type,
+      serial, vga, boot, scsihw, bios, startup_shutdown,
+    ]
   }
+}
+
+# Takes the existing VM into state rather than creating a second one; does nothing once the VM is in state
+import {
+  for_each = var.adopt_existing_vm ? toset([tostring(var.vm_id)]) : toset([])
+  to       = proxmox_vm_qemu.gitlab
+  id       = "${var.target_node}/qemu/${each.value}"
 }
