@@ -15,10 +15,12 @@
     proxmox_cert_user: "{{ hostvars[proxmox_cert_hosts[0]].automation_user_name | default('ansible') if proxmox_cert_hosts | length > 0 else 'ansible' }}"
 
   tasks:
-    # Tagged always, so a run limited to some tags (e.g. --tags ansible_user) still logs in this way
+    # Tagged always, so a run limited to some tags (e.g. --tags ansible_user) still logs in this way; check_mode false because a
+    # dry run on the nodes still needs a real login, and these steps only touch the runner's memory
     - name: Sign and use the certificate
       when: proxmox_cert_on | bool
       tags: [always]
+      check_mode: false
       block:
         # A run that stopped early leaves its key behind; the certificate has expired by then, but the key goes too
         - name: Find keys earlier runs left behind

@@ -13,3 +13,5 @@
         state: absent
       when: proxmox_cert_path is defined
       tags: [always]
+      # Also in dry runs, which made a real key too
+      check_mode: false
