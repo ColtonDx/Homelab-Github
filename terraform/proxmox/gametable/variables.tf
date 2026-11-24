@@ -82,3 +82,9 @@ variable "start_at_node_boot" {
   description = "Start the VM when its Proxmox node boots"
   default     = false
 }
+
+variable "tags" {
+  type        = string
+  description = "Semicolon-separated Proxmox tags"
+  default     = "terraform"
+}

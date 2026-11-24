@@ -47,6 +47,9 @@ resource "proxmox_vm_qemu" "talos_node" {
   description = var.description
   tags        = "terraform;talos"
 
+  # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
+  startup_shutdown {}
+
   # A cluster node must come back on its own after a host reboot
   start_at_node_boot = true
 

@@ -39,6 +39,10 @@ resource "proxmox_vm_qemu" "kasm" {
   vmid        = var.vm_id
   target_node = var.target_node
   description = var.description
+  tags        = var.tags
+
+  # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
+  startup_shutdown {}
 
   # Cloned once from the template; ignored afterwards, see lifecycle below
   clone      = var.template_name

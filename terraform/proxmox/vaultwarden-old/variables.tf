@@ -104,3 +104,9 @@ variable "vlan_tag" {
   description = "VLAN the VM's network interface is tagged into"
   default     = 99
 }
+
+variable "tags" {
+  type        = string
+  description = "Semicolon-separated Proxmox tags"
+  default     = "terraform"
+}
