@@ -1,0 +1,10 @@
+---
+# Semaphore task template Network | ICX Facts; see docs/semaphore/templates.md for the project resources it names
+name: Network | ICX Facts
+description: "Read-only: logs in to the ICX switches with the automation account and reports model, firmware and interfaces; the connection test before any config change"
+app: ansible
+playbook: ansible/playbooks/network/icx-facts.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

@@ -63,6 +63,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Uptime Kuma \| Sync Monitors | (none) | [uptime-kuma-sync-monitors.yaml](../../semaphore/templates/uptime-kuma-sync-monitors.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` |
 | Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](../../semaphore/templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/set-maintenance-window.yaml` |
 | OPNsense \| Reserve IP | (none) | [opnsense-dnsmasq-reserve-ip.yaml](../../semaphore/templates/opnsense-dnsmasq-reserve-ip.yaml) | `ansible/playbooks/opnsense/dnsmasq-reserve-ip.yaml` |
+| Network \| ICX Facts | (none) | [network-icx-facts.yaml](../../semaphore/templates/network-icx-facts.yaml) | `ansible/playbooks/network/icx-facts.yaml` |
 
 ## File format
 
