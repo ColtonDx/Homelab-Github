@@ -1,9 +1,0 @@
----
-# Semaphore task template Linux Disk Utilization Check; see docs/semaphore/templates.md for the project resources it names
-name: Linux Disk Utilization Check
-app: ansible
-playbook: ansible/playbooks/maintenance/disk-usage-alert.yaml
-repository: Github-Homelab
-inventory: Gitlab Ansible Inventory
-environments:
-  - Hashicorp Secrets
