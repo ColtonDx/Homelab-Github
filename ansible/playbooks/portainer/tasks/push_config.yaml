@@ -56,6 +56,8 @@
 
     # Extracts the files into ConfigPath inside the container, overwriting the old copies
     - name: Copy the files into the container
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/{{ stack_config_container }}/archive?path={{ stack_config_path | urlencode }}"
         method: PUT
@@ -70,6 +72,8 @@
 
     # Only for apps that do not pick up config changes on their own
     - name: Restart the container
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/{{ stack_config_container }}/restart"
         method: POST

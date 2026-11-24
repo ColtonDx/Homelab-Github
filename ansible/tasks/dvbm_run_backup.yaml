@@ -36,6 +36,8 @@
 
 # Jobs are matched by their Backup label (Backup=<value>), whatever they are named; a job named after the value also counts
 - name: Get all DVBMv3 backup jobs
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/jobs"
     method: GET
@@ -62,6 +64,8 @@
 
 # The newest record before triggering, so the new run can be told apart from older ones
 - name: Record the newest existing backup for this job
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/backups?job_id={{ dvbm_run_job.id }}&limit=1"
     method: GET
@@ -78,6 +82,8 @@
 
 # Start the backup now rather than waiting for its schedule
 - name: Trigger the backup job
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/jobs/{{ dvbm_run_job.id }}/run"
     method: POST
@@ -94,6 +100,8 @@
 
 # Poll until a record newer than the one above exists and has stopped running
 - name: Wait for a new backup record to finish
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/backups?job_id={{ dvbm_run_job.id }}&limit=1"
     method: GET
