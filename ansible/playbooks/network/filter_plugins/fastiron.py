@@ -41,8 +41,24 @@ def fastiron_lines(text, ignore=None):
     return sorted(set(entries))
 
 
+def fastiron_commands(entries):
+    """Group fastiron_lines entries into pushes: [{'parents': [block] or [], 'lines': [...]}], top-level lines first."""
+    top = [e for e in entries if " :: " not in e]
+    blocks = {}
+    for entry in entries:
+        if " :: " in entry:
+            header, line = entry.split(" :: ", 1)
+            blocks.setdefault(header, []).append(line)
+    # A missing block header is opened by its block's parents line instead, so it never leaves later top-level lines inside that block
+    top = [line for line in top if line not in blocks]
+    pushes = [{"parents": [], "lines": top}] if top else []
+    for header in sorted(blocks):
+        pushes.append({"parents": [header], "lines": blocks[header]})
+    return pushes
+
+
 class FilterModule(object):
     """FastIron config filters."""
 
     def filters(self):
-        return {"fastiron_lines": fastiron_lines}
+        return {"fastiron_lines": fastiron_lines, "fastiron_commands": fastiron_commands}

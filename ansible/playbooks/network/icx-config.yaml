@@ -1,11 +1,14 @@
 ---
-# Compares each ICX switch's running config with the config its inventory defines, and reports every difference; changes nothing
+# Compares each ICX switch's running config with the config its inventory defines and reports every difference; with apply=true it also sends
+# the lines the switch is missing (never removes anything) and saves the config when it changed
 # The inventory describes the switch with fastiron_* variables (host_vars): fastiron_global (top-level lines, or {line, children} blocks),
 # fastiron_vlans ({id, name, tagged ('all' or a port list), untagged, router_interface}), fastiron_all_ports (the port list 'all' means),
 # fastiron_port_groups ({prefix like 1/1, first, last, settings}), fastiron_port_overrides (per port, e.g. '1/1/36': {name, dual_mode, speed, poe})
 # and fastiron_router_interfaces ({name like 've 100', lines}); templates/fastiron-config.j2 renders them
 # Left out of the comparison: user accounts, SNMP communities and the version line (fastiron_ignore adds more patterns)
-# Extra vars: target_hosts (default switches), fail_on_drift (default false; true fails the run when they differ, for scheduled checks)
+# Extra vars: target_hosts (default switches), fail_on_drift (default false; true fails the run when they differ, for scheduled checks),
+# apply (default false; without it the run only lists the commands it would send), allow_protected (default false)
+# Inventory: fastiron_protected lists patterns for blocks or lines a run may not change unless allow_protected=true, such as the management interface
 # Needs community.network on the runner; logs in through login.yaml like the other network playbooks
 
 - name: Load the switch passwords
@@ -50,3 +53,41 @@
         that: (fastiron_missing + fastiron_extra) | length == 0
         fail_msg: "{{ inventory_hostname }}'s running config differs from the inventory; see the report above."
       when: fail_on_drift | default(false) | bool
+
+    # What apply would send: each missing line inside its block; lines only on the switch are reported above, never removed
+    - name: Work out the commands for the missing lines
+      ansible.builtin.set_fact:
+        fastiron_pushes: "{{ fastiron_missing | fastiron_commands }}"
+        fastiron_blocked: >-
+          {{ fastiron_missing | select('search', fastiron_protected | join('|')) | list if fastiron_protected | default([]) | length > 0 else [] }}
+
+    - name: Show the commands
+      ansible.builtin.debug:
+        msg: "{{ ['Nothing to send'] if fastiron_pushes | length == 0 else fastiron_pushes }}"
+
+    # The management interface and its VLAN carry this very connection, so a bad push there cuts off Ansible and everyone else
+    - name: Refuse to change protected config
+      ansible.builtin.assert:
+        that: fastiron_blocked | length == 0 or allow_protected | default(false) | bool
+        fail_msg: "These changes touch protected config and need allow_protected=true: {{ fastiron_blocked }}"
+      when: apply | default(false) | bool
+
+    # One push per block; match none sends exactly these lines, since the comparison above already chose them
+    - name: Send the missing lines
+      community.network.icx_config:
+        parents: "{{ item.parents if item.parents | length > 0 else omit }}"
+        lines: "{{ item.lines }}"
+        match: none
+      loop: "{{ fastiron_pushes }}"
+      loop_control:
+        label: "{{ item.parents | first | default('top level') }}"
+      when: apply | default(false) | bool
+
+    # Kept to runs that changed something, so a clean run never writes the switch's flash
+    - name: Save the config
+      community.network.icx_command:
+        commands: ["write memory"]
+      when:
+        - apply | default(false) | bool
+        - fastiron_pushes | length > 0
+      changed_when: true
