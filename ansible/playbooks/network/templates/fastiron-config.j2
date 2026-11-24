@@ -1,0 +1,52 @@
+{# Renders a FastIron switch configuration from the fastiron_* inventory variables; see network/icx-config.yaml for what each holds #}
+{% for item in fastiron_global | default([]) %}
+{% if item is mapping %}
+{{ item.line }}
+{% for child in item.children | default([]) %}
+ {{ child }}
+{% endfor %}
+{% else %}
+{{ item }}
+{% endif %}
+!
+{% endfor %}
+{% for vlan in fastiron_vlans | default([]) %}
+vlan {{ vlan.id }} name {{ vlan.name }} by port
+{% if vlan.tagged is defined %}
+ tagged {{ fastiron_all_ports if vlan.tagged == 'all' else vlan.tagged }}
+{% endif %}
+{% if vlan.untagged is defined %}
+ untagged {{ vlan.untagged }}
+{% endif %}
+{% if vlan.router_interface is defined %}
+ router-interface {{ vlan.router_interface }}
+{% endif %}
+!
+{% endfor %}
+{% for group in fastiron_port_groups | default([]) %}
+{% for n in range(group.first, group.last + 1) %}
+{% set port = group.prefix ~ '/' ~ n %}
+{% set p = group.settings | combine(fastiron_port_overrides[port] | default({})) %}
+interface ethernet {{ port }}
+{% if p.name | default('') | length > 0 %}
+ port-name {{ p.name }}
+{% endif %}
+{% if p.dual_mode is defined %}
+ dual-mode {{ p.dual_mode }}
+{% endif %}
+{% if p.speed is defined %}
+ speed-duplex {{ p.speed }}
+{% endif %}
+{% if p.poe | default(false) %}
+ inline power
+{% endif %}
+!
+{% endfor %}
+{% endfor %}
+{% for ve in fastiron_router_interfaces | default([]) %}
+interface {{ ve.name }}
+{% for line in ve.lines | default([]) %}
+ {{ line }}
+{% endfor %}
+!
+{% endfor %}
