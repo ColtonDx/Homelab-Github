@@ -14,6 +14,8 @@ services:
       - HBOX_WEB_MAX_UPLOAD_SIZE=10
       # Accounts already exist, so nobody else can register
       - HBOX_OPTIONS_ALLOW_REGISTRATION=false
+      # Required since 0.27: secret used to hash API keys (from Vault); changing it invalidates every issued API key
+      - HBOX_AUTH_API_KEY_PEPPER=${HOMEBOX_API_KEY_PEPPER}
     volumes:
       - data:/data/
     labels:
