@@ -19,6 +19,8 @@ services:
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: ${KARAKEEP_NEXTAUTH_SECRET}
       CRAWLER_VIDEO_DOWNLOAD: true
+      # Accounts already exist, so nobody else can sign up
+      DISABLE_SIGNUPS: "true"
     volumes:
       - data:/data
     labels:

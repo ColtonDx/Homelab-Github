@@ -2,6 +2,7 @@
 # Backs up Plex Media Server's data: stops Plex briefly to copy it, restarts Plex, then archives the copy to a backup share
 # Extra vars: target_hosts (default plex)
 # Inventory: plex_data_dir, plex_backup_dest (default /mnt/media/PlexBackups) and plex_service_name (default plexmediaserver) override the defaults
+# Inventory: backup_age_recipients (required) lists the age public keys the archive is encrypted to; the matching private key is kept off this host
 - name: Back up Plex Media Server
   hosts: "{{ target_hosts | default('plex') }}"
   become: true
@@ -15,7 +16,8 @@
     stamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
     temp_dir: "/tmp/plex_backup_{{ stamp }}"
     temp_archive: "/tmp/plex_backup_{{ stamp }}.tar.gz"
-    final_archive: "{{ backup_dest }}/plex_backup_{{ stamp }}.tar.gz"
+    temp_encrypted: "/tmp/plex_backup_{{ stamp }}.tar.gz.age"
+    final_archive: "{{ backup_dest }}/plex_backup_{{ stamp }}.tar.gz.age"
     # Items under the data directory worth keeping; any a given Plex version lacks are skipped
     include_items:
       - Codecs
@@ -29,6 +31,19 @@
       - Setup Plex.html
 
   tasks:
+    # The archive holds the Plex account token, so it never reaches the share unencrypted
+    - name: Require the age recipients
+      ansible.builtin.assert:
+        that: backup_age_recipients | default([]) | length > 0
+        fail_msg: Set backup_age_recipients (age public keys) in the inventory; Plex backups are always encrypted.
+        quiet: true
+
+    # age encrypts to public keys, so this host can write backups but never read them back
+    - name: Install age
+      ansible.builtin.package:
+        name: age
+        state: present
+
     # Find which items exist on this server so a missing one is skipped rather than failing the run
     - name: Check which items exist
       ansible.builtin.stat:
@@ -76,6 +91,12 @@
             format: gz
             mode: "0600"
 
+        # Encrypted on this host before it is copied, so only ciphertext reaches the share
+        - name: Encrypt the archive
+          ansible.builtin.command:
+            argv: "{{ ['age'] + (['-r'] | product(backup_age_recipients) | flatten) + ['-o', temp_encrypted, temp_archive] }}"
+          changed_when: true
+
         # Created on the share if this is the first backup
         - name: Ensure the backup destination exists
           ansible.builtin.file:
@@ -86,7 +107,7 @@
         # The copy module fails on SMB shares, so a plain cp is used
         - name: Copy the archive to the backup share
           ansible.builtin.command:
-            argv: [cp, "{{ temp_archive }}", "{{ final_archive }}"]
+            argv: [cp, "{{ temp_encrypted }}", "{{ final_archive }}"]
           changed_when: true
 
       rescue:
@@ -110,3 +131,4 @@
           loop:
             - "{{ temp_dir }}"
             - "{{ temp_archive }}"
+            - "{{ temp_encrypted }}"
