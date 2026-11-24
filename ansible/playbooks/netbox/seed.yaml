@@ -117,6 +117,8 @@
       delay: 3
       until: seed_existing is not failed
       no_log: true
+      # A read-only lookup, so it also runs in check mode, where the steps below need its results
+      check_mode: false
 
     # Addresses are compared without their mask, so the same address with another prefix length still counts as present
     - name: Note what already exists
@@ -166,7 +168,8 @@
         data:
           name: "{{ item.name }}"
           device_type: "{{ item.device_type }}"
-          role: "{{ item.role }}"
+          # The collection version the runner pins names this field device_role
+          device_role: "{{ item.role }}"
           site: "{{ item.site }}"
           platform: "{{ item.platform | default(omit) }}"
           cluster: "{{ item.cluster | default(omit) }}"
