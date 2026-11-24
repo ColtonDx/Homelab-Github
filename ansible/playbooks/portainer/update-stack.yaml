@@ -84,6 +84,8 @@
       block:
         # Healthy means running and not reporting an unhealthy or still-starting healthcheck
         - name: Poll container state
+          # The request carries a credential, so its arguments stay out of the log
+          no_log: true
           ansible.builtin.uri:
             url: "{{ portainer_url }}/api/endpoints/{{ portainer_endpoint_id }}/docker/containers/json?all=true"
             method: GET

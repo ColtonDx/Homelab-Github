@@ -239,6 +239,8 @@
 
 # Fails the run if a service does not come up, rather than leaving it broken unnoticed
 - name: Wait for each service to report ready
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ item.scheme | default('http') }}://127.0.0.1:{{ item.port }}{{ item.path }}"
     status_code: 200

@@ -37,6 +37,8 @@
 
     # Every project, so schedules added to a new project are watched too
     - name: List the projects
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ sj_url }}/api/projects"
         headers: { Authorization: "Bearer {{ sj_token }}" }
@@ -44,6 +46,8 @@
 
     # Each project's schedules, to find which templates run on their own
     - name: List each project's schedules
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ sj_url }}/api/project/{{ item.id }}/schedules"
         headers: { Authorization: "Bearer {{ sj_token }}" }
@@ -65,6 +69,8 @@
 
     # The template's name, for a readable message
     - name: Read each scheduled template
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ sj_url }}/api/project/{{ item.project }}/templates/{{ item.template }}"
         headers: { Authorization: "Bearer {{ sj_token }}" }
@@ -75,6 +81,8 @@
 
     # The newest runs first; only these few matter
     - name: Read each template's recent runs
+      # The request carries a credential, so its arguments stay out of the log
+      no_log: true
       ansible.builtin.uri:
         url: "{{ sj_url }}/api/project/{{ item.project }}/templates/{{ item.template }}/tasks/last"
         headers: { Authorization: "Bearer {{ sj_token }}" }

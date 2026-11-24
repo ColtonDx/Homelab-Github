@@ -26,6 +26,8 @@
 
 # Jobs are matched by their Backup label (Backup=<value>), whatever they are named; a job named after the value also counts
 - name: Get all existing DVBMv3 backup jobs
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ dvbm_url }}/api/jobs"
     method: GET

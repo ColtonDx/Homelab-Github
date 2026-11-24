@@ -126,6 +126,8 @@
 
 # Portainer identifies environments by ID, so look up the one named in portainer_endpoint
 - name: Get the Portainer environments
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ portainer_url }}/api/endpoints"
     method: GET
@@ -150,6 +152,8 @@
 
 # Stacks are matched by name within the chosen environment
 - name: Get the Portainer stacks
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ portainer_url }}/api/stacks"
     method: GET
@@ -161,6 +165,8 @@
 
 # Empty when the stack has not been deployed to this environment yet
 - name: Find the stack by name and environment
+  # The stack record includes its env values, which -v would otherwise print
+  no_log: true
   ansible.builtin.set_fact:
     existing_stack: >-
       {{ portainer_stacks.json | selectattr('Name', 'equalto', stack_name)

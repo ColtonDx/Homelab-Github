@@ -25,6 +25,8 @@
 
 # Existing hosts are matched by domain name
 - name: Get all existing proxy hosts
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ npm_url }}/api/nginx/proxy-hosts"
     method: GET
@@ -54,6 +56,8 @@
 
 # New host pointing at the container over the shared proxy network
 - name: Create new proxy host
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ npm_url }}/api/nginx/proxy-hosts"
     method: POST
@@ -89,6 +93,8 @@
 
 # Refresh the target, keeping any access list, advanced config and locations set by hand in NPM
 - name: Update existing proxy host
+  # The request carries a credential, so its arguments stay out of the log
+  no_log: true
   ansible.builtin.uri:
     url: "{{ npm_url }}/api/nginx/proxy-hosts/{{ npm_existing_host.id }}"
     method: PUT
