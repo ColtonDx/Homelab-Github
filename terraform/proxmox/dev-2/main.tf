@@ -114,9 +114,19 @@ resource "proxmox_vm_qemu" "dev_2" {
     macaddr = var.mac_address != "" ? var.mac_address : null
   }
 
+  # Never reboot the VM to apply a change; developers work on it, so changes wait for a planned restart
+  automatic_reboot = false
+
   lifecycle {
-    # The template only matters at creation
-    ignore_changes = [clone, full_clone]
+    # Refuse any plan that would destroy or replace this VM, which holds live development work
+    prevent_destroy = true
+
+    # The template only matters at creation; disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
+    ignore_changes = [
+      clone, full_clone,
+      disks, network, ipconfig0, ciupgrade, os_type,
+      serial, vga, boot, scsihw, bios, startup_shutdown,
+    ]
   }
 }
 
