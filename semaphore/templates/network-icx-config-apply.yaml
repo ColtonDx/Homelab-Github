@@ -1,0 +1,31 @@
+---
+# Semaphore task template Network | ICX Config Apply; see docs/semaphore/templates.md for the project resources it names
+name: Network | ICX Config Apply
+description: "Sends the config lines the ICX switches are missing from the inventory and saves; leave Apply on No for a dry run that only lists the commands. Never removes config; protected config (management interface) needs its own Yes"
+app: ansible
+playbook: ansible/playbooks/network/icx-config.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: apply
+    title: Apply
+    description: No lists the commands only; Yes sends them and saves
+    type: enum
+    required: true
+    values:
+      - name: No, dry run
+        value: "false"
+      - name: "Yes"
+        value: "true"
+  - name: allow_protected
+    title: Allow protected config
+    description: Yes lets the run change the management interface and VLAN
+    type: enum
+    required: true
+    values:
+      - name: "No"
+        value: "false"
+      - name: "Yes"
+        value: "true"
