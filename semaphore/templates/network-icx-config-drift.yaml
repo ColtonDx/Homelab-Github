@@ -1,0 +1,10 @@
+---
+# Semaphore task template Network | ICX Config Drift; see docs/semaphore/templates.md for the project resources it names
+name: Network | ICX Config Drift
+description: "Read-only: compares each ICX switch running config with the config the inventory defines and reports the differences; fail_on_drift=true fails the run"
+app: ansible
+playbook: ansible/playbooks/network/icx-config.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
