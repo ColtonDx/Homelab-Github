@@ -6,50 +6,16 @@
 # Optional per host: network_legacy_kex=true allows the weak key exchange old firmware needs, for that host's address only
 # Extra vars: target_hosts (default switches)
 
-# The Vault module runs where the task runs, so the passwords are read on the controller first
-- name: Load the switch passwords from Vault
-  hosts: localhost
-  connection: local
-  gather_facts: false
-
-  tasks:
-    - name: List the password each switch needs
-      ansible.builtin.set_fact:
-        vault_secrets: >-
-          {{ vault_secrets | default([]) + [{'var': 'switch_password_' ~ (item | regex_replace('[^A-Za-z0-9_]', '_')),
-             'path': hostvars[item].network_vault_path, 'field': hostvars[item].network_vault_field}] }}
-      loop: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('switches')) }}"
-
-    - name: Read the passwords
-      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
-
-    # libssh reads the runner user's SSH config when it connects (ansible-pylibssh ignores a config file passed to it), so the
-    # 1024-bit group1 key exchange, ssh-rsa host keys and hmac-sha1 that old firmware needs are allowed there, for those switches' addresses only
-    - name: Allow the old key exchange for switches that need it
-      ansible.builtin.blockinfile:
-        path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/config"
-        create: true
-        mode: "0600"
-        marker: "# {mark} switches with old SSH key exchange, managed by network/icx-facts.yaml"
-        block: |
-          {% for host in query('ansible.builtin.inventory_hostnames', target_hosts | default('switches'))
-             if hostvars[host].network_legacy_kex | default(false) | bool %}
-          Host {{ hostvars[host].ansible_host }}
-            KexAlgorithms +diffie-hellman-group1-sha1
-            HostKeyAlgorithms +ssh-rsa
-            MACs +hmac-sha1
-          {% endfor %}
+- name: Load the switch passwords
+  ansible.builtin.import_playbook: login.yaml
 
 - name: Check each switch
   hosts: "{{ target_hosts | default('switches') }}"
   gather_facts: false
 
   tasks:
-    # Kept out of the log; network_cli logs in with it
     - name: Use the password loaded from Vault
-      ansible.builtin.set_fact:
-        ansible_password: "{{ hostvars['localhost']['switch_password_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_'))] }}"
-      no_log: true
+      ansible.builtin.include_tasks: tasks/use_password.yaml
 
     # icx_facts was only tested on FastIron 10 and returns blanks on 08.0.30, so the version output is read directly; a failed command fails the task
     - name: Read the switch's version

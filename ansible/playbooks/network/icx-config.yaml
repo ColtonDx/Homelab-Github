@@ -1,0 +1,52 @@
+---
+# Compares each ICX switch's running config with the config its inventory defines, and reports every difference; changes nothing
+# The inventory describes the switch with fastiron_* variables (host_vars): fastiron_global (top-level lines, or {line, children} blocks),
+# fastiron_vlans ({id, name, tagged ('all' or a port list), untagged, router_interface}), fastiron_all_ports (the port list 'all' means),
+# fastiron_port_groups ({prefix like 1/1, first, last, settings}), fastiron_port_overrides (per port, e.g. '1/1/36': {name, dual_mode, speed, poe})
+# and fastiron_router_interfaces ({name like 've 100', lines}); templates/fastiron-config.j2 renders them
+# Left out of the comparison: user accounts, SNMP communities and the version line (fastiron_ignore adds more patterns)
+# Extra vars: target_hosts (default switches), fail_on_drift (default false; true fails the run when they differ, for scheduled checks)
+# Needs community.network on the runner; logs in through login.yaml like the other network playbooks
+
+- name: Load the switch passwords
+  ansible.builtin.import_playbook: login.yaml
+
+- name: Compare each switch's config with the inventory
+  hosts: "{{ target_hosts | default('switches') }}"
+  gather_facts: false
+
+  vars:
+    fastiron_ignore_default: ['^ver ', '^username ', '^snmp-server community ', '^Current configuration', '^end$']
+
+  tasks:
+    - name: Use the password loaded from Vault
+      ansible.builtin.include_tasks: tasks/use_password.yaml
+
+    # The output holds password hashes and SNMP communities, so it stays out of the log
+    - name: Read the running config
+      community.network.icx_command:
+        commands: ["show running-config"]
+      register: fastiron_running
+      no_log: true
+
+    - name: Compare it with the inventory's config
+      ansible.builtin.set_fact:
+        fastiron_missing: "{{ fastiron_wanted | difference(fastiron_have) }}"
+        fastiron_extra: "{{ fastiron_have | difference(fastiron_wanted) }}"
+      vars:
+        fastiron_patterns: "{{ fastiron_ignore_default + fastiron_ignore | default([]) }}"
+        fastiron_wanted: "{{ lookup('ansible.builtin.template', 'templates/fastiron-config.j2') | fastiron_lines(fastiron_patterns) }}"
+        fastiron_have: "{{ fastiron_running.stdout[0] | fastiron_lines(fastiron_patterns) }}"
+
+    - name: Report the differences
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }}: {{ 'matches the inventory' if (fastiron_missing + fastiron_extra) | length == 0 else 'differs from the inventory' }}"
+          - "In the inventory but not on the switch: {{ fastiron_missing }}"
+          - "On the switch but not in the inventory: {{ fastiron_extra }}"
+
+    - name: Fail when the switch has drifted
+      ansible.builtin.assert:
+        that: (fastiron_missing + fastiron_extra) | length == 0
+        fail_msg: "{{ inventory_hostname }}'s running config differs from the inventory; see the report above."
+      when: fail_on_drift | default(false) | bool

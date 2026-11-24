@@ -1,0 +1,39 @@
+---
+# Shared login setup for the network playbooks, imported first: reads each switch's password from Vault on the controller and
+# allows the old SSH algorithms for switches with network_legacy_kex; tasks/use_password.yaml then hands the password to the switch
+# Inventory (switches group): network_vault_path (Vault secret) and per host network_vault_field (the login password's field)
+# Extra vars: target_hosts (default switches)
+
+# The Vault module runs where the task runs, so the passwords are read on the controller first
+- name: Load the switch passwords from Vault
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: List the password each switch needs
+      ansible.builtin.set_fact:
+        vault_secrets: >-
+          {{ vault_secrets | default([]) + [{'var': 'switch_password_' ~ (item | regex_replace('[^A-Za-z0-9_]', '_')),
+             'path': hostvars[item].network_vault_path, 'field': hostvars[item].network_vault_field}] }}
+      loop: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('switches')) }}"
+
+    - name: Read the passwords
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+    # libssh reads the runner user's SSH config when it connects (ansible-pylibssh ignores a config file passed to it), so the
+    # 1024-bit group1 key exchange, ssh-rsa host keys and hmac-sha1 that old firmware needs are allowed there, for those switches' addresses only
+    - name: Allow the old key exchange for switches that need it
+      ansible.builtin.blockinfile:
+        path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/config"
+        create: true
+        mode: "0600"
+        marker: "# {mark} switches with old SSH key exchange, managed by network/icx-facts.yaml"
+        block: |
+          {% for host in query('ansible.builtin.inventory_hostnames', target_hosts | default('switches'))
+             if hostvars[host].network_legacy_kex | default(false) | bool %}
+          Host {{ hostvars[host].ansible_host }}
+            KexAlgorithms +diffie-hellman-group1-sha1
+            HostKeyAlgorithms +ssh-rsa
+            MACs +hmac-sha1
+          {% endfor %}
