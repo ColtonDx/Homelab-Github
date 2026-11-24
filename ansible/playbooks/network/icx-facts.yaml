@@ -1,0 +1,45 @@
+---
+# Read-only check of the Ruckus/Brocade ICX switches: logs in with the automation account and reports model, firmware and interfaces
+# Changes nothing, so it doubles as the connection test before any config playbook runs
+# Inventory (switches group): ansible_user, network_vault_path (Vault secret) and per host network_vault_field (the login password's field)
+# Needs community.network and ansible.netcommon on the runner (runner_collection_pins in deployment/semaphore-runner.yaml)
+# Extra vars: target_hosts (default switches)
+
+# The Vault module runs where the task runs, so the passwords are read on the controller first
+- name: Load the switch passwords from Vault
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: List the password each switch needs
+      ansible.builtin.set_fact:
+        vault_secrets: >-
+          {{ vault_secrets | default([]) + [{'var': 'switch_password_' ~ (item | regex_replace('[^A-Za-z0-9_]', '_')),
+             'path': hostvars[item].network_vault_path, 'field': hostvars[item].network_vault_field}] }}
+      loop: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('switches')) }}"
+
+    - name: Read the passwords
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+
+- name: Check each switch
+  hosts: "{{ target_hosts | default('switches') }}"
+  gather_facts: false
+
+  tasks:
+    # Kept out of the log; network_cli logs in with it
+    - name: Use the password loaded from Vault
+      ansible.builtin.set_fact:
+        ansible_password: "{{ hostvars['localhost']['switch_password_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_'))] }}"
+      no_log: true
+
+    # The default subset (no running config) works without enable mode
+    - name: Read the switch's facts
+      community.network.icx_facts:
+        gather_subset: ["!config"]
+
+    - name: Report the switch
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ ansible_net_model | default('?') }}, firmware {{ ansible_net_version | default('?') }},
+          hostname {{ ansible_net_hostname | default('?') }}, {{ ansible_net_interfaces | default({}) | length }} interfaces
