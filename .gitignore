@@ -20,3 +20,7 @@ talos/_out/
 # Local tooling
 id_rsa
 .ansible/
+
+# Python bytecode, written whenever a filter or module is imported locally; it embeds build paths
+__pycache__/
+*.pyc

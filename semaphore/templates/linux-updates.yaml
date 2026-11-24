@@ -5,8 +5,7 @@ app: ansible
 playbook: ansible/playbooks/maintenance/update-linux.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
-# A task may run another branch, for check-mode runs of a PR before merge; real runs use main
-allow_override_branch_in_task: true
+# Always runs main: this template reaches every host or the hypervisors, so a task may not pick another branch
 environments:
   - Hashicorp Secrets
 survey_vars:
