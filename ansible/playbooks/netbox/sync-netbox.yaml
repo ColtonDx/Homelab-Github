@@ -56,6 +56,17 @@
           ansible.builtin.set_fact:
             netbox_failed_sources: "{{ netbox_failed_sources | default([]) + ['proxmox: ' ~ (ansible_failed_result.msg | default('failed'))] }}"
 
+    # After Proxmox, whose VM interfaces some addresses go on; part of the inventory source
+    - name: Attach the inventory's addresses to their interfaces
+      when: "'inventory' in netbox_run_sources"
+      block:
+        - name: Attach the listed addresses
+          ansible.builtin.include_tasks: tasks/sync_assignments.yaml
+      rescue:
+        - name: Note that attaching addresses failed
+          ansible.builtin.set_fact:
+            netbox_failed_sources: "{{ netbox_failed_sources | default([]) + ['inventory assignments: ' ~ (ansible_failed_result.msg | default('failed'))] }}"
+
     # Last, so leases fill in only what the inventory and Proxmox have not already recorded
     - name: Sync OPNsense
       when: "'opnsense' in netbox_run_sources"

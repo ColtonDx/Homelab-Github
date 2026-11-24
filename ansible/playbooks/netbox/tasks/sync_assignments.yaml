@@ -1,0 +1,11 @@
+---
+# Task file: attaches the inventory's netbox_ip_assignments to their device or VM interfaces and makes each the primary address; needs connect_netbox.yaml first
+# Each entry: address, device or vm, interface; optional type (devices only, default 1000base-t), rename_from and primary (default true)
+# Runs after the Proxmox sync, so VM interfaces such as eth0 already exist; it only adds or corrects, never removes
+
+- name: Attach each listed address
+  ansible.builtin.include_tasks: assign_address.yaml
+  loop: "{{ netbox_ip_assignments | default([]) }}"
+  loop_control:
+    loop_var: nas
+    label: "{{ nas.device | default(nas.vm) }} {{ nas.interface }}"
