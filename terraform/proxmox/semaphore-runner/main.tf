@@ -126,6 +126,8 @@ resource "proxmox_vm_qemu" "semaphore_runner" {
       clone, full_clone, description,
       disks, network, ipconfig0, ciupgrade, os_type,
       serial, vga, boot, scsihw, bios, startup_shutdown,
+      # Changing a cloud-init field gives the VM a new cloud-init identity, which can regenerate its SSH host keys at the next boot
+      ciuser, cipassword, sshkeys, nameserver, searchdomain,
     ]
   }
 }
