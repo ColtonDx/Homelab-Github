@@ -19,7 +19,17 @@
   gather_facts: false
 
   vars:
-    fastiron_ignore_default: ['^ver ', '^username ', '^snmp-server community ', '^Current configuration', '^end$']
+    # Lines that are not compared or reported: the version banner, and anything that can carry a password, key or community string,
+    # since lines found only on the switch are printed in the run log
+    fastiron_ignore_default:
+      - '^ver '
+      - '^Current configuration'
+      - '^end$'
+      - '^username '
+      - '^snmp-server (community|user|group) '
+      - '^enable .*password'
+      - '^(radius|tacacs)-server '
+      - '(password|secret|key-string)'
 
   tasks:
     - name: Use the password loaded from Vault

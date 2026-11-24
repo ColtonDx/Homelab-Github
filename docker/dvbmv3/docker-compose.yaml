@@ -12,9 +12,9 @@ services:
       - MIGRATE_ENCRYPTED_DB=true
 
       # ── Allowed hosts / CORS ──────────────────────────────────────────────
-      # Host names DVBM answers to and origins its API accepts, from the inventory; both default to any, so a redeploy before the
-      # values are pushed keeps working. The built-in health check calls 127.0.0.1, so the host list must include it
-      - ALLOWED_HOSTS=${DVBM_ALLOWED_HOSTS:-*}
+      # Host names DVBM answers to and origins its API accepts, from the inventory. Without the host list it answers only its own
+      # health check (127.0.0.1), so a missing value locks the UI out rather than opening it to any host
+      - ALLOWED_HOSTS=${DVBM_ALLOWED_HOSTS:-127.0.0.1,localhost}
       - ALLOWED_ORIGINS=${DVBM_ALLOWED_ORIGINS:-*}
 
       # ── HTTPS / TLS ───────────────────────────────────────────────────────
