@@ -26,6 +26,8 @@
   # Every call in here runs from the controller without privilege escalation
   delegate_to: localhost
   become: false
+  # Fails a Kuma call that never returns instead of hanging the run (and a patching run with it); each call normally takes a few seconds
+  timeout: "{{ kuma_call_timeout | default(120) }}"
   block:
     # The maintenance module fails on a name Kuma does not know, so the list is checked first
     - name: List Kuma's monitors

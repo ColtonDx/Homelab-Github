@@ -7,7 +7,7 @@
     msg:
       - "Proxmox guests considered: {{ proxmox_guests | length }}"
       - "VMs created: {{ guests_to_create | map(attribute='name') | list }}"
-      - "VMs updated: {{ guests_to_update | length }}"
+      - "VMs updated: {{ nb_vm_updates.results | default([]) | selectattr('json', 'defined') | list | length }} of {{ guests_to_update | length }}"
       - >-
         Interfaces created:
         {{ nbi_created_ifaces.results | default([]) | selectattr('json', 'defined')
