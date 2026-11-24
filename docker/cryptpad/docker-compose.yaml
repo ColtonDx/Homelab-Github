@@ -3,20 +3,21 @@ services:
     container_name: cryptpad
     hostname: cryptpad
     restart: unless-stopped
-    # Pinned by digest; 2026 releases move the domains into config/infra.js, so upgrading is its own change
-    image: "cryptpad/cryptpad:version-2025.3.0@sha256:81da8210f93f7caa124bd6554115570898d7f6b5579e63ae65953615d66a9e1a"
+    # Pinned by digest so upgrades arrive as reviewed changes; laid out like upstream's own compose file for this release
+    image: "cryptpad/cryptpad:version-2026.10.1@sha256:b1129d954692e9b8a7d198e79d3080d3627051c95137bbf41a7d2683aa53305d"
+    # Upstream runs the app read-only: everything it writes goes to the volumes below or /tmp
+    read_only: true
     networks:
       - reverseproxy-nw
     environment:
+      # With these set, CryptPad builds its config from them and listens on all interfaces; both domains are proxied to port 3000
       - CPAD_MAIN_DOMAIN=https://cryptpad.${DOCKER_DOMAIN}
       - CPAD_SANDBOX_DOMAIN=https://sandbox-cryptpad.${DOCKER_DOMAIN}
-      - CPAD_CONF=/cryptpad/config/config.js
 
       # Read and accept the license before uncommenting the following line:
-      # https://github.com/ONLYOFFICE/web-apps/blob/master/LICENSE.txt
-      # - CPAD_INSTALL_ONLYOFFICE=yes
-    # Only the data folders are volumes, as upstream does; a volume over all of /cryptpad would keep the old app files after an image upgrade
-    # config.js is not kept: the image rebuilds it from the two domains above at every start
+      # https://github.com/Euro-Office/web-apps/raw/refs/heads/main/LICENSE.txt
+      # - CPAD_INSTALL_OFFICE=yes
+    # Only data and settings are volumes, as upstream does, so an image upgrade always runs the new app files
     volumes:
       - blob:/cryptpad/blob
       - block:/cryptpad/block
@@ -25,6 +26,10 @@ services:
       - datastore:/cryptpad/datastore
       - onlyoffice-dist:/cryptpad/www/common/onlyoffice/dist
       - onlyoffice-conf:/cryptpad/onlyoffice-conf
+      # config.js and infra.js; created from the image's examples on the first start
+      - config:/cryptpad/config
+      - type: tmpfs
+        target: /tmp
     ulimits:
       nofile:
         soft: 1000000
@@ -47,3 +52,4 @@ volumes:
   datastore:
   onlyoffice-dist:
   onlyoffice-conf:
+  config:
