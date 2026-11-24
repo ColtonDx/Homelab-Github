@@ -2,6 +2,12 @@
 # Installs Grafana Alloy on Linux hosts so they ship metrics and logs (journal, plus Docker containers where present) to the monitoring server; safe to re-run
 # Vault: MONITORING_PUSH_PASSWORD at monitoring (vault_monitoring_path renames it) when sending over https; connection from VAULT_ADDR, VAULT_TOKEN and VAULT_KV_MOUNT
 # Inventory: hosts in monitoring_clients (or target_hosts) and monitoring_client_server; every setting is in ansible/roles/monitoring_client/defaults/main.yaml
+# Proxmox nodes in the group are reached with a Vault-signed certificate when the inventory turns that on (proxmox/ssh-certificate.yaml)
+
+# Signs a short-lived certificate for the Proxmox nodes; does nothing for other hosts or when proxmox_ssh_certificate is off
+- name: Sign the SSH certificate for the Proxmox nodes
+  ansible.builtin.import_playbook: ../proxmox/ssh-certificate.yaml
+
 - name: Ship host metrics and logs to the monitoring server
   hosts: "{{ target_hosts | default('monitoring_clients') }}"
   become: true
@@ -21,3 +27,7 @@
   roles:
     # A path rather than a name, so the role resolves however Semaphore starts the run
     - role: ../../roles/monitoring_client  # noqa: role-name[path]
+
+# Deletes the certificate's key from memory
+- name: Clean up the SSH certificate
+  ansible.builtin.import_playbook: ../proxmox/ssh-certificate-cleanup.yaml
