@@ -42,7 +42,8 @@
       "groupName": "GitHub Actions"
     },
     {
-      "description": "The runner's Ansible pins and the CI workflow's copies move together, so CI checks what the runner runs",
+      "description": "The runner's Ansible pins and the CI workflow's copies move together, so CI checks what the runner runs; the workflow's actions keep their own group",
+      "matchManagers": ["custom.regex"],
       "matchFileNames": ["ansible/playbooks/deployment/semaphore-runner.yaml", ".github/workflows/lint.yaml"],
       "groupName": "Ansible runner and CI versions"
     }
