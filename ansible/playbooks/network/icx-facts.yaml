@@ -3,7 +3,7 @@
 # Changes nothing, so it doubles as the connection test before any config playbook runs
 # Inventory (switches group): ansible_user, network_vault_path (Vault secret) and per host network_vault_field (the login password's field)
 # Needs community.network and ansible.netcommon on the runner (runner_collection_pins in deployment/semaphore-runner.yaml)
-# Optional per host: network_legacy_kex=true allows the weak key exchange old firmware needs (ansible/files/ssh/legacy-kex.conf), for that host only
+# Optional per host: network_legacy_kex=true allows the weak key exchange old firmware needs, for that host's address only
 # Extra vars: target_hosts (default switches)
 
 # The Vault module runs where the task runs, so the passwords are read on the controller first
@@ -23,12 +23,25 @@
     - name: Read the passwords
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
 
+    # libssh reads the runner user's SSH config when it connects (ansible-pylibssh ignores a config file passed to it), so the
+    # 1024-bit group1 key exchange and ssh-rsa host keys old firmware needs are allowed there, for those switches' addresses only
+    - name: Allow the old key exchange for switches that need it
+      ansible.builtin.blockinfile:
+        path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/config"
+        create: true
+        mode: "0600"
+        marker: "# {mark} switches with old SSH key exchange, managed by network/icx-facts.yaml"
+        block: |
+          {% for host in query('ansible.builtin.inventory_hostnames', target_hosts | default('switches'))
+             if hostvars[host].network_legacy_kex | default(false) | bool %}
+          Host {{ hostvars[host].ansible_host }}
+            KexAlgorithms +diffie-hellman-group1-sha1
+            HostKeyAlgorithms +ssh-rsa
+          {% endfor %}
+
 - name: Check each switch
   hosts: "{{ target_hosts | default('switches') }}"
   gather_facts: false
-  vars:
-    # An empty path leaves libssh on its defaults
-    ansible_libssh_config_file: "{{ playbook_dir ~ '/../../files/ssh/legacy-kex.conf' if network_legacy_kex | default(false) | bool else '' }}"
 
   tasks:
     # Kept out of the log; network_cli logs in with it
