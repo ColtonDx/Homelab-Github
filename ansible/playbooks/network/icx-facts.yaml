@@ -24,7 +24,7 @@
       ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
 
     # libssh reads the runner user's SSH config when it connects (ansible-pylibssh ignores a config file passed to it), so the
-    # 1024-bit group1 key exchange and ssh-rsa host keys old firmware needs are allowed there, for those switches' addresses only
+    # 1024-bit group1 key exchange, ssh-rsa host keys and hmac-sha1 that old firmware needs are allowed there, for those switches' addresses only
     - name: Allow the old key exchange for switches that need it
       ansible.builtin.blockinfile:
         path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/config"
@@ -37,6 +37,7 @@
           Host {{ hostvars[host].ansible_host }}
             KexAlgorithms +diffie-hellman-group1-sha1
             HostKeyAlgorithms +ssh-rsa
+            MACs +hmac-sha1
           {% endfor %}
 
 - name: Check each switch
