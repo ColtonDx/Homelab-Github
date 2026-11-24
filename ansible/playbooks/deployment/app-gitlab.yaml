@@ -2,7 +2,7 @@
 # Installs GitLab from GitLab's apt repository, or updates it to gitlab_version, starts it, then issues its certificate and switches it to HTTPS; safe to re-run
 # Inventory: gitlab_domain (required), gitlab_edition (ce or ee, default ce), gitlab_version (e.g. 18.4.1) to install or move to that release
 # Without gitlab_version an installed GitLab is left alone; upgrades must follow GitLab's upgrade path, so step through its required stops
-# The TLS keys written below (gitlab_rails['nginx'], registry['nginx']) need GitLab 19.2 or later
+# The TLS keys written below (gitlab_rails['nginx'], registry['nginx']) need GitLab 19.2 or later; older hand-set nginx[ssl_*] and registry_nginx[...] lines are commented out
 # The certificate needs the Vault connection and Vault fields CF_API and CF_EMAIL at cloudflare; gitlab_rb_path and gitlab_ssl_dir override the default locations
 # Container registry (off by default): gitlab_registry_domain (e.g. registry.example.com) turns it on behind its own HTTPS nginx with its own certificate
 # gitlab_registry_cert_file and gitlab_registry_key_file override where that certificate is installed (default gitlab_ssl_dir/<registry domain>.crt and .key)
@@ -203,6 +203,7 @@
           registry['nginx']['enable'] = true
           registry['nginx']['ssl_certificate'] = "{{ gitlab_registry_crt }}"
           registry['nginx']['ssl_certificate_key'] = "{{ gitlab_registry_key }}"
+          registry['nginx']['redirect_http_to_https'] = true
           {% endif %}
       notify: Reconfigure GitLab
 
@@ -210,7 +211,7 @@
     - name: Disable external_url lines outside the managed block
       ansible.builtin.replace:
         path: "{{ gitlab_rb_file }}"
-        regexp: '^(external_url\s.*)$'
+        regexp: '^[ \t]*(external_url\s.*)$'
         replace: '# \1  # superseded by the managed block below'
         before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
       notify: Reconfigure GitLab
@@ -219,7 +220,34 @@
     - name: Disable registry_external_url lines outside the managed block
       ansible.builtin.replace:
         path: "{{ gitlab_rb_file }}"
-        regexp: '^(registry_external_url\s.*)$'
+        regexp: '^[ \t]*(registry_external_url\s.*)$'
+        replace: '# \1  # superseded by the managed block'
+        before: "{{ item.before | default(omit) }}"
+        after: "{{ item.after | default(omit) }}"
+      loop:
+        - before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+        - after: "# END ANSIBLE MANAGED URL AND TLS CONFIG"
+      when: gitlab_registry_host | length > 0
+      notify: Reconfigure GitLab
+
+    # Pre-19.2 nginx TLS keys set by hand would fight the managed block's gitlab_rails['nginx'] keys, so they are commented out on both sides of it
+    - name: Disable old-style nginx TLS lines outside the managed block
+      ansible.builtin.replace:
+        path: "{{ gitlab_rb_file }}"
+        regexp: "^[ \\t]*(nginx\\['ssl_certificate(?:_key)?'\\]\\s*=.*)$"
+        replace: '# \1  # superseded by the managed block'
+        before: "{{ item.before | default(omit) }}"
+        after: "{{ item.after | default(omit) }}"
+      loop:
+        - before: "# BEGIN ANSIBLE MANAGED URL AND TLS CONFIG"
+        - after: "# END ANSIBLE MANAGED URL AND TLS CONFIG"
+      notify: Reconfigure GitLab
+
+    # Same for the pre-19.2 registry_nginx keys, which registry['nginx'] replaces; only when this play manages the registry, so a hand-run registry keeps its settings
+    - name: Disable old-style registry_nginx lines outside the managed block
+      ansible.builtin.replace:
+        path: "{{ gitlab_rb_file }}"
+        regexp: "^[ \\t]*(registry_nginx\\[.*)$"
         replace: '# \1  # superseded by the managed block'
         before: "{{ item.before | default(omit) }}"
         after: "{{ item.after | default(omit) }}"
