@@ -12,3 +12,4 @@
         path: "{{ proxmox_cert_path }}"
         state: absent
       when: proxmox_cert_path is defined
+      tags: [always]
