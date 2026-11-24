@@ -34,6 +34,9 @@ loki.source.syslog "devices" {
     protocol      = "{{ listener.protocol }}"
     syslog_format = "{{ listener.format }}"
     labels        = { job = "syslog" }
+{% if listener.protocol == 'tcp' %}
+    idle_timeout  = "{{ monitoring_server_syslog_idle_timeout }}"
+{% endif %}
   }
 
 {% endfor %}
