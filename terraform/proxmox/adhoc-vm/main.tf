@@ -34,6 +34,9 @@ locals {
 resource "proxmox_vm_qemu" "clone" {
   name        = var.vm_name
   description = "Deployed by Terraform"
+
+  # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
+  startup_shutdown {}
   target_node = var.target_node
   vmid        = var.vm_id
   clone       = var.template_name
