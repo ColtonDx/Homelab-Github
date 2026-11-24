@@ -1,5 +1,5 @@
 ---
-# Read-only check of the Ruckus/Brocade ICX switches: logs in with the automation account and reports model, firmware and interfaces
+# Read-only check of the Ruckus/Brocade ICX switches: logs in with the automation account and reports model and firmware
 # Changes nothing, so it doubles as the connection test before any config playbook runs
 # Inventory (switches group): ansible_user, network_vault_path (Vault secret) and per host network_vault_field (the login password's field)
 # Needs community.network and ansible.netcommon on the runner (runner_collection_pins in deployment/semaphore-runner.yaml)
@@ -33,13 +33,15 @@
         ansible_password: "{{ hostvars['localhost']['switch_password_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_'))] }}"
       no_log: true
 
-    # The default subset (no running config) works without enable mode
-    - name: Read the switch's facts
-      community.network.icx_facts:
-        gather_subset: ["!config"]
+    # icx_facts was only tested on FastIron 10 and returns blanks on 08.0.30, so the version output is read directly; a failed command fails the task
+    - name: Read the switch's version
+      community.network.icx_command:
+        commands: ["show version"]
+      register: icx_version
 
+    # The serial number is in the same output, so only the model and firmware lines are reported
     - name: Report the switch
       ansible.builtin.debug:
         msg: >-
-          {{ inventory_hostname }}: {{ ansible_net_model | default('?') }}, firmware {{ ansible_net_version | default('?') }},
-          hostname {{ ansible_net_hostname | default('?') }}, {{ ansible_net_interfaces | default({}) | length }} interfaces
+          {{ inventory_hostname }}: {{ icx_version.stdout[0] | regex_search('HW: .+') | default('?', true) | replace('HW: ', '') | trim }},
+          firmware {{ icx_version.stdout[0] | regex_search('SW: Version [^ ]+') | default('?', true) | replace('SW: Version ', '') | trim }}
