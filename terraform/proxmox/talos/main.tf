@@ -61,6 +61,9 @@ resource "proxmox_vm_qemu" "talos_node" {
   memory  = each.value.memory
   balloon = 0
 
+  # Proxmox refuses to delete a protected node, even from its own UI; rebuild one node at a time by turning it off for that node only
+  protection = each.value.protection
+
   # qemu-guest-agent is a Talos system extension, so only enable it when the install image carries it
   agent = var.qemu_agent ? 1 : 0
 

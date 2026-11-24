@@ -16,7 +16,7 @@ variable "proxmox_api_token_secret" {
 
 # The same list the Talos playbooks read; address, gateway and the other network fields are used by the machine config, not here
 variable "nodes" {
-  description = "The cluster's nodes, built by build-project.yaml from the talos_cluster inventory group"
+  description = "The cluster's nodes, built by build-project.yaml from the talos_cluster inventory group; protection (default true) is Proxmox's delete guard, turned off for the one node being rebuilt"
   type = list(object({
     name           = string
     vm_id          = number
@@ -33,6 +33,7 @@ variable "nodes" {
     data_disk_size = optional(string, "100G")
     storage_pool   = optional(string)
     mac_address    = optional(string)
+    protection     = optional(bool, true)
   }))
 
   validation {

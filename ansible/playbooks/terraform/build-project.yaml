@@ -338,6 +338,43 @@
     # Whatever happens in Terraform, the plan files it writes are deleted
     - name: Run Terraform and remove the saved plan
       block:
+        # A project can cap how many resources one apply may destroy or replace (max_replacements in its sources.yaml),
+        # e.g. one Talos node at a time so etcd keeps its quorum; the apply is planned first and stops above the cap
+        - name: Check the apply against the project's replacement cap
+          when:
+            - tf_action_resolved == 'apply'
+            - tf_sources.max_replacements is defined
+          block:
+            - name: Plan the apply
+              community.general.terraform:
+                project_path: "{{ tf_dir }}"
+                state: planned
+                plan_file: "{{ tf_tmp.path }}/capcheck.tfplan"
+                variables: "{{ tf_variables }}"
+                complex_vars: true
+              environment: "{{ tf_env | combine({'TMPDIR': tf_tmp.path}) }}"
+
+            - name: Read the planned changes
+              ansible.builtin.command:
+                argv: [terraform, show, -json, "{{ tf_tmp.path }}/capcheck.tfplan"]
+                chdir: "{{ tf_dir }}"
+              environment: "{{ tf_env | combine({'TMPDIR': tf_tmp.path}) }}"
+              register: tf_cap_plan
+              changed_when: false
+              no_log: true
+
+            - name: Stop when the apply would destroy or replace too much
+              ansible.builtin.assert:
+                that: tf_cap_deletes | length <= tf_sources.max_replacements | int
+                fail_msg: >-
+                  This apply would destroy or replace {{ tf_cap_deletes | length }} resources ({{ tf_cap_deletes | join(', ') }}),
+                  more than this project's max_replacements of {{ tf_sources.max_replacements }}. Nothing was changed.
+                success_msg: "Within the cap: {{ tf_cap_deletes | length }} of {{ tf_sources.max_replacements }} allowed."
+              vars:
+                tf_cap_deletes: >-
+                  {{ (tf_cap_plan.stdout | from_json).resource_changes | default([])
+                     | selectattr('change.actions', 'contains', 'delete') | map(attribute='address') | list }}
+
         # Plan shows the changes without making them; apply makes them
         - name: Run Terraform
           community.general.terraform:
@@ -350,7 +387,7 @@
           environment: "{{ tf_env | combine({'TMPDIR': tf_tmp.path}) }}"
           register: tf_result
       always:
-        # Nothing reuses a plan once Terraform has run
+        # Nothing reuses a plan once Terraform has run; the temp directory also holds the cap check's plan
         - name: Remove the saved plan and the temp directory
           ansible.builtin.file:
             path: "{{ item }}"
