@@ -11,6 +11,8 @@ services:
       - HBOX_LOG_LEVEL=info
       - HBOX_LOG_FORMAT=text
       - HBOX_WEB_MAX_UPLOAD_SIZE=10
+      # Accounts already exist, so nobody else can register
+      - HBOX_OPTIONS_ALLOW_REGISTRATION=false
     volumes:
       - data:/data/
     labels:

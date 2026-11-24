@@ -311,17 +311,53 @@
         - tf_local_state.stat.exists | default(false)
         - tf_migrate_state | default(false) | bool
 
-    # Plan shows the changes without making them; apply makes them
-    - name: Run Terraform
-      community.general.terraform:
-        project_path: "{{ tf_dir }}"
-        state: "{{ 'planned' if tf_action_resolved == 'plan' else 'present' }}"
-        plan_file: "{{ tf_dir ~ '/tfplan' if tf_action_resolved == 'plan' else omit }}"
-        variables: "{{ tf_variables }}"
-        # Lists and maps, such as a node list, need HCL formatting; plain values are unaffected
-        complex_vars: true
-      environment: "{{ tf_env }}"
-      register: tf_result
+    # Plan files hold every variable value, the Proxmox token included; earlier versions left them here and in the temp directory
+    - name: Find plan files earlier runs left behind
+      ansible.builtin.find:
+        paths: ["{{ tf_dir }}", "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"]
+        patterns: ["tfplan", "tmp*.tfplan"]
+      register: tf_old_plans
+
+    # Also stops an apply from picking up a stale plan, since the module applies an existing plan file as is
+    - name: Remove plan files earlier runs left behind
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ tf_old_plans.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    # Whatever happens in Terraform, the plan files it writes are deleted
+    - name: Run Terraform and remove the saved plan
+      block:
+        # Plan shows the changes without making them; apply makes them
+        - name: Run Terraform
+          community.general.terraform:
+            project_path: "{{ tf_dir }}"
+            state: "{{ 'planned' if tf_action_resolved == 'plan' else 'present' }}"
+            plan_file: "{{ tf_dir ~ '/tfplan' if tf_action_resolved == 'plan' else omit }}"
+            variables: "{{ tf_variables }}"
+            # Lists and maps, such as a node list, need HCL formatting; plain values are unaffected
+            complex_vars: true
+          # An apply writes its plan to a temp file; TMPDIR keeps that inside the project folder so the cleanup below finds it
+          environment: "{{ tf_env | combine({'TMPDIR': tf_dir}) }}"
+          register: tf_result
+      always:
+        # Nothing reuses a plan once Terraform has run
+        - name: Find the plan files this run wrote
+          ansible.builtin.find:
+            paths: "{{ tf_dir }}"
+            patterns: ["tfplan", "tmp*.tfplan"]
+          register: tf_run_plans
+
+        # Removes the named plan and an apply's temp plan alike
+        - name: Remove the plan files this run wrote
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ tf_run_plans.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
 
     # Terraform masks sensitive values in its own output, so the plan is safe to show
     - name: Show Terraform's output
