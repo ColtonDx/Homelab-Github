@@ -58,6 +58,8 @@ Git history makes these versioned backups as well, and a rebuilt application can
 
 ### Monitoring and Maintenance
 
+The full breakdown of what is monitored, by which tool, and how alerts reach Discord is in [docs/monitoring.md](docs/monitoring.md).
+
 Uptime Kuma monitors services and hosts that do not have their own integrations for monitoring somewhere else. 
 
 I personally have everytihng configured for Discord notifications.
