@@ -10,6 +10,9 @@ vault:
   - { path: proxmox, field: PROXMOX_API_TOKEN_ID, var: proxmox_api_token_id }
   - { path: proxmox, field: PROXMOX_API_TOKEN_SECRET, var: proxmox_api_token_secret }
 
+# An apply may destroy or replace at most one node, so a change that would rebuild several etcd members at once stops first
+max_replacements: 1
+
 # Each host in this group becomes one node; talos_iso and storage_pool come from terraform_defaults
 group: talos_cluster
 
