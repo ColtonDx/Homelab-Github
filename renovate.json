@@ -1,0 +1,82 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Keeps pinned images, providers, actions and Ansible versions current; updates arrive as grouped pull requests, never merged automatically",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "timezone": "America/Chicago",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 6,
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "Images the team builds itself track :latest on purpose and redeploy through Portainer, so Renovate leaves them alone",
+      "matchPackageNames": ["coltondx/docker-volume-backup-manager-v3", "/worksuite/"],
+      "enabled": false
+    },
+    {
+      "description": "Compose images: pin every third-party image by digest so updates arrive as reviewed changes",
+      "matchManagers": ["docker-compose"],
+      "pinDigests": true
+    },
+    {
+      "description": "One weekly pull request for every image's minor, patch and digest updates; each docker/ stack redeploys on merge",
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "groupName": "Docker images (minor, patch and digests)"
+    },
+    {
+      "description": "A major image update gets its own pull request, since it may need config or data changes",
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    },
+    {
+      "description": "Terraform providers, all projects together so they stay on one version",
+      "matchManagers": ["terraform"],
+      "groupName": "Terraform providers"
+    },
+    {
+      "description": "CI actions stay pinned by digest",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "The runner's Ansible pins and the CI workflow's copies move together, so CI checks what the runner runs",
+      "matchFileNames": ["ansible/playbooks/deployment/semaphore-runner.yaml", ".github/workflows/lint.yaml"],
+      "groupName": "Ansible runner and CI versions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Python packages the runner installs (name==version list items); ansible-core is templated per Python version and stays manual",
+      "managerFilePatterns": ["/^ansible/playbooks/deployment/semaphore-runner\\.yaml$/"],
+      "matchStrings": ["- (?<depName>[a-z0-9][a-z0-9_.-]*)==(?<currentValue>[0-9][^\\s\"']*)"],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "Ansible collections pinned as namespace.name:==version, on the runner and in CI",
+      "managerFilePatterns": ["/^ansible/playbooks/deployment/semaphore-runner\\.yaml$/", "/^\\.github/workflows/lint\\.yaml$/"],
+      "matchStrings": ["(?<depName>[a-z0-9_]+\\.[a-z0-9_]+):==(?<currentValue>[0-9][^\\s\"']*)"],
+      "datasourceTemplate": "galaxy-collection"
+    },
+    {
+      "customType": "regex",
+      "description": "Python packages CI installs (pip install name==version ...)",
+      "managerFilePatterns": ["/^\\.github/workflows/lint\\.yaml$/"],
+      "matchStrings": ["(?<depName>ansible-core)==(?<currentValue>[0-9][^\\s]*)"],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "The Terraform version CI checks with",
+      "managerFilePatterns": ["/^\\.github/workflows/lint\\.yaml$/"],
+      "matchStrings": ["terraform_version: (?<currentValue>[0-9][^\\s]*)"],
+      "depNameTemplate": "hashicorp/terraform",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}
