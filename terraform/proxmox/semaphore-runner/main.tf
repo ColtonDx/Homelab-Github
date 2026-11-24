@@ -64,7 +64,7 @@ resource "proxmox_vm_qemu" "semaphore_runner" {
   hotplug    = "network,disk,usb"
   tablet     = true
   kvm        = true
-  protection = false
+  protection = true # Proxmox refuses to delete the VM or its disks, even from its UI, while this is on
 
   cpu {
     cores   = var.cores
