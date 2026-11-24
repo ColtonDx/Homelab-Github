@@ -1,6 +1,8 @@
 ---
 # Creates NetBox addresses for new leases and refreshes the lease records this step owns; records the inventory, Proxmox or a person made are left alone
 # Owned means created by this step (its comment marker) or still in dhcp status; reserved and deprecated keep their status either way
+# A lease's hostname becomes the DNS name only when it is a valid host name; clients that send "*" or other junk get none, and
+# owned records already carrying one are cleared on the next refresh
 
 # A lease on an address set aside as unprovisioned is a real conflict, so it is reported and left for a person
 - name: Report addresses whose reserved/deprecated status blocks an update
@@ -21,7 +23,7 @@
     body:
       address: "{{ item.address }}/32"
       status: "{{ 'active' if item.address in inventory_addresses or item.is_reserved | default('') | length > 0 else 'dhcp' }}"
-      dns_name: "{{ item.hostname | default('') }}"
+      dns_name: "{{ (item.hostname | default('') if item.hostname | default('') is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$') else '') }}"
       description: "DHCP lease — MAC: {{ item.hwaddr }}"
       comments: "Auto-synced from OPNsense DHCP leases"
     status_code: 201
@@ -41,7 +43,7 @@
     status_now: "{{ record.status.value }}"
     wanted:
       status: "{{ status_now if status_now in ['reserved', 'deprecated'] else ('active' if item.address in inventory_addresses or item.is_reserved | default('') | length > 0 else 'dhcp') }}"
-      dns_name: "{{ item.hostname | default('') }}"
+      dns_name: "{{ (item.hostname | default('') if item.hostname | default('') is match('^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$') else '') }}"
       description: "DHCP lease — MAC: {{ item.hwaddr }}"
     current:
       status: "{{ status_now }}"

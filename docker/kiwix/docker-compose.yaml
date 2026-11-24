@@ -2,7 +2,8 @@ services:
   kiwix:
     container_name: kiwix
     restart: unless-stopped
-    image: ghcr.io/kiwix/kiwix-serve
+    # A release tag Renovate can track and pin by digest; it was untagged (latest), which is this same build
+    image: ghcr.io/kiwix/kiwix-serve:3.8.2
     # The image runs as uid 1001, which cannot read the ZIM files (owned 3000:0, mode 770), so it runs as their owner
     user: "3000:0"
     networks:
