@@ -303,24 +303,24 @@
     - Berserk:
         href: https://berserk.{{ docker_domain }}
         icon: mdi-sword
-        server: my-unraid
-        container: kavita
-        description: eBooks
+        # Not a Docker container Homepage can see, so the status dot checks the link
+        siteMonitor: https://berserk.{{ docker_domain }}
+        description: BerserkTCG
     - Gametable:
         href: https://magic.{{ docker_domain }}
         icon: mdi-cards-playing
-        server: my-unraid
-        container: kavita
-        description: eBooks
+        # Not a Docker container Homepage can see, so the status dot checks the link
+        siteMonitor: https://magic.{{ docker_domain }}
+        description: GameTable
     - TvSync:
         href: https://tvsync.{{ domain }}
         icon: mdi-television-play
-        server: my-unraid
-        container: kavita
-        description: eBooks
+        # Not a Docker container Homepage can see, so the status dot checks the link
+        siteMonitor: https://tvsync.{{ domain }}
+        description: TV sync
     - Plexbuster:
         href: https://plexbuster.{{ docker_domain }}
         icon: mdi-ghost
-        server: my-unraid
-        container: kavita
-        description: eBooks
+        # Not a Docker container Homepage can see, so the status dot checks the link
+        siteMonitor: https://plexbuster.{{ docker_domain }}
+        description: Plexbuster
