@@ -1,5 +1,6 @@
 ---
 # Semaphore task template SSH Key Rotation; see docs/semaphore/templates.md for the project resources it names
+# Keys come only from the inventory (ssh_public_key_<user>), so there is no field to paste one in
 name: SSH Key Rotation
 app: ansible
 playbook: ansible/playbooks/maintenance/rotate-ssh-keys.yaml
@@ -17,5 +18,3 @@ survey_vars:
         value: admin
       - name: ansible
         value: ansible
-  - name: ssh_public_key
-    title: Public key (optional; defaults to ssh_public_key_<user> in the inventory)
