@@ -36,6 +36,14 @@ survey_vars:
         value: terraform/proxmox/dev-1
       - name: Dev 2 VM
         value: terraform/proxmox/dev-2
+      - name: Agents VM
+        value: terraform/proxmox/agents-vm
+      - name: Semaphore runner VM
+        value: terraform/proxmox/semaphore-runner
+      - name: GameTable VM
+        value: terraform/proxmox/gametable
+      - name: Old Vaultwarden VM
+        value: terraform/proxmox/vaultwarden-old
   - name: tf_action
     title: Action
     description: plan reviews, apply builds then installs, install reruns only the install playbook
