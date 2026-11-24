@@ -3,7 +3,8 @@ services:
     container_name: cryptpad
     hostname: cryptpad
     restart: unless-stopped
-    image: "cryptpad/cryptpad:version-2025.3.0"
+    # Pinned by digest; 2026 releases move the domains into config/infra.js, so upgrading is its own change
+    image: "cryptpad/cryptpad:version-2025.3.0@sha256:81da8210f93f7caa124bd6554115570898d7f6b5579e63ae65953615d66a9e1a"
     networks:
       - reverseproxy-nw
     environment:
@@ -14,8 +15,16 @@ services:
       # Read and accept the license before uncommenting the following line:
       # https://github.com/ONLYOFFICE/web-apps/blob/master/LICENSE.txt
       # - CPAD_INSTALL_ONLYOFFICE=yes
+    # Only the data folders are volumes, as upstream does; a volume over all of /cryptpad would keep the old app files after an image upgrade
+    # config.js is not kept: the image rebuilds it from the two domains above at every start
     volumes:
-      - data:/cryptpad
+      - blob:/cryptpad/blob
+      - block:/cryptpad/block
+      - customize:/cryptpad/customize
+      - data:/cryptpad/data
+      - datastore:/cryptpad/datastore
+      - onlyoffice-dist:/cryptpad/www/common/onlyoffice/dist
+      - onlyoffice-conf:/cryptpad/onlyoffice-conf
     ulimits:
       nofile:
         soft: 1000000
@@ -31,4 +40,10 @@ networks:
     external: true
 
 volumes:
+  blob:
+  block:
+  customize:
   data:
+  datastore:
+  onlyoffice-dist:
+  onlyoffice-conf:
