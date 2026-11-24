@@ -327,6 +327,14 @@
       loop_control:
         label: "{{ item.path | basename }}"
 
+    # An apply writes its plan to a temp file; a private temp directory of its own lets the cleanup below remove it.
+    # It must stay short: Terraform talks to its providers over sockets there, and long socket paths fail.
+    - name: Make a private temp directory for Terraform
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: _tf
+      register: tf_tmp
+
     # Whatever happens in Terraform, the plan files it writes are deleted
     - name: Run Terraform and remove the saved plan
       block:
@@ -339,25 +347,17 @@
             variables: "{{ tf_variables }}"
             # Lists and maps, such as a node list, need HCL formatting; plain values are unaffected
             complex_vars: true
-          # An apply writes its plan to a temp file; TMPDIR keeps that inside the project folder so the cleanup below finds it
-          environment: "{{ tf_env | combine({'TMPDIR': tf_dir}) }}"
+          environment: "{{ tf_env | combine({'TMPDIR': tf_tmp.path}) }}"
           register: tf_result
       always:
         # Nothing reuses a plan once Terraform has run
-        - name: Find the plan files this run wrote
-          ansible.builtin.find:
-            paths: "{{ tf_dir }}"
-            patterns: ["tfplan", "tmp*.tfplan"]
-          register: tf_run_plans
-
-        # Removes the named plan and an apply's temp plan alike
-        - name: Remove the plan files this run wrote
+        - name: Remove the saved plan and the temp directory
           ansible.builtin.file:
-            path: "{{ item.path }}"
+            path: "{{ item }}"
             state: absent
-          loop: "{{ tf_run_plans.files }}"
-          loop_control:
-            label: "{{ item.path | basename }}"
+          loop:
+            - "{{ tf_dir }}/tfplan"
+            - "{{ tf_tmp.path }}"
 
     # Terraform masks sensitive values in its own output, so the plan is safe to show
     - name: Show Terraform's output
