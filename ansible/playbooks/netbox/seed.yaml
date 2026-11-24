@@ -168,7 +168,8 @@
         data:
           name: "{{ item.name }}"
           device_type: "{{ item.device_type }}"
-          role: "{{ item.role }}"
+          # The collection version the runner pins names this field device_role
+          device_role: "{{ item.role }}"
           site: "{{ item.site }}"
           platform: "{{ item.platform | default(omit) }}"
           cluster: "{{ item.cluster | default(omit) }}"
