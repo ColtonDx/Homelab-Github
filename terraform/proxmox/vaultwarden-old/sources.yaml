@@ -1,6 +1,6 @@
 ---
 # Tells ansible/playbooks/terraform/build-project.yaml where this project's inputs come from; locations only, never values
-# Recorded copy of a live VM, not applied: running it needs the inventory host below and a terraform import of the VM first
+# Adopts the live VM on its first apply (import block in main.tf); needs the inventory host below
 
 # State file in Garage; tf_backend=local replaces it with local state for a bootstrap run
 state_key: vaultwarden-old.tfstate

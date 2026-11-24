@@ -1,9 +1,12 @@
-# Records the previous Vaultwarden server as Terraform, matching the live VM, so it can be rebuilt or brought under Terraform later; not applied to the live VM today
+# Records the previous Vaultwarden server as Terraform, matching the live VM, with guard rails so an apply never rebuilds or restarts it
 # Normally run through ansible/playbooks/terraform/build-project.yaml, which fills variables from the inventory, NetBox and Vault as sources.yaml describes
 # A direct run needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_ENDPOINT_URL_S3 for Garage, TF_VAR_proxmox_api_url, TF_VAR_proxmox_api_token_id and TF_VAR_proxmox_api_token_secret, and site values in terraform.tfvars
-# Bringing it in means importing the live VM into this state first (terraform import); a plain apply would try to create a second VM
+# The import block at the end adopts the existing VM on the first apply; set adopt_existing_vm to false to build a new VM instead
 
 terraform {
+  # The import block below uses for_each, which needs Terraform 1.7 or later
+  required_version = ">= 1.7.0"
+
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
   backend "s3" {
     bucket                      = "terraform"
@@ -50,13 +53,13 @@ resource "proxmox_vm_qemu" "vaultwarden_old" {
 
   start_at_node_boot = var.start_at_node_boot
 
-  os_type    = "cloud-init"
-  qemu_os    = "other"
-  bios       = "seabios"
-  boot       = "order=scsi0"
-  scsihw     = "virtio-scsi-pci"
-  memory     = var.memory
-  balloon    = 0
+  os_type = "cloud-init"
+  qemu_os = "other"
+  bios    = "seabios"
+  boot    = "order=scsi0"
+  scsihw  = "virtio-scsi-pci"
+  memory  = var.memory
+  # The live VM leaves ballooning at Proxmox's default (on), so nothing is set here
   agent      = 1
   hotplug    = "network,disk,usb"
   tablet     = true
@@ -112,8 +115,27 @@ resource "proxmox_vm_qemu" "vaultwarden_old" {
     macaddr = var.mac_address != "" ? var.mac_address : null
   }
 
+  # Never reboot the VM to apply a change; changes that need a restart wait for a planned one
+  automatic_reboot = false
+
   lifecycle {
-    # The template only matters at creation
-    ignore_changes = [clone, full_clone]
+    # Refuse any plan that would destroy or replace this VM
+    prevent_destroy = true
+
+    # The template only matters at creation; the description, disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
+    ignore_changes = [
+      clone, full_clone, description,
+      disks, network, ipconfig0, ciupgrade, os_type,
+      serial, vga, boot, scsihw, bios, startup_shutdown,
+      # Ballooning stays as it is on the live VM
+      balloon,
+    ]
   }
+}
+
+# Takes the existing VM into state rather than creating a second one; does nothing once the VM is in state
+import {
+  for_each = var.adopt_existing_vm ? toset([tostring(var.vm_id)]) : toset([])
+  to       = proxmox_vm_qemu.vaultwarden_old
+  id       = "${var.target_node}/qemu/${each.value}"
 }
