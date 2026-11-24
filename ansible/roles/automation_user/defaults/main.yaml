@@ -5,3 +5,10 @@ automation_user_name: ansible
 # authorized_keys, so any other key stops working. Defaults to the inventory's ssh_public_key_<user>, the same variable
 # rotate-ssh-keys.yaml reads, so a key rotation and a rerun of this role agree
 automation_user_keys: "{{ lookup('ansible.builtin.vars', 'ssh_public_key_' ~ (automation_user_name | regex_replace('[^A-Za-z0-9_]', '_')), default='') }}"
+# Certificate mode: an OpenSSH CA public key (e.g. Vault's SSH signer). When set, the account has no authorized_keys and accepts only
+# certificates this CA signed for its own name, and the keys above are not used; other accounts cannot log in with this CA's certificates
+automation_user_ca_public_key: ""
+# Where certificate mode keeps the CA key, the principals files and its sshd setting
+automation_user_ca_file: /etc/ssh/automation-user-ca.pub
+automation_user_principals_dir: /etc/ssh/auth_principals
+automation_user_sshd_dropin: /etc/ssh/sshd_config.d/60-automation-user-ca.conf

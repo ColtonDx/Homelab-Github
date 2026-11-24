@@ -1,12 +1,18 @@
 ---
 # Creates the automation account: key-only SSH with the runner's public key(s), no usable password, passwordless sudo
+# With automation_user_ca_public_key set it is certificate-only instead: no authorized_keys, and only certificates that CA signed for it
 # Safe to re-run: an existing account is brought back to this state, so a hand-made one is adopted as it is
 
-# Accept one key, several keys on separate lines, or a list
+- name: Note whether the account uses certificates
+  ansible.builtin.set_fact:
+    automation_user_ca_mode: "{{ automation_user_ca_public_key | trim | length > 0 }}"
+
+# Accept one key, several keys on separate lines, or a list; in certificate mode the CA key is the one to check
 - name: Normalise the keys into a list
   ansible.builtin.set_fact:
     automation_user_key_list: >-
-      {{ (automation_user_keys if automation_user_keys is not string else automation_user_keys.splitlines())
+      {{ [automation_user_ca_public_key | trim] if automation_user_ca_mode
+         else (automation_user_keys if automation_user_keys is not string else automation_user_keys.splitlines())
          | map('trim') | reject('equalto', '') | list }}
 
 # Parse each key with ssh-keygen on the controller, which rejects truncated or malformed pastes
@@ -32,7 +38,7 @@
       - automation_user_key_list | length > 0
       - automation_user_key_checks.results | default([]) | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0) | list | length == automation_user_key_list | length
     fail_msg: >-
-      No valid SSH public key for {{ automation_user_name }}: set automation_user_keys or
+      No valid SSH public key for {{ automation_user_name }}: set automation_user_ca_public_key, automation_user_keys or
       ssh_public_key_{{ automation_user_name | regex_replace('[^A-Za-z0-9_]', '_') }} in the inventory. Nothing was changed.
 
 # Proxmox and minimal Debian installs ship without sudo
@@ -82,6 +88,78 @@
     group: "{{ automation_user_gid }}"
     mode: "0600"
     backup: true
+  when: not automation_user_ca_mode
+
+# Certificate mode: a leftover key would be a second way in that never expires
+- name: Remove authorized_keys in certificate mode
+  ansible.builtin.file:
+    path: "{{ automation_user_home }}/.ssh/authorized_keys"
+    state: absent
+  when: automation_user_ca_mode
+
+- name: Trust the CA for the account
+  when: automation_user_ca_mode
+  block:
+    - name: Install the CA public key
+      ansible.builtin.copy:
+        dest: "{{ automation_user_ca_file }}"
+        content: "{{ automation_user_ca_public_key | trim }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Create the principals directory
+      ansible.builtin.file:
+        path: "{{ automation_user_principals_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Only this account has a principals file, so the CA's certificates cannot log in as root or anyone else
+    - name: Allow certificates for this account's name only
+      ansible.builtin.copy:
+        dest: "{{ automation_user_principals_dir }}/{{ automation_user_name }}"
+        content: "{{ automation_user_name }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Point sshd at the CA and the principals files
+      ansible.builtin.copy:
+        dest: "{{ automation_user_sshd_dropin }}"
+        content: |
+          # Managed by Ansible (role automation_user): certificate logins, for accounts listed in {{ automation_user_principals_dir }} only
+          TrustedUserCAKeys {{ automation_user_ca_file }}
+          AuthorizedPrincipalsFile {{ automation_user_principals_dir }}/%u
+        owner: root
+        group: root
+        mode: "0644"
+      register: automation_user_dropin
+
+    # A bad sshd config would stop new logins after the reload, so it is checked first and taken back out if sshd rejects it;
+    # a block rather than a handler, since a handler cannot undo the change when the check fails
+    - name: Check and reload sshd  # noqa: no-handler
+      when: automation_user_dropin is changed
+      block:
+        - name: Check the sshd configuration
+          ansible.builtin.command: /usr/sbin/sshd -t
+          changed_when: false
+
+        # Reload keeps existing sessions, including this one
+        - name: Reload sshd
+          ansible.builtin.systemd:
+            name: ssh
+            state: reloaded
+      rescue:
+        - name: Take the setting back out
+          ansible.builtin.file:
+            path: "{{ automation_user_sshd_dropin }}"
+            state: absent
+
+        - name: Stop after sshd rejected the setting
+          ansible.builtin.fail:
+            msg: "sshd rejected the certificate settings, so they were removed again and sshd was left as it was."
 
 # A drop-in file, checked with visudo before it is put in place, so a bad rule cannot break sudo
 - name: Allow passwordless sudo

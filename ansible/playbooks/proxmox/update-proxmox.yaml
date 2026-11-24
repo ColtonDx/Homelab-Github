@@ -4,6 +4,10 @@
 # Stay in place: guests tagged with one of proxmox_stay_tags (default talos: cluster nodes kept one per host) or using PCI or USB passthrough
 # Optional: proxmox_reboot_always=true reboots even without updates, proxmox_rebalance=false leaves migrated guests where they went, target_hosts (default proxmox) to update some nodes
 
+# Logs in with a Vault-signed certificate when the inventory turns that on
+- name: Sign the SSH certificate
+  ansible.builtin.import_playbook: ssh-certificate.yaml
+
 # One node at a time, so the cluster never loses more than one member and guests always have somewhere to go
 - name: Update the Proxmox nodes
   hosts: "{{ target_hosts | default('proxmox') }}"
@@ -28,3 +32,7 @@
     - name: Rebalance the guests
       ansible.builtin.include_tasks: tasks/rebalance.yaml
       when: proxmox_rebalance | default(true) | bool
+
+# Deletes the certificate's key from memory
+- name: Clean up the SSH certificate
+  ansible.builtin.import_playbook: ssh-certificate-cleanup.yaml
