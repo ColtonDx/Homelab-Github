@@ -1,8 +1,12 @@
 ---
 # Semaphore task template Network | ICX Config Drift; see docs/semaphore/templates.md for the project resources it names
 name: Network | ICX Config Drift
-description: "Read-only: compares each ICX switch running config with the config the inventory defines and reports the differences; fail_on_drift=true fails the run"
+description: "Read-only: compares each ICX switch running config with the config the inventory defines; fails when they differ, so the daily run alerts Discord"
 app: ansible
+# Fails on any difference, so the daily schedule (10:30 UTC) reaches Discord through Semaphore | Scheduled Job Alerts
+arguments:
+  - -e
+  - fail_on_drift=true
 playbook: ansible/playbooks/network/icx-config.yaml
 repository: Github-Homelab
 inventory: Gitlab Ansible Inventory
