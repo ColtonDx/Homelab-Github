@@ -3,6 +3,7 @@
 # Changes nothing, so it doubles as the connection test before any config playbook runs
 # Inventory (switches group): ansible_user, network_vault_path (Vault secret) and per host network_vault_field (the login password's field)
 # Needs community.network and ansible.netcommon on the runner (runner_collection_pins in deployment/semaphore-runner.yaml)
+# Optional per host: network_legacy_kex=true allows the weak key exchange old firmware needs (ansible/files/ssh/legacy-kex.conf), for that host only
 # Extra vars: target_hosts (default switches)
 
 # The Vault module runs where the task runs, so the passwords are read on the controller first
@@ -25,6 +26,9 @@
 - name: Check each switch
   hosts: "{{ target_hosts | default('switches') }}"
   gather_facts: false
+  vars:
+    # An empty path leaves libssh on its defaults
+    ansible_libssh_config_file: "{{ playbook_dir ~ '/../../files/ssh/legacy-kex.conf' if network_legacy_kex | default(false) | bool else '' }}"
 
   tasks:
     # Kept out of the log; network_cli logs in with it
