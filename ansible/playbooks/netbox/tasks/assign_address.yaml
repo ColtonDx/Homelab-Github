@@ -1,0 +1,108 @@
+---
+# Task file: puts one address on a named interface of a device or VM and makes it that object's primary; looped from sync_assignments.yaml
+# Expects nas (one netbox_ip_assignments entry): address, device or vm, interface; optional type (devices only, default 1000base-t),
+# rename_from (an existing interface to rename instead of adding one) and primary (default true)
+
+- name: Describe the object the address belongs to
+  ansible.builtin.set_fact:
+    nas_kind: "{{ 'device' if nas.device is defined else 'vm' }}"
+    nas_parent_name: "{{ nas.device | default(nas.vm) }}"
+    nas_parent_api: "{{ 'dcim/devices' if nas.device is defined else 'virtualization/virtual-machines' }}"
+    nas_iface_api: "{{ 'dcim/interfaces' if nas.device is defined else 'virtualization/interfaces' }}"
+    nas_iface_type: "{{ 'dcim.interface' if nas.device is defined else 'virtualization.vminterface' }}"
+    nas_parent_key: "{{ 'device' if nas.device is defined else 'virtual_machine' }}"
+
+- name: Look up the device or VM
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/{{ nas_parent_api }}/?name={{ nas_parent_name | urlencode }}"
+    headers: "{{ netbox_headers }}"
+  # Read-only, so a check-mode run still shows what would change
+  check_mode: false
+  register: nas_parent
+
+- name: Look up the address
+  ansible.builtin.uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ nas.address | regex_replace('/.*$', '') }}"
+    headers: "{{ netbox_headers }}"
+  # Read-only, so a check-mode run still shows what would change
+  check_mode: false
+  register: nas_ip
+
+# The object and the address come from seeding, the inventory sync or Proxmox; this only connects them
+- name: Skip when the object or the address is not in NetBox yet
+  ansible.builtin.debug:
+    msg: "{{ nas_parent_name }} or {{ nas.address }} is not in NetBox yet; it is attached on a later run."
+  when: nas_parent.json.count != 1 or nas_ip.json.count != 1
+
+- name: Attach the address
+  when: nas_parent.json.count == 1 and nas_ip.json.count == 1
+  vars:
+    nas_parent_id: "{{ nas_parent.json.results[0].id }}"
+  block:
+    - name: Read the object's interfaces
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/{{ nas_iface_api }}/?{{ nas_parent_key }}_id={{ nas_parent_id }}&limit=0"
+        headers: "{{ netbox_headers }}"
+      check_mode: false
+      register: nas_ifaces
+
+    - name: Find the wanted interface and any to rename
+      ansible.builtin.set_fact:
+        nas_iface: "{{ nas_ifaces.json.results | selectattr('name', 'equalto', nas.interface) | first | default({}) }}"
+        nas_old_iface: "{{ nas_ifaces.json.results | selectattr('name', 'equalto', nas.rename_from | default('')) | first | default({}) }}"
+
+    # Fixes a misnamed interface in place, so whatever is attached to it stays
+    - name: Rename the old interface
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/{{ nas_iface_api }}/{{ nas_old_iface.id }}/"
+        method: PATCH
+        headers: "{{ netbox_headers }}"
+        body_format: json
+        body: "{{ {'name': nas.interface} | combine({'type': nas.type | default('1000base-t')} if nas_kind == 'device' else {}) }}"
+      when: nas_iface == {} and nas_old_iface != {}
+      register: nas_renamed
+      changed_when: true
+
+    - name: Add the interface
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/{{ nas_iface_api }}/"
+        method: POST
+        headers: "{{ netbox_headers }}"
+        body_format: json
+        body: "{{ {nas_parent_key: nas_parent_id | int, 'name': nas.interface} | combine({'type': nas.type | default('1000base-t')} if nas_kind == 'device' else {}) }}"
+        status_code: 201
+      when: nas_iface == {} and nas_old_iface == {}
+      register: nas_created
+      changed_when: true
+
+    - name: Note the interface's ID
+      ansible.builtin.set_fact:
+        nas_iface_id: >-
+          {{ nas_iface.id if nas_iface != {} else (nas_renamed.json.id | default(0) if nas_renamed is not skipped else nas_created.json.id | default(0)) }}
+
+    - name: Put the address on the interface
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ nas_ip.json.results[0].id }}/"
+        method: PATCH
+        headers: "{{ netbox_headers }}"
+        body_format: json
+        body:
+          assigned_object_type: "{{ nas_iface_type }}"
+          assigned_object_id: "{{ nas_iface_id | int }}"
+      when: >-
+        nas_ip.json.results[0].assigned_object_type != nas_iface_type
+        or nas_ip.json.results[0].assigned_object_id | default(0) | int != nas_iface_id | int
+      changed_when: true
+
+    - name: Make it the object's primary address
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/{{ nas_parent_api }}/{{ nas_parent_id }}/"
+        method: PATCH
+        headers: "{{ netbox_headers }}"
+        body_format: json
+        body:
+          primary_ip4: "{{ nas_ip.json.results[0].id | int }}"
+      when:
+        - nas.primary | default(true) | bool
+        - (nas_parent.json.results[0].primary_ip4.id | default(0)) | int != nas_ip.json.results[0].id | int
+      changed_when: true
