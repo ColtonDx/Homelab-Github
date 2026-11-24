@@ -5,8 +5,13 @@ services:
     restart: unless-stopped
     # Pinned by digest so upgrades arrive as reviewed changes; laid out like upstream's own compose file for this release
     image: "cryptpad/cryptpad:version-2026.10.1@sha256:b1129d954692e9b8a7d198e79d3080d3627051c95137bbf41a7d2683aa53305d"
-    # Upstream runs the app read-only: everything it writes goes to the volumes below or /tmp
+    # Upstream runs the app read-only: everything it writes goes to the volumes below or the in-memory folders here
     read_only: true
+    # The config folder is rebuilt from the two domains above at every start, so it lives in memory, owned by CryptPad's
+    # user (4001); a Docker volume there would be created root-owned, and the start-up copy of config.js would fail
+    tmpfs:
+      - /tmp
+      - /cryptpad/config:uid=4001,gid=4001,mode=0750
     networks:
       - reverseproxy-nw
     environment:
@@ -26,10 +31,6 @@ services:
       - datastore:/cryptpad/datastore
       - onlyoffice-dist:/cryptpad/www/common/onlyoffice/dist
       - onlyoffice-conf:/cryptpad/onlyoffice-conf
-      # config.js and infra.js; created from the image's examples on the first start
-      - config:/cryptpad/config
-      - type: tmpfs
-        target: /tmp
     ulimits:
       nofile:
         soft: 1000000
@@ -52,4 +53,3 @@ volumes:
   datastore:
   onlyoffice-dist:
   onlyoffice-conf:
-  config:
