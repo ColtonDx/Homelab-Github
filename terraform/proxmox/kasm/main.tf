@@ -122,9 +122,9 @@ resource "proxmox_vm_qemu" "kasm" {
     # Refuse any plan that would destroy or replace this VM
     prevent_destroy = true
 
-    # The template only matters at creation; disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
+    # The template only matters at creation; the description, disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
     ignore_changes = [
-      clone, full_clone,
+      clone, full_clone, description,
       disks, network, ipconfig0, ciupgrade, os_type,
       serial, vga, boot, scsihw, bios, startup_shutdown,
     ]

@@ -110,3 +110,15 @@ variable "adopt_existing_vm" {
   description = "Import the VM that already has vm_id on target_node instead of creating it; set false when building it from scratch"
   default     = true
 }
+
+variable "qemu_agent" {
+  type        = bool
+  description = "Enable the QEMU guest agent option on the VM"
+  default     = false
+}
+
+variable "ha_state" {
+  type        = string
+  description = "Proxmox HA state for the VM (started, stopped, ignored); null keeps it out of HA"
+  default     = null
+}

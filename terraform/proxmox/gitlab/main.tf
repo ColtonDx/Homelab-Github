@@ -42,7 +42,10 @@ resource "proxmox_vm_qemu" "gitlab" {
   vmid        = var.vm_id
   target_node = var.target_node
   description = var.description
-  tags        = var.tags
+
+  # Proxmox HA: the state the cluster keeps the VM in (e.g. started); null leaves it out of HA
+  hastate = var.ha_state
+  tags    = var.tags
 
   # Proxmox's own defaults (any order, default delay and timeout); the provider always reads this block back, so leaving it out shows a change on every plan
   startup_shutdown {}
@@ -61,7 +64,7 @@ resource "proxmox_vm_qemu" "gitlab" {
   scsihw     = "virtio-scsi-pci"
   memory     = var.memory
   balloon    = 0
-  agent      = 0
+  agent      = var.qemu_agent ? 1 : 0
   hotplug    = "network,disk,usb"
   tablet     = true
   kvm        = true
@@ -122,9 +125,9 @@ resource "proxmox_vm_qemu" "gitlab" {
     # Refuse any plan that would destroy or replace this VM
     prevent_destroy = true
 
-    # The template only matters at creation; disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
+    # The template only matters at creation; the description, disks, network, cloud-init and console settings are left as they are on the live VM so an apply cannot disturb them
     ignore_changes = [
-      clone, full_clone,
+      clone, full_clone, description,
       disks, network, ipconfig0, ciupgrade, os_type,
       serial, vga, boot, scsihw, bios, startup_shutdown,
     ]
