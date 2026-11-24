@@ -2,7 +2,8 @@ services:
   homebox:
     container_name: homebox
     restart: unless-stopped
-    image: ghcr.io/hay-kot/homebox:latest
+    # The original project is archived; this is its maintained continuation, pinned by digest so upgrades arrive as reviewed changes
+    image: ghcr.io/sysadminsmedia/homebox:0.27.1@sha256:9d0b64776c694f018c0ca06faf52105a33ca376024f46bb58e6ab0e2b728bb61
     networks:
       - reverseproxy-nw
 #    ports:
