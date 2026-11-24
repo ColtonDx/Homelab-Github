@@ -1,0 +1,14 @@
+---
+# Imported last by the Proxmox playbooks: deletes the throwaway key and certificate ssh-certificate.yaml made; a run that fails before
+# this point leaves them in memory until the certificate expires and the next run removes them
+- name: Remove the short-lived SSH key
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Delete the key and certificate
+      ansible.builtin.file:
+        path: "{{ proxmox_cert_path }}"
+        state: absent
+      when: proxmox_cert_path is defined

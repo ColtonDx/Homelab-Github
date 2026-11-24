@@ -2,8 +2,13 @@
 # Sets up and configures the Proxmox nodes: repositories, NTP, DNS and domain, the automation account, the cluster, ZFS and backup storage, the backup schedule, and ACME certificates; update-proxmox.yaml does upgrades
 # Safe to re-run: every step reads the current state first and only changes what differs; run with --check to see what would change without changing it
 # Tags: repos, ntp, dns, ansible_user, cluster, storage, backup, acme; the inventory settings each part reads are listed in its task file under tasks/
-# Optional: proxmox_ansible_user=true (default false) adds the runner's key-only account with passwordless sudo; see ansible/roles/automation_user/defaults/main.yaml
+# Optional: proxmox_ansible_user=true (default false) adds the runner's automation account with passwordless sudo (key-only, or certificate-only with
+# automation_user_ca_public_key); proxmox_ssh_certificate=true then logs in as it with a Vault-signed certificate (ssh-certificate.yaml)
 # One-way steps only run on request: -e proxmox_cluster_create=true, -e proxmox_cluster_join=true
+
+# Logs in with a Vault-signed certificate when the inventory turns that on
+- name: Sign the SSH certificate
+  ansible.builtin.import_playbook: ssh-certificate.yaml
 
 # Per-node settings, on every node at once since none of them affect the cluster
 - name: Configure each Proxmox node
@@ -99,3 +104,7 @@
         apply:
           tags: [acme]
       tags: [acme]
+
+# Deletes the certificate's key from memory
+- name: Clean up the SSH certificate
+  ansible.builtin.import_playbook: ssh-certificate-cleanup.yaml

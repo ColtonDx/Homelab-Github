@@ -1,0 +1,78 @@
+---
+# Imported first by the Proxmox playbooks: when the inventory sets proxmox_ssh_certificate=true, makes a throwaway SSH key in memory
+# (/dev/shm), has Vault sign it for the automation account, and logs in to the nodes with that short-lived certificate
+# Inventory: proxmox_ssh_signer (Vault path of the signing role, e.g. ssh-client-signer/sign/proxmox-ansible), automation_user_name (default ansible)
+# Vault connection from the environment (VAULT_ADDR, VAULT_TOKEN); the token needs update on the signer path
+# Nothing happens when proxmox_ssh_certificate is off, so the nodes are reached as before; ssh-certificate-cleanup.yaml removes the key afterwards
+- name: Sign a short-lived SSH certificate for the Proxmox nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    proxmox_cert_hosts: "{{ query('ansible.builtin.inventory_hostnames', proxmox_group | default('proxmox')) }}"
+    proxmox_cert_on: "{{ proxmox_cert_hosts | length > 0 and hostvars[proxmox_cert_hosts[0]].proxmox_ssh_certificate | default(false) | bool }}"
+    proxmox_cert_user: "{{ hostvars[proxmox_cert_hosts[0]].automation_user_name | default('ansible') if proxmox_cert_hosts | length > 0 else 'ansible' }}"
+
+  tasks:
+    - name: Sign and use the certificate
+      when: proxmox_cert_on | bool
+      block:
+        # A run that stopped early leaves its key behind; the certificate has expired by then, but the key goes too
+        - name: Find keys earlier runs left behind
+          ansible.builtin.find:
+            paths: /dev/shm
+            patterns: "ansible.*_sshcert"
+            file_type: directory
+          register: proxmox_cert_old
+
+        - name: Remove them
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ proxmox_cert_old.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+        # /dev/shm is memory, so the key never reaches the runner's disk; tempfile makes the directory private (0700)
+        - name: Make a private directory in memory
+          ansible.builtin.tempfile:
+            state: directory
+            path: /dev/shm
+            suffix: _sshcert
+          register: proxmox_cert_dir
+
+        - name: Make a throwaway key
+          ansible.builtin.command:
+            argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "semaphore-proxmox", -f, "{{ proxmox_cert_dir.path }}/id_ed25519"]
+            creates: "{{ proxmox_cert_dir.path }}/id_ed25519"
+
+        # Vault's role fixes the account, the lifetime and the runner's source address; this only asks for the signature
+        - name: Have Vault sign it
+          community.hashi_vault.vault_write:
+            path: "{{ hostvars[proxmox_cert_hosts[0]].proxmox_ssh_signer }}"
+            data:
+              public_key: "{{ lookup('ansible.builtin.file', proxmox_cert_dir.path ~ '/id_ed25519.pub') }}"
+              valid_principals: "{{ proxmox_cert_user }}"
+              cert_type: user
+          register: proxmox_cert_signed
+
+        # ssh picks up <key>-cert.pub next to the key by itself
+        - name: Save the certificate next to the key
+          ansible.builtin.copy:
+            content: "{{ proxmox_cert_signed.data.data.signed_key }}"
+            dest: "{{ proxmox_cert_dir.path }}/id_ed25519-cert.pub"
+            mode: "0600"
+
+        # Facts outrank the inventory and the key Semaphore passes, so every later play on these nodes logs in this way
+        - name: Log in to the nodes with the certificate
+          ansible.builtin.set_fact:
+            ansible_user: "{{ proxmox_cert_user }}"
+            ansible_ssh_private_key_file: "{{ proxmox_cert_dir.path }}/id_ed25519"
+          delegate_to: "{{ item }}"
+          delegate_facts: true
+          loop: "{{ proxmox_cert_hosts }}"
+
+        - name: Remember the directory for the cleanup
+          ansible.builtin.set_fact:
+            proxmox_cert_path: "{{ proxmox_cert_dir.path }}"
