@@ -2,7 +2,9 @@ services:
   web:
     container_name: karakeep
     restart: unless-stopped
-    image: ghcr.io/karakeep-app/karakeep
+    # Explicitly latest, which is what it ran untagged: a build newer than the last release (0.35.0), so pinning a release would
+    # roll its database back; Renovate can now pin and update its digest. Move to a release tag once one passes this build
+    image: ghcr.io/karakeep-app/karakeep:latest
     networks:
       - reverseproxy-nw
       - default

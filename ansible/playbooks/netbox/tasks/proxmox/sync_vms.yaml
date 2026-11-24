@@ -95,8 +95,9 @@
           'memory': nb_vm.memory} }}
   register: nb_vm_updates
 
-# Records from runs before the tag existed are found by the comment marker and tagged once
-- name: Backfill the Dynamic tag onto VMs the Proxmox sync created earlier
+# Records from runs before the tag existed (found by the comment marker), and records another step made for a guest Proxmox
+# still runs (e.g. a Terraform apply), are tagged once, so the stale-record clean-up removes them when the guest is deleted
+- name: Backfill the Dynamic tag onto VMs Proxmox runs
   ansible.builtin.uri:
     url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ item.id }}/"
     method: PATCH
@@ -106,10 +107,14 @@
       tags: "{{ (item.tags | map(attribute='id') | list) + [netbox_dynamic_tag_id | int] }}"
     status_code: [200]
   loop: >-
-    {{ netbox_existing_vms.json.results | default([])
-       | selectattr('comments', 'defined')
-       | selectattr('comments', 'search', 'proxmox-vms-to-netbox')
-       | list }}
+    {{ (netbox_existing_vms.json.results | default([])
+        | selectattr('comments', 'defined')
+        | selectattr('comments', 'search', 'proxmox-vms-to-netbox')
+        | list)
+       + (netbox_existing_vms.json.results | default([])
+          | selectattr('name', 'in', guests_to_update | default([]) | map(attribute='name') | list)
+          | list)
+       | unique(attribute='id') }}
   loop_control:
     label: "{{ item.name }}"
   when:
