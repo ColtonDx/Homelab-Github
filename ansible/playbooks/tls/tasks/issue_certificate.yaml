@@ -126,16 +126,14 @@
     acme_store_fullchain: "/root/.acme.sh/{{ acme_domain }}_ecc/fullchain.cer"
 
 # Request the certificate through a Cloudflare DNS challenge; skipped once a key exists for the domain
+# The token goes in through the environment, so it never appears in a command line, script text or the process list
 - name: Issue certificate using Cloudflare DNS
-  ansible.builtin.shell: |
-    export CF_Token="{{ cloudflare_api_token }}"
-    export CF_Email="{{ acme_email }}"
-    /root/.acme.sh/acme.sh --issue \
-      --dns dns_cf \
-      -d "{{ acme_domain }}" \
-      --keylength ec-256
-  args:
+  ansible.builtin.command:
+    argv: [/root/.acme.sh/acme.sh, --issue, --dns, dns_cf, -d, "{{ acme_domain }}", --keylength, ec-256]
     creates: "{{ acme_store_dir }}/{{ acme_domain }}.key"
+  environment:
+    CF_Token: "{{ cloudflare_api_token }}"
+    CF_Email: "{{ acme_email }}"
   register: acme_issue
   failed_when: false
   no_log: true
@@ -158,13 +156,12 @@
 
 # Renews now when forced or close to expiry; otherwise acme.sh's nightly cron keeps its own schedule
 - name: Renew the certificate
-  ansible.builtin.shell: |
-    export CF_Token="{{ cloudflare_api_token }}"
-    export CF_Email="{{ acme_email }}"
-    /root/.acme.sh/acme.sh --renew --force \
-      --dns dns_cf \
-      -d "{{ acme_domain }}" \
-      --ecc
+  ansible.builtin.command:
+    argv: [/root/.acme.sh/acme.sh, --renew, --force, --dns, dns_cf, -d, "{{ acme_domain }}", --ecc]
+  environment:
+    CF_Token: "{{ cloudflare_api_token }}"
+    CF_Email: "{{ acme_email }}"
+  changed_when: acme_renew.rc == 0
   register: acme_renew
   failed_when: false
   when:
