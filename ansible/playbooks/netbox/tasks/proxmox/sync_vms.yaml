@@ -70,6 +70,30 @@
   loop: "{{ guests_to_update }}"
   loop_control:
     label: "{{ item.name }} (vmid {{ item.vmid }})"
+  # Only VMs whose Proxmox-owned fields differ from NetBox are written, so an unchanged VM is left alone
+  when: nb_vm_want != (nb_vm_have | dict2items | selectattr('key', 'in', nb_vm_want.keys() | list) | items2dict)
+  vars:
+    nb_vm: "{{ netbox_existing_vms.json.results | selectattr('name', 'equalto', item.name) | first }}"
+    # The values the PATCH below would send; a value Proxmox does not give is not compared
+    nb_vm_want: >-
+      {{ {'cluster': netbox_cluster_id | int,
+          'virtual_machine_type': netbox_vm_type_id | int,
+          'device': netbox_device_by_node.get(item.node | lower),
+          'status': 'active' if item.status == 'running' else 'offline',
+          'start_on_boot': onboot_by_vmid.get(item.vmid | string),
+          'vcpus': item.maxcpu | default(item.cpus) | default(none),
+          'memory': ((item.maxmem | default(0)) / 1048576) | round | int}
+         | dict2items | rejectattr('value', 'none') | items2dict }}
+    # The same fields as NetBox holds them now, flattened to ids and values
+    nb_vm_have: >-
+      {{ {'cluster': (nb_vm.cluster or {}).id | default(none),
+          'virtual_machine_type': (nb_vm.virtual_machine_type or {}).id | default(none),
+          'device': (nb_vm.device or {}).id | default(none),
+          'status': (nb_vm.status or {}).value | default(none),
+          'start_on_boot': (nb_vm.start_on_boot or {}).value | default(none),
+          'vcpus': nb_vm.vcpus,
+          'memory': nb_vm.memory} }}
+  register: nb_vm_updates
 
 # Records from runs before the tag existed are found by the comment marker and tagged once
 - name: Backfill the Dynamic tag onto VMs the Proxmox sync created earlier

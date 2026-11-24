@@ -45,6 +45,8 @@
       register: kuma_login
       delegate_to: localhost
       become: false
+      # A login that never returns is treated like a failed one instead of hanging the run
+      timeout: "{{ kuma_call_timeout | default(120) }}"
       failed_when: false
       no_log: true
 

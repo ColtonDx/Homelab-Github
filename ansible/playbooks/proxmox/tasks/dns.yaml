@@ -48,7 +48,7 @@
     - name: Find the node's entry in /etc/hosts
       ansible.builtin.set_fact:
         proxmox_hosts_entries: >-
-          {{ (proxmox_hosts_file.content | b64decode).split('\n')
+          {{ (proxmox_hosts_file.content | b64decode).splitlines()
              | reject('match', '^\s*#') | select('search', '(^|\s)' ~ (proxmox_node | regex_escape) ~ '(\.|\s|$)') | list }}
         proxmox_hosts_wanted: "{{ proxmox_ip }} {{ proxmox_fqdn }} {{ proxmox_node }}"
 
