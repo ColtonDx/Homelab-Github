@@ -16,7 +16,7 @@ task_params:
   allow_override_limit: true
   allow_override_skip_tags: true
   allow_override_tags: true
-allow_override_args_in_task: true
+# No free extra arguments: runs take only the survey choices, tags and host limit
 survey_vars:
   - name: target_hosts
     title: Hosts
