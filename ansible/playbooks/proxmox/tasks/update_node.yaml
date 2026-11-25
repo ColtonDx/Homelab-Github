@@ -81,6 +81,8 @@
       register: proxmox_post
       changed_when: false
       failed_when: false
+      # Read-only, so a dry run checks quorum too instead of waiting on a skipped command
+      check_mode: false
       retries: 30
       delay: 10
       until: proxmox_post.rc != 0 or proxmox_post.stdout is search('Quorate:\\s+Yes')
