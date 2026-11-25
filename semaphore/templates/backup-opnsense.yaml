@@ -1,0 +1,12 @@
+---
+# Semaphore task template Backup | OPNsense; see docs/semaphore/templates.md for the project resources it names
+# OPNsense config.xml through its API, encrypted with age, copied to the backup server's Opnsense folder
+# Scheduled nightly at 09:30 UTC (03:30 Central)
+name: Backup | OPNsense
+view: Backups
+app: ansible
+playbook: ansible/playbooks/backups/opnsense-backup.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets

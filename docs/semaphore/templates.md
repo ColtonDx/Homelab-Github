@@ -50,6 +50,8 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| DVBM Job | Backups | [backup-dvbm-job.yaml](../../semaphore/templates/backup-dvbm-job.yaml) | `ansible/playbooks/backups/dvbm-backup.yaml` |
 | Backup \| Gitlab | Backups | [backup-gitlab.yaml](../../semaphore/templates/backup-gitlab.yaml) | `ansible/playbooks/backups/gitlab-backup.yaml` |
 | Backup \| Plex | Backups | [backup-plex.yaml](../../semaphore/templates/backup-plex.yaml) | `ansible/playbooks/backups/plex-backup.yaml` |
+| Backup \| Vault | Backups | [backup-vault.yaml](../../semaphore/templates/backup-vault.yaml) | `ansible/playbooks/backups/vault-backup.yaml` |
+| Backup \| OPNsense | Backups | [backup-opnsense.yaml](../../semaphore/templates/backup-opnsense.yaml) | `ansible/playbooks/backups/opnsense-backup.yaml` |
 | Host \| Docker | (none) | [host-docker.yaml](../../semaphore/templates/host-docker.yaml) | `ansible/playbooks/deployment/host-docker.yaml` |
 | Host \| Dev | (none) | [host-dev.yaml](../../semaphore/templates/host-dev.yaml) | `ansible/playbooks/deployment/host-dev.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](../../semaphore/templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |

@@ -26,12 +26,12 @@ survey_vars:
     values:
       - name: All Proxmox nodes
         value: proxmox
-      - name: 'Host: PVE1'
-        value: PVE1
-      - name: 'Host: PVE2'
-        value: PVE2
-      - name: 'Host: PVE3'
-        value: PVE3
+      - name: 'Host: PVE-VM-1'
+        value: PVE-VM-1
+      - name: 'Host: PVE-VM-2'
+        value: PVE-VM-2
+      - name: 'Host: PVE-VM-3'
+        value: PVE-VM-3
   - name: proxmox_fix_hosts
     title: Rewrite a wrong /etc/hosts entry
     description: Otherwise a mismatch is only reported

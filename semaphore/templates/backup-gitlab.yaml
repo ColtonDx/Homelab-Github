@@ -1,5 +1,6 @@
 ---
 # Semaphore task template Backup | Gitlab; see docs/semaphore/templates.md for the project resources it names
+# Scheduled nightly at 09:00 UTC (03:00 Central), ahead of the dataset snapshots on the backup server
 name: Backup | Gitlab
 view: Backups
 app: ansible

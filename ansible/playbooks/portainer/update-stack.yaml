@@ -2,6 +2,8 @@
 # Updates a deployed stack to newer images: backs it up through DVBMv3, redeploys pulling images, then waits for the containers to be healthy
 # Connection settings and Vault fields are listed in tasks/setup.yaml; this playbook only updates, and deploy-stack.yaml creates stacks
 # Required: app_name, portainer_endpoint; optional: repo_ref, repo_auth, stack_prune, skip_backup, health_timeout (300), health_interval (10)
+# env_only=true only sends the stack's env to Portainer, with no backup and no redeploy: run it on a pull request's branch before merging,
+# so a compose change that adds a ${VAR} finds its value already in Portainer when the merge triggers the GitOps redeploy
 # On a failed health check it redeploys rollback_ref when given; images already pulled are not rolled back, so data recovery is a restore in DVBMv3 from the backup ID
 - name: Update a Portainer stack with a backup and health gate
   hosts: localhost
@@ -28,6 +30,41 @@
     # The redeploy re-sends the env, so rebuild it from the inventory and Vault
     - name: Build the stack env from the inventory and Vault
       ansible.builtin.include_tasks: tasks/stack_env.yaml
+
+    # Env only: the stack keeps tracking its branch and its automatic updates; only its env changes, ready for the next redeploy
+    - name: Send the env without redeploying
+      when: env_only | default(false) | bool
+      block:
+        # The stack's own Git settings are sent back unchanged, since this call replaces them; the body carries env values, so it is hidden
+        - name: Update the stack's env in Portainer
+          ansible.builtin.uri:
+            url: "{{ portainer_url }}/api/stacks/{{ existing_stack.Id }}/git?endpointId={{ portainer_endpoint_id }}"
+            method: POST
+            headers:
+              X-API-Key: "{{ portainer_token }}"
+              Content-Type: application/json
+            body_format: json
+            body:
+              env: "{{ stack_env }}"
+              autoUpdate: "{{ existing_stack.AutoUpdate | default(omit) }}"
+              repositoryReferenceName: "{{ existing_stack.GitConfig.ReferenceName }}"
+              repositoryAuthentication: "{{ repo_auth | default(false) | bool }}"
+              repositoryUsername: "{{ repo_username | default('') }}"
+              repositoryPassword: "{{ repo_password | default('') }}"
+              prune: "{{ stack_prune | default(false) | bool }}"
+            validate_certs: "{{ portainer_validate_certs }}"
+            status_code: [-1, 200, 400, 401, 403, 404, 409, 500]
+          register: env_result
+          no_log: true
+
+        - name: Check Portainer took the env
+          ansible.builtin.assert:
+            that: env_result.status == 200
+            fail_msg: "Portainer refused the env update ({{ env_result.status }}): {{ env_result.json.message | default(env_result.json.details | default(env_result.msg | default('no details'))) }}"
+            success_msg: "Stack '{{ stack_name }}' env updated with {{ stack_env | length }} variables; nothing was redeployed"
+
+        - name: Stop here, since nothing was redeployed
+          ansible.builtin.meta: end_play
 
     # A failed backup fails the play here, before anything changes
     - name: Run pre-upgrade DVBMv3 backup

@@ -60,7 +60,8 @@
 - name: Stop when the server refused the copy
   ansible.builtin.fail:
     msg: >-
-      The backup server refused the copy ({{ backup_push_result.stderr | trim | truncate(300) }}). If this host's key is new, add this line
+      The copy to the backup server failed ({{ (backup_push_result.stderr | default('') | trim) or (backup_push_result.msg | default('') | trim) or 'rsync exited ' ~ backup_push_result.rc }}).
+      If this host's key is new, add this line
       to the {{ backup_push_user | default('backup') }} user's SSH public keys on {{ backup_push_host }}, then re-run:
       {{ backup_push_authorized }}
   when: backup_push_result.rc != 0

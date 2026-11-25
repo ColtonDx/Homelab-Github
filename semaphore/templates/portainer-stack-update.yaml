@@ -11,6 +11,16 @@ allow_override_branch_in_task: true
 environments:
   - Hashicorp Secrets
 survey_vars:
+  - name: env_only
+    title: Env only
+    description: Yes only sends the stack's env to Portainer (no backup, no redeploy); run it on a pull request's branch before merging one that adds a variable
+    type: enum
+    required: true
+    values:
+      - name: "No, full update"
+        value: "false"
+      - name: "Yes, env only"
+        value: "true"
   - name: app_name
     title: App
     description: Matches docker/<app_name>/
