@@ -3,6 +3,32 @@ services:
     container_name: omnitools
     restart: unless-stopped
     image: iib0011/omni-tools:latest
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # Only what nginx needs:
+      - CHOWN # create its cache folders for the worker user
+      - SETUID # switch the workers to the nginx user
+      - SETGID # and its group
+      - NET_BIND_SERVICE # listen on port 80
+    read_only: true # The app cannot change its own files; only the in-memory folders below are writable
+    tmpfs: # In-memory scratch space nginx writes at runtime
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    healthcheck: # Lets Docker and Kuma see a hung web server, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 128m # A runaway process cannot take the host's memory
+    pids_limit: 100 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - reverseproxy-nw
     labels:
