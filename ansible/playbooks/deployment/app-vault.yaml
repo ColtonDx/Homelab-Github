@@ -160,12 +160,13 @@
       check_mode: false
 
     # A just-started server already runs the new binary and config; otherwise either change needs a restart
+    # The version is read as plain digits, since vault version prints it with or without a leading v depending on the release
     - name: Work out whether a restart is needed
       ansible.builtin.set_fact:
         vault_restart_needed: >-
           {{ not (vault_started is changed)
              and ((vault_config_result is changed)
-                  or ((vault_binary.stdout | regex_search('v([0-9.]+)', '\\1') | first)
+                  or ((vault_binary.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') | default('', true))
                       != (vault_status.stdout | from_json).version | regex_replace('\\+.*$', ''))) }}
 
     # Only on request, since it seals Vault and every playbook that reads secrets stops working until it is unsealed
