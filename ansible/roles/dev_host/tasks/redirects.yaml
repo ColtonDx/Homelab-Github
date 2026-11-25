@@ -1,0 +1,87 @@
+---
+# Forwards low ports to unprivileged ones with an nftables table of its own, so a rootless proxy serves 80/443 without lowering
+# net.ipv4.ip_unprivileged_port_start for every user on the host; an empty dev_host_port_redirects removes the table and its unit
+
+# The rules, loaded by the unit below; the table is created, deleted and rebuilt so a reload replaces it whole
+- name: Write the port redirect rules
+  ansible.builtin.copy:
+    dest: /etc/dev-host-port-redirect.nft
+    content: |
+      # Written by the dev_host role: incoming TCP to each port goes to the unprivileged port beside it
+      table inet dev_host_redirect
+      delete table inet dev_host_redirect
+      table inet dev_host_redirect {
+        chain prerouting {
+          type nat hook prerouting priority dstnat; policy accept;
+      {% for r in dev_host_port_redirects %}
+          tcp dport {{ r.port | int }} redirect to :{{ r.to | int }}
+      {% endfor %}
+        }
+      }
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+  when: dev_host_port_redirects | length > 0
+  register: dev_host_redirect_rules
+
+# Loads the table at boot and on restart; stopping it removes the table, and nothing here touches other nftables rules
+- name: Install the port redirect unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/dev-host-port-redirect.service
+    content: |
+      # Written by the dev_host role: loads /etc/dev-host-port-redirect.nft
+      [Unit]
+      Description=Redirect low ports to unprivileged ones for rootless services
+      After=network-pre.target
+      Wants=network-pre.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft -f /etc/dev-host-port-redirect.nft
+      ExecStop=/usr/sbin/nft delete table inet dev_host_redirect
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: "0644"
+  when: dev_host_port_redirects | length > 0
+  register: dev_host_redirect_unit
+
+# Restarted when the rules or unit change, so the running table always matches the file
+- name: Start the port redirect
+  ansible.builtin.systemd_service:
+    name: dev-host-port-redirect.service
+    enabled: true
+    state: "{{ 'restarted' if (dev_host_redirect_rules is changed or dev_host_redirect_unit is changed) else 'started' }}"
+    daemon_reload: "{{ dev_host_redirect_unit is changed }}"
+  when: dev_host_port_redirects | length > 0
+
+# With no redirects listed, a unit left from an earlier run is stopped (dropping the table) and removed
+- name: Check for a port redirect unit to remove
+  ansible.builtin.stat:
+    path: /etc/systemd/system/dev-host-port-redirect.service
+  register: dev_host_redirect_old
+  when: dev_host_port_redirects | length == 0
+
+# Stopping it deletes the table
+- name: Stop the old port redirect
+  ansible.builtin.systemd_service:
+    name: dev-host-port-redirect.service
+    enabled: false
+    state: stopped
+  when:
+    - dev_host_port_redirects | length == 0
+    - dev_host_redirect_old.stat.exists
+
+# Then its rules and unit go
+- name: Remove the old port redirect files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: [/etc/systemd/system/dev-host-port-redirect.service, /etc/dev-host-port-redirect.nft]
+  when:
+    - dev_host_port_redirects | length == 0
+    - dev_host_redirect_old.stat.exists

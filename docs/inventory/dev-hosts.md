@@ -10,6 +10,8 @@ Read by the **Host | Dev** job (`ansible/playbooks/deployment/host-dev.yaml`), w
 - Lingering for every user in the UID range, so `systemctl --user` works over SSH and user services survive a reboot. This is the only change made to users the role did not create.
 - A read-only check that fails the run when any of those users is in `sudo`, `docker`, `adm`, `disk`, `lxd`, `libvirt` or `wheel`. List the admin account Ansible logs in as in `dev_host_admin_users`.
 
+With `dev_host_port_redirects` (a list of `{ port, to }`), incoming TCP to each `port` is redirected to `to` by an nftables table of its own (`dev-host-port-redirect.service`), so a rootless reverse proxy can serve 80 and 443 without lowering `net.ipv4.ip_unprivileged_port_start` for every user. An empty list removes the table and unit.
+
 The role does not install or remove Docker; that is the `docker` group and the **Host | Docker** job.
 
 ## Test hosts
