@@ -10,6 +10,25 @@ services:
       - default
 #    ports:
 #      - 3002:3000
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What its init needs to hand its folders to the app's user and drop to it:
+      - CHOWN # give its folders to that user
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the app's user
+      - SETGID # and its group
+    # Not read-only: its init writes service files at start-up and the crawler writes temporary files
+    # hardening: healthcheck comes from the image itself (wget on 127.0.0.1)
+    mem_limit: 2g # A runaway process cannot take the host's memory
+    pids_limit: 300 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       BROWSER_WEB_URL: http://chrome:9222
       # OPENAI_API_KEY: ...
@@ -35,6 +54,20 @@ services:
     container_name: karakeep-chrome
     restart: unless-stopped
     image: ghcr.io/karakeep-app/karakeep-chrome:release
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it already runs as the unprivileged nobody user
+    # Not read-only: Chrome writes its profile and caches at runtime
+    # hardening: healthcheck skipped, the image has no HTTP client to check its DevTools port with; Karakeep's own check notices a dead browser
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 500 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     init: true
     networks:
       - default
@@ -55,6 +88,26 @@ services:
     image: getmeili/meilisearch:v1.13.3
     networks:
       - default
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it only reads and writes its own data volume
+    read_only: true # The app cannot change its own files; only its data volume and /tmp are writable
+    tmpfs:
+      - /tmp # In-memory scratch space
+    healthcheck: # Lets Docker see a hung search index, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:7700/health"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 100 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       MEILI_NO_ANALYTICS: "true"
       DATA_DIR: /data # DON'T CHANGE THIS

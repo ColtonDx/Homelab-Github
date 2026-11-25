@@ -3,6 +3,25 @@ services:
     container_name: homepage
     restart: unless-stopped
     image: ghcr.io/gethomepage/homepage:latest
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What its init needs to hand its folders to the app's user and drop to it:
+      - CHOWN # give its folders to that user
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the app's user
+      - SETGID # and its group
+    # Not read-only: Next.js writes its cache inside the app folder
+    # hardening: healthcheck comes from the image itself (wget on 127.0.0.1)
+    mem_limit: 512m # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - reverseproxy-nw
       - docker-api
@@ -34,6 +53,13 @@ services:
     security_opt: [no-new-privileges:true]
     networks:
       - docker-api
+    mem_limit: 64m # A runaway process cannot take the host's memory
+    pids_limit: 50 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       # Only the Homepage container may connect
       SP_ALLOWFROM: homepage
