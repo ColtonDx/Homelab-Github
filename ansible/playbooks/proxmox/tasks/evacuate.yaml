@@ -1,6 +1,6 @@
 ---
 # Empties one node before its reboot, for update_node.yaml: moves the running guests that can move, and shuts down the ones that should stay
-# A guest stays when it has a tag in proxmox_stay_tags (default talos), is named in proxmox_stay_names, or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
+# A guest stays when it has a tag in proxmox_stay_tags (default talos), is listed in proxmox_stay_names (by name or VM ID), or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
 # A VM only moves to a node that has every storage its disks are on; the whole plan is checked before anything moves
 
 # Running VMs on this node
@@ -84,7 +84,11 @@
       {{ proxmox_running | selectattr('tags', 'defined')
          | selectattr('tags', 'search', '(^|;)(' ~ (proxmox_stay_tags | default(['talos']) | join('|')) ~ ')(;|$)')
          | map(attribute='vmid') | list }}
-    proxmox_stay_name_ids: "{{ proxmox_running | selectattr('name', 'defined') | selectattr('name', 'in', proxmox_stay_names | default([])) | map(attribute='vmid') | list }}"
+    # Entries are guest names or VM IDs
+    proxmox_stay_name_ids: >-
+      {{ (proxmox_running | selectattr('name', 'defined') | selectattr('name', 'in', proxmox_stay_names | default([])) | map(attribute='vmid') | list)
+         + (proxmox_running | selectattr('vmid', 'in', proxmox_stay_names | default([]) | map('string') | select('match', '^[0-9]+$') | map('int') | list)
+            | map(attribute='vmid') | list) }}
 
 # The two lists, with the reason each stays
 - name: List the guests to move and to stay
