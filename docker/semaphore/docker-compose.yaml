@@ -12,6 +12,29 @@ services:
       POSTGRES_DB: semaphore
     volumes:
       - postgres:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What the postgres image's start script needs before it drops to the postgres user:
+      - CHOWN # give the data folder to postgres
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the postgres user
+      - SETGID # and its group
+    # Not read-only: Postgres writes its socket and lock files outside the data volume
+    healthcheck: # Lets Docker see a database that stopped answering
+      test: ["CMD", "pg_isready", "-U", "semaphore"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=semaphore" # Sets the DVBM Backup Job Label
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
@@ -50,6 +73,24 @@ services:
 #      SEMAPHORE_LDAP_DN_SEARCH: 'dc=local,dc=example,dc=com'
 #      SEMAPHORE_LDAP_SEARCH_FILTER: "(&(uid=%s)(memberOf=cn=ipausers,cn=groups,cn=accounts,dc=local,dc=example,dc=com))"
       TZ: UTC
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it already runs as an unprivileged user on port 3000
+    # Not read-only: it checks out playbook repositories under /tmp/semaphore
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/ping"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 1024 # Nor fork without limit; the limit counts threads
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=semaphore" # Sets the DVBM Backup Job Label
       - "AppPort=3000" # Sets the Application Port for the Reverse Proxy Job

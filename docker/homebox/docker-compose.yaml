@@ -18,6 +18,22 @@ services:
       - HBOX_AUTH_API_KEY_PEPPER=${HOMEBOX_API_KEY_PEPPER}
     volumes:
       - data:/data/
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: a single binary on port 7745 that writes only its data volume
+    read_only: true # The app cannot change its own files; only its data volume and /tmp are writable
+    tmpfs:
+      - /tmp # In-memory scratch space
+    # hardening: healthcheck comes from the image itself (wget on its status API)
+    mem_limit: 512m # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=homebox" # Sets the DVBM Backup Job Label
       - "AppPort=7745" # Sets the Application Port for the Reverse Proxy Job

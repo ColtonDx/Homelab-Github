@@ -13,6 +13,22 @@ services:
     volumes:
       - data:/var/lib/garage
       - etc:/etc
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: a single binary on ports above 1024
+    read_only: true # The app cannot change its own files; only its volumes and /tmp are writable
+    tmpfs:
+      - /tmp # In-memory scratch space
+    # hardening: healthcheck skipped, the image has only the garage binary (no shell or HTTP client); Kuma checks its endpoints
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 512 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=garage" # Sets the DVBM Backup Job Label
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)

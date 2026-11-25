@@ -1,6 +1,6 @@
-"""Warns about Docker Compose services in docker/ that are missing part of the standard hardening block (docs/docker/hardening.md).
+"""Fails when a Docker Compose service in docker/ is missing part of the standard hardening block (docs/docker/hardening.md).
 
-Warnings only for now: each one becomes a GitHub annotation, and the exit code is always 0 until every stack has been rolled out.
+Each gap becomes a GitHub annotation on the file, so a new stack has to carry the block (or a recorded exception) before it merges.
 A service can skip a check with a comment on the same line as its image, e.g. `image: ...  # hardening: no read_only (writes its own files)`.
 """
 
@@ -32,9 +32,9 @@ def main():
             gaps = [check for check, test in CHECKS.items() if not test(service or {}) and not any(check.split()[0] in s for s in skipped)]
             if gaps:
                 missing += 1
-                print(f"::warning file={path}::{name} is missing: {', '.join(gaps)}")
+                print(f"::error file={path}::{name} is missing: {', '.join(gaps)}")
     print(f"{missing} service(s) still need hardening")
-    return 0
+    return 1 if missing else 0
 
 
 if __name__ == "__main__":

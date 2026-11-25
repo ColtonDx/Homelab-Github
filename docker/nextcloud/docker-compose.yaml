@@ -14,6 +14,31 @@ services:
       - data:/config
       # TrueNAS path to the Nextcloud data folder; change for other hosts
       - /mnt/NASPool/Docker/Volumes/Nextcloud:/data
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What its init needs to hand its folders to the app's user and drop to it:
+      - CHOWN # give its folders to that user
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the app's user
+      - SETGID # and its group
+      - NET_BIND_SERVICE # listen on ports 80 and 443
+    # Not read-only: linuxserver's init writes its user and service files, and Nextcloud updates its own app folder
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "curl", "-kfsS", "-o", "/dev/null", "https://127.0.0.1/status.php"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 2m
+    mem_limit: 2g # A runaway process cannot take the host's memory
+    pids_limit: 1024 # Nor fork without limit; the limit counts threads
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=nextcloud" # Sets the DVBM Backup Job Label
       - "AppPort=443" # Sets the Application Port for the Reverse Proxy Job
