@@ -38,6 +38,10 @@ jobs:
       - name: Run yamllint
         run: yamllint -s -f github .
 
+      # Warns (never fails, for now) about compose services missing the standard hardening block in docs/docker/hardening.md
+      - name: Check compose hardening
+        run: python ci/compose-hardening.py
+
   # Parses every playbook with the same Ansible and collections the Semaphore runner uses
   ansible:
     runs-on: ubuntu-latest

@@ -3,6 +3,27 @@ services:
     container_name: searxng
     restart: always
     image: docker.io/searxng/searxng:latest
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # Only what upstream's own compose file keeps:
+      - CHOWN # hand the config and cache folders to the searxng user
+      - SETUID # switch to that user after start-up
+      - SETGID # and its group
+    # Not read-only: the image writes its settings and compiled files at start-up
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - searxng
       - reverseproxy-nw
@@ -19,6 +40,27 @@ services:
     container_name: searxng-valkey
     restart: always
     image: docker.io/valkey/valkey:9-alpine
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # Only what upstream's own compose file keeps:
+      - SETUID # switch to the valkey user after start-up
+      - SETGID # and its group
+      - DAC_OVERRIDE # write its data folder before the switch
+    # Not read-only: the image fixes up its data folder at start-up
+    healthcheck: # Lets Docker see a hung cache, not just a running container
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m # A runaway process cannot take the host's memory
+    pids_limit: 100 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - searxng
     command: valkey-server --save 30 1 --loglevel warning
