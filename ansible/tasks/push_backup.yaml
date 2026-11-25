@@ -4,7 +4,7 @@
 # write into its own folder: it cannot read, delete or reach any other app's backups. Until that line is added, the run fails and prints it.
 # Expects: backup_push_files (local paths), backup_push_folder (the folder under backup_push_root, e.g. Gitlab)
 # Inventory: backup_push_host (the backup server), backup_push_user (default backup), backup_push_root (the backups dataset),
-# backup_push_key (default ~/.ssh/backup_push_ed25519 of the user running this)
+# backup_push_key (default ~/.ssh/backup_push_<folder>_ed25519 of the user running this: one key per folder, since the server limits each key to one)
 
 - name: Require the backup server settings
   ansible.builtin.assert:
@@ -18,7 +18,9 @@
 
 - name: Work out the key's location
   ansible.builtin.set_fact:
-    backup_push_key_path: "{{ backup_push_key | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/backup_push_ed25519' if inventory_hostname == 'localhost' else '/root/.ssh/backup_push_ed25519') }}"
+    backup_push_key_path: >-
+      {{ backup_push_key | default((lookup('ansible.builtin.env', 'HOME') if inventory_hostname == 'localhost' else '/root')
+         ~ '/.ssh/backup_push_' ~ (backup_push_folder | lower) ~ '_ed25519') }}
 
 - name: Ensure the key's folder exists
   ansible.builtin.file:

@@ -1,0 +1,16 @@
+---
+# Task file: puts a pinned age release in a working folder, for hosts without an age package (the Semaphore runner); checked against its sha256
+# Expects: age_workdir (an existing private folder); afterwards the binary is at {{ age_workdir }}/age/age
+# Pinned so the binary is a reviewed choice; the checksum is of the release's linux-amd64 archive
+- name: Download age
+  ansible.builtin.get_url:
+    url: https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz
+    dest: "{{ age_workdir }}/age.tar.gz"
+    checksum: sha256:cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+    mode: "0600"
+
+- name: Unpack age
+  ansible.builtin.unarchive:
+    src: "{{ age_workdir }}/age.tar.gz"
+    dest: "{{ age_workdir }}"
+    remote_src: true
