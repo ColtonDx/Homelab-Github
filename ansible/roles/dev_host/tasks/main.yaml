@@ -65,6 +65,10 @@
   loop_control:
     label: "{{ item.key }}"
 
+# Low ports forwarded to unprivileged ones, for a rootless reverse proxy
+- name: Manage the port redirects
+  ansible.builtin.include_tasks: redirects.yaml
+
 # Project users, only on hosts that hand this role their accounts
 - name: Manage the project users
   ansible.builtin.include_tasks: projects.yaml

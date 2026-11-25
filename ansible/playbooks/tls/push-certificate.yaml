@@ -1,0 +1,178 @@
+---
+# Issues a Let's Encrypt certificate on the Semaphore runner and copies it to hosts that should not hold the Cloudflare token (e.g. development hosts)
+# Inventory: hosts in tls_push (or target_hosts), each with tls_push_certificate: { domains, dir, owner, group } and optional key_name / fullchain_name
+# Renews only when the host's copy is missing, expires within tls_push_renew_days (default 30) or does not cover every domain; tls_push_force=true renews now
+# The key is written before the fullchain, each by atomic rename, so a watcher on the fullchain always sees a matching pair; the service reloads itself
+# Vault: CF_API and CF_EMAIL at cloudflare (vault_cloudflare_path renames it), the token the ACME hosts use; it stays on the runner
+# Meant for a weekly schedule; Let's Encrypt allows 5 identical certificates a week, so avoid repeated forced runs
+- name: Push ACME certificates to hosts
+  hosts: "{{ target_hosts | default('tls_push') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    tls_cert: "{{ tls_push_certificate | default({}) }}"
+    tls_key_path: "{{ tls_cert.dir }}/{{ tls_cert.key_name | default('privkey.pem') }}"
+    tls_fullchain_path: "{{ tls_cert.dir }}/{{ tls_cert.fullchain_name | default('fullchain.pem') }}"
+
+  tasks:
+    # A host in the group without its settings would get a half-written certificate
+    - name: Check the host's certificate settings
+      ansible.builtin.assert:
+        that:
+          - tls_cert.domains | default([]) | length > 0
+          - tls_cert.dir | default('') | length > 0
+          - tls_cert.owner | default('') | length > 0
+        fail_msg: "Set tls_push_certificate with domains, dir and owner (group optional) for {{ inventory_hostname }}."
+        quiet: true
+
+    # The copy the service uses now, if any
+    - name: Check the host's certificate
+      ansible.builtin.stat:
+        path: "{{ tls_fullchain_path }}"
+      register: tls_current
+
+    # Exits 1 when it expires within tls_push_renew_days, which includes one already expired
+    - name: Check the certificate's expiry
+      ansible.builtin.command:
+        argv: [openssl, x509, -noout, -in, "{{ tls_fullchain_path }}", -checkend, "{{ (tls_push_renew_days | default(30) | int) * 86400 }}"]
+      register: tls_expiry
+      changed_when: false
+      failed_when: tls_expiry.rc not in [0, 1]
+      check_mode: false
+      when: tls_current.stat.exists
+
+    # The names it covers, so a change to the domain list gets a new certificate
+    - name: Read the certificate's names
+      ansible.builtin.command:
+        argv: [openssl, x509, -noout, -in, "{{ tls_fullchain_path }}", -ext, subjectAltName]
+      register: tls_names
+      changed_when: false
+      check_mode: false
+      when: tls_current.stat.exists
+
+    # Any one of these means a new certificate
+    - name: Decide whether to renew
+      ansible.builtin.set_fact:
+        tls_renew: >-
+          {{ (tls_push_force | default(false) | bool)
+             or not tls_current.stat.exists
+             or tls_expiry.rc | default(0) == 1
+             or (tls_cert.domains | map('regex_replace', '^', 'DNS:') | reject('in', tls_names.stdout | default('')) | list | length > 0) }}
+
+    # Shown so the run log says why it did or did not renew
+    - name: Report the decision
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ 'renewing ' if tls_renew else 'current, nothing to do for ' }}{{ tls_cert.domains | join(', ') }}"
+
+    # In check mode nothing is issued, so the copies below would have no source
+    - name: Issue on the runner and copy to the host
+      when:
+        - tls_renew
+        - not ansible_check_mode
+      block:
+        # The Cloudflare token the DNS challenge needs, read on the runner
+        - name: Load the Cloudflare credentials
+          ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+          vars:
+            vault_secrets:
+              - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+                field: CF_API
+                var: cloudflare_api_token
+              - path: "{{ vault_cloudflare_path | default('cloudflare') }}"
+                field: CF_EMAIL
+                var: acme_email
+
+        # A fresh acme.sh home each run, deleted below, so no account or token is left on the runner
+        - name: Make a private working folder on the runner
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: _tls_push
+          delegate_to: localhost
+          become: false
+          register: tls_tmp
+
+        # The pinned acme.sh release and its checksum, shared with the ACME hosts
+        - name: Load the pinned acme.sh version
+          ansible.builtin.include_vars:
+            file: vars/acme-sh.yaml
+
+        # A tampered or corrupted download fails the checksum
+        - name: Download acme.sh
+          ansible.builtin.get_url:
+            url: "https://github.com/acmesh-official/acme.sh/archive/refs/tags/{{ acme_sh_version }}.tar.gz"
+            dest: "{{ tls_tmp.path }}/acme.tar.gz"
+            checksum: "sha256:{{ acme_sh_sha256 }}"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+
+        # Folder that acme.sh runs from and keeps its state in for this run
+        - name: Make the acme.sh folder
+          ansible.builtin.file:
+            path: "{{ tls_tmp.path }}/acme"
+            state: directory
+            mode: "0700"
+          delegate_to: localhost
+          become: false
+
+        # Run straight from the source tree, which carries the Cloudflare DNS plugin
+        - name: Extract acme.sh
+          ansible.builtin.unarchive:
+            src: "{{ tls_tmp.path }}/acme.tar.gz"
+            dest: "{{ tls_tmp.path }}/acme"
+            extra_opts: [--strip-components=1]
+          delegate_to: localhost
+          become: false
+
+        # The token goes in through the environment, never a command line; output is hidden and reported below with the token removed
+        - name: Issue the certificate through a Cloudflare DNS challenge
+          ansible.builtin.command:
+            argv: >-
+              {{ [tls_tmp.path ~ '/acme/acme.sh', '--issue', '--home', tls_tmp.path ~ '/acme', '--server', 'letsencrypt',
+                  '--dns', 'dns_cf', '--keylength', 'ec-256',
+                  '--key-file', tls_tmp.path ~ '/key.pem', '--fullchain-file', tls_tmp.path ~ '/fullchain.pem']
+                 + (tls_cert.domains | map('regex_replace', '^', '-d ') | map('split', ' ') | flatten) }}
+          environment:
+            CF_Token: "{{ cloudflare_api_token }}"
+            CF_Email: "{{ acme_email }}"
+          delegate_to: localhost
+          become: false
+          register: tls_issue
+          changed_when: tls_issue.rc == 0
+          failed_when: false
+          no_log: true
+
+        # acme.sh's own error, with the token removed
+        - name: Report a failed issue
+          ansible.builtin.fail:
+            msg: "{{ (tls_issue.stdout_lines | default([]) + tls_issue.stderr_lines | default([]))[-15:] | map('replace', cloudflare_api_token, '<redacted>') | list }}"
+          when: tls_issue.rc | default(0) != 0
+
+        # Key first, so the fullchain written next always finds its matching key in place
+        - name: Copy the key to the host
+          ansible.builtin.copy:
+            src: "{{ tls_tmp.path }}/key.pem"
+            dest: "{{ tls_key_path }}"
+            owner: "{{ tls_cert.owner }}"
+            group: "{{ tls_cert.group | default(tls_cert.owner) }}"
+            mode: "0600"
+
+        # The service's watcher sees this change and reloads
+        - name: Copy the fullchain to the host
+          ansible.builtin.copy:
+            src: "{{ tls_tmp.path }}/fullchain.pem"
+            dest: "{{ tls_fullchain_path }}"
+            owner: "{{ tls_cert.owner }}"
+            group: "{{ tls_cert.group | default(tls_cert.owner) }}"
+            mode: "0644"
+
+      always:
+        # The key and acme.sh's account never outlive the run
+        - name: Remove the working folder on the runner
+          ansible.builtin.file:
+            path: "{{ tls_tmp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: tls_tmp.path is defined
