@@ -1,7 +1,7 @@
 ---
 # Updates the Proxmox nodes one at a time; with -e proxmox_reboot=true each node is emptied first, rebooted, and its guests moved back once every node is done
 # Emptying: running VMs live-migrate to the node with most free memory that has their disks' storage, containers restart-migrate, HA guests move through ha-manager, and guests that should stay are shut down and started again
-# Stay in place: guests tagged with one of proxmox_stay_tags (default talos: cluster nodes kept one per host), named in proxmox_stay_names, or using PCI or USB passthrough
+# Stay in place: guests tagged with one of proxmox_stay_tags (default talos: cluster nodes kept one per host), listed in proxmox_stay_names (names or VM IDs), or using PCI or USB passthrough
 # Optional: proxmox_reboot_always=true reboots even without updates, proxmox_rebalance=false leaves migrated guests where they went, target_hosts (default proxmox) to update some nodes
 
 # Logs in with a Vault-signed certificate when the inventory turns that on
