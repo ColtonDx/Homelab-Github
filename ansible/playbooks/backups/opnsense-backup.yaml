@@ -1,0 +1,99 @@
+---
+# Backs up OPNsense's configuration: downloads config.xml through its API, encrypts it with age and copies it to the backup server (folder Opnsense)
+# Runs on the Semaphore runner, which has no age package, so a pinned age release is downloaded, checked against its sha256 and used from a temp folder
+# Vault: backup/API_KEY and backup/API_SECRET at opnsense (vault_opnsense_path renames it), the key of an OPNsense user with only "System: Configuration: Backups"
+# Inventory: opnsense_backup_host (default the citadel host's ansible_host), backup_age_recipients (required), backup_push_host and backup_push_root
+- name: Back up OPNsense
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    opnsense_address: "{{ opnsense_backup_host | default(hostvars['citadel'].ansible_host) }}"
+    backup_stamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
+    # Pinned so the binary is a reviewed choice; checked against the sha256 of the release's linux-amd64 archive
+    backup_age_url: https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz
+    backup_age_sha256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+
+  tasks:
+    - name: Require the age recipients
+      ansible.builtin.assert:
+        that: backup_age_recipients | default([]) | length > 0
+        fail_msg: Set backup_age_recipients (age public keys) in the inventory; OPNsense backups are always encrypted.
+        quiet: true
+
+    - name: Load the OPNsense backup key
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - path: "{{ vault_opnsense_path | default('opnsense') }}"
+            field: backup/API_KEY
+            var: opnsense_backup_key
+          - path: "{{ vault_opnsense_path | default('opnsense') }}"
+            field: backup/API_SECRET
+            var: opnsense_backup_secret
+
+    # In memory where possible, and removed at the end whatever happens
+    - name: Make a private working folder
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: _opnsense_backup
+      register: opnsense_tmp
+
+    - name: Download, encrypt and copy the configuration
+      block:
+        - name: Download age
+          ansible.builtin.get_url:
+            url: "{{ backup_age_url }}"
+            dest: "{{ opnsense_tmp.path }}/age.tar.gz"
+            checksum: "sha256:{{ backup_age_sha256 }}"
+            mode: "0600"
+
+        - name: Unpack age
+          ansible.builtin.unarchive:
+            src: "{{ opnsense_tmp.path }}/age.tar.gz"
+            dest: "{{ opnsense_tmp.path }}"
+            remote_src: true
+
+        # The whole running configuration, including users and certificates, so it stays out of the log
+        - name: Download the configuration
+          ansible.builtin.uri:
+            url: "https://{{ opnsense_address }}/api/core/backup/download/this"
+            user: "{{ opnsense_backup_key }}"
+            password: "{{ opnsense_backup_secret }}"
+            force_basic_auth: true
+            dest: "{{ opnsense_tmp.path }}/config.xml"
+            mode: "0600"
+          no_log: true
+
+        # An error page or an empty answer must never stand in for a backup
+        - name: Read the start of the download
+          ansible.builtin.command:
+            argv: [head, -c, "4096", "{{ opnsense_tmp.path }}/config.xml"]
+          register: opnsense_head
+          changed_when: false
+          no_log: true
+
+        - name: Check it is an OPNsense configuration
+          ansible.builtin.assert:
+            that: "'<opnsense>' in opnsense_head.stdout"
+            fail_msg: The download is not an OPNsense config.xml; check the backup user's rights and the address.
+            quiet: true
+
+        - name: Encrypt the configuration
+          ansible.builtin.command:
+            argv: "{{ [opnsense_tmp.path ~ '/age/age'] + (['-r'] | product(backup_age_recipients) | flatten)
+                      + ['-o', opnsense_tmp.path ~ '/opnsense_config_' ~ backup_stamp ~ '.xml.age', opnsense_tmp.path ~ '/config.xml'] }}"
+          changed_when: true
+
+        # The runner's own key, limited on the server to the Opnsense folder
+        - name: Copy the backup to the backup server
+          ansible.builtin.include_tasks: ../../tasks/push_backup.yaml
+          vars:
+            backup_push_folder: Opnsense
+            backup_push_files: ["{{ opnsense_tmp.path }}/opnsense_config_{{ backup_stamp }}.xml.age"]
+      always:
+        - name: Remove the working folder
+          ansible.builtin.file:
+            path: "{{ opnsense_tmp.path }}"
+            state: absent
