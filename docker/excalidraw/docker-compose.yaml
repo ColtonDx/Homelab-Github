@@ -17,7 +17,12 @@ services:
       - /var/cache/nginx
       - /var/run
       - /tmp
-    # hardening: healthcheck comes from the image itself
+    # The image's own check calls localhost, which is IPv6 here, and a read-only nginx only listens on IPv4
+    healthcheck: # Lets Docker and Kuma see a hung web server, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
     mem_limit: 128m # A runaway process cannot take the host's memory
     pids_limit: 100 # Nor fork without limit
     logging: # Rotate container logs so they cannot fill the disk
