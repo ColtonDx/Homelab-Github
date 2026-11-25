@@ -1,6 +1,6 @@
 ---
 # Backs up OPNsense's configuration: downloads config.xml through its API, encrypts it with age and copies it to the backup server (folder Opnsense)
-# Runs on the Semaphore runner, which has no age package, so a pinned age release is downloaded, checked against its sha256 and used from a temp folder
+# Runs on the Semaphore runner, which has no age package, so a pinned age release is used from a temp folder (tasks/age_download.yaml)
 # Vault: backup/API_KEY and backup/API_SECRET at opnsense (vault_opnsense_path renames it), the key of an OPNsense user with only "System: Configuration: Backups"
 # Inventory: opnsense_backup_host (default the citadel host's ansible_host), backup_age_recipients (required), backup_push_host and backup_push_root
 - name: Back up OPNsense
@@ -11,9 +11,6 @@
   vars:
     opnsense_address: "{{ opnsense_backup_host | default(hostvars['citadel'].ansible_host) }}"
     backup_stamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
-    # Pinned so the binary is a reviewed choice; checked against the sha256 of the release's linux-amd64 archive
-    backup_age_url: https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz
-    backup_age_sha256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
 
   tasks:
     - name: Require the age recipients
@@ -42,18 +39,10 @@
 
     - name: Download, encrypt and copy the configuration
       block:
-        - name: Download age
-          ansible.builtin.get_url:
-            url: "{{ backup_age_url }}"
-            dest: "{{ opnsense_tmp.path }}/age.tar.gz"
-            checksum: "sha256:{{ backup_age_sha256 }}"
-            mode: "0600"
-
-        - name: Unpack age
-          ansible.builtin.unarchive:
-            src: "{{ opnsense_tmp.path }}/age.tar.gz"
-            dest: "{{ opnsense_tmp.path }}"
-            remote_src: true
+        - name: Get age
+          ansible.builtin.include_tasks: ../../tasks/age_download.yaml
+          vars:
+            age_workdir: "{{ opnsense_tmp.path }}"
 
         # The whole running configuration, including users and certificates, so it stays out of the log
         - name: Download the configuration

@@ -1,0 +1,115 @@
+---
+# Backs up Home Assistant without a share: asks its API for a full backup, downloads it, encrypts it with age and copies it to the backup
+# server (folder HomeAssistant), then deletes that one backup from Home Assistant; its own scheduled backups are left alone
+# The backup is made unencrypted inside Home Assistant, so age is the one key a restore needs (restore: decrypt, then upload in Settings > System > Backups)
+# Runs on the Semaphore runner; never changes Home Assistant's configuration
+# Vault: BACKUP_TOKEN at homeassistant (vault_homeassistant_path renames it), a long-lived token of a Home Assistant administrator, which backups need
+# Inventory: homeassistant_url (default the home-assistant host's homepage_url), backup_age_recipients (required), backup_push_host and backup_push_root
+- name: Back up Home Assistant
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    ha_url: "{{ (homeassistant_url | default(hostvars['home-assistant'].homepage_url)) | regex_replace('/+$', '') }}"
+    backup_stamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
+    backup_file: "homeassistant_{{ backup_stamp }}.tar.age"
+
+  tasks:
+    - name: Require the age recipients
+      ansible.builtin.assert:
+        that: backup_age_recipients | default([]) | length > 0
+        fail_msg: Set backup_age_recipients (age public keys) in the inventory; Home Assistant backups are always encrypted.
+        quiet: true
+
+    - name: Load the Home Assistant token
+      ansible.builtin.include_tasks: ../../tasks/var_lookup.yaml
+      vars:
+        vault_secrets:
+          - path: "{{ vault_homeassistant_path | default('homeassistant') }}"
+            field: BACKUP_TOKEN
+            var: ha_backup_token
+
+    - name: Make a private working folder
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: _ha_backup
+      register: ha_tmp
+
+    - name: Make, fetch, encrypt and copy the backup
+      block:
+        - name: Get age
+          ansible.builtin.include_tasks: ../../tasks/age_download.yaml
+          vars:
+            age_workdir: "{{ ha_tmp.path }}"
+
+        # Waits until Home Assistant has finished writing it; a large media or database folder can take several minutes
+        - name: Ask Home Assistant for a full backup
+          ansible.builtin.uri:
+            url: "{{ ha_url }}/api/hassio/backups/new/full"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ ha_backup_token }}"
+            body_format: json
+            body:
+              name: "Backup job {{ backup_stamp }}"
+              compressed: true
+            timeout: 1800
+          register: ha_new
+          # The request carries a credential, so its arguments stay out of the log
+          no_log: true
+
+        - name: Note the backup's id
+          ansible.builtin.set_fact:
+            ha_slug: "{{ ha_new.json.data.slug }}"
+
+        - name: Download the backup
+          ansible.builtin.uri:
+            url: "{{ ha_url }}/api/hassio/backups/{{ ha_slug }}/download"
+            headers:
+              Authorization: "Bearer {{ ha_backup_token }}"
+            dest: "{{ ha_tmp.path }}/homeassistant.tar"
+            mode: "0600"
+            timeout: 1800
+          no_log: true
+
+        # An error page or an empty answer must never stand in for a backup
+        - name: List the backup's contents
+          ansible.builtin.command:
+            argv: [tar, -tf, "{{ ha_tmp.path }}/homeassistant.tar"]
+          register: ha_listing
+          changed_when: false
+
+        - name: Check it is a Home Assistant backup
+          ansible.builtin.assert:
+            that: "'backup.json' in (ha_listing.stdout_lines | map('regex_replace', '^\\./', '') | list)"
+            fail_msg: The download is not a Home Assistant backup; check the token belongs to an administrator and the address.
+            quiet: true
+
+        - name: Encrypt the backup
+          ansible.builtin.command:
+            argv: "{{ [ha_tmp.path ~ '/age/age'] + (['-r'] | product(backup_age_recipients) | flatten)
+                      + ['-o', ha_tmp.path ~ '/' ~ backup_file, ha_tmp.path ~ '/homeassistant.tar'] }}"
+          changed_when: true
+
+        # The runner's own key, limited on the server to the HomeAssistant folder
+        - name: Copy the backup to the backup server
+          ansible.builtin.include_tasks: ../../tasks/push_backup.yaml
+          vars:
+            backup_push_folder: HomeAssistant
+            backup_push_files: ["{{ ha_tmp.path }}/{{ backup_file }}"]
+      always:
+        # Only the backup this run made, so Home Assistant's own backups and retention are untouched
+        - name: Delete this run's backup from Home Assistant
+          ansible.builtin.uri:
+            url: "{{ ha_url }}/api/hassio/backups/{{ ha_slug }}"
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ ha_backup_token }}"
+          when: ha_slug is defined
+          no_log: true
+
+        - name: Remove the working folder
+          ansible.builtin.file:
+            path: "{{ ha_tmp.path }}"
+            state: absent
