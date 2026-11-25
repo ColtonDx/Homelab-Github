@@ -51,7 +51,7 @@ The **Uptime Kuma | GitOps** job makes Kuma match Git every 3 hours. Monitors co
 - **Hosts and devices:** `kuma_monitor` on inventory hosts: HTTP, ping, port or DNS checks, e.g. for VMs without a web UI, Windows servers and network gear. See [inventory/uptime-kuma.md](inventory/uptime-kuma.md).
 - **Anything else:** `kuma_manual_monitors` in the inventory.
 
-Each top-level Kuma group gets its Discord notifications from the inventory's `kuma_group_notifications`. Monitors are matched by name and never deleted, so a removed app's monitor is removed in Kuma by hand. Linux patching opens a Kuma maintenance window for each host it reboots, so planned restarts stay quiet.
+Each top-level Kuma group gets its Discord notifications from the inventory's `kuma_group_notifications`. Every monitor the sync manages carries a Kuma tag, `iac`. Each run reports tagged monitors the code no longer defines, and with `kuma_prune: true` in the inventory it deletes them (at most `kuma_prune_max`, default 5, per run). Monitors made by hand in Kuma have no tag and are never touched. Linux patching opens a Kuma maintenance window for each host it reboots, so planned restarts stay quiet.
 
 ## Scheduled jobs (Semaphore)
 

@@ -44,3 +44,16 @@ myserver:
 | `patch_window_minutes` | Host or group | Longest maintenance window during patching (default `30`) |
 
 The Kuma login is in Vault at `uptime-kuma` (`KUMA_USERNAME`, `KUMA_PASSWORD`).
+
+## Removing monitors
+
+The sync tags every monitor and group it manages with `iac` (`kuma_owner_tag` renames it). Each run lists tagged monitors no longer in code, and monitors without the tag, which it never touches.
+
+| Variable | Meaning |
+|---|---|
+| `kuma_prune` | `true` deletes tagged monitors no longer in code; default `false` only reports them |
+| `kuma_prune_max` | The most one run may delete (default `5`), so a source that failed to read cannot empty Kuma |
+| `kuma_prune_force` | `true` for one run lifts that cap |
+
+Groups are deleted only once nothing lives in them.
+

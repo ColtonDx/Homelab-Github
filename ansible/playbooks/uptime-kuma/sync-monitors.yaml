@@ -1,7 +1,8 @@
 ---
 # The one Uptime Kuma playbook: makes Kuma match Git, run on a schedule; each step is a task file in this folder
 # Monitors come from three places: inventory hosts' kuma_monitor (read_host_monitors.yaml), compose labels in docker/ (read_compose_monitors.yaml), and kuma_manual_monitors in the inventory for anything else
-# Then it logs in (connect_kuma.yaml), registers the Docker hosts (register_docker_hosts.yaml) and adds or updates every monitor (add_monitors.yaml); monitors are matched by name and never deleted
+# Then it logs in (connect_kuma.yaml), registers the Docker hosts (register_docker_hosts.yaml) and adds or updates every monitor (add_monitors.yaml); monitors are matched by name
+# Last, prune_monitors.yaml tags what it manages and reports tagged monitors the code no longer defines; with kuma_prune on it deletes them (hand-made, untagged monitors are never touched)
 # Hosts with no group set get none, unless sync_group names one; connection and Vault settings are in connect_kuma.yaml
 - name: Sync Uptime Kuma from Git
   hosts: localhost
@@ -54,5 +55,11 @@
     # Validates every entry, then creates the groups and adds or updates each monitor
     - name: Add the monitors
       ansible.builtin.include_tasks: tasks/add_monitors.yaml
+      vars:
+        kuma_monitors: "{{ kuma_all_monitors }}"
+
+    # Tags what the code defines, reports what has left it, and deletes those when kuma_prune is on
+    - name: Mark and prune the managed monitors
+      ansible.builtin.include_tasks: tasks/prune_monitors.yaml
       vars:
         kuma_monitors: "{{ kuma_all_monitors }}"
