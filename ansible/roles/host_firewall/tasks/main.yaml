@@ -1,0 +1,165 @@
+---
+# Loads a baseline inbound firewall (nftables table inet host_firewall) and keeps it across reboots with host-firewall.service
+# New rules go live with a timed revert, cancelled only once the runner can still open SSH through them; safe to re-run
+
+# A typo in a port or address would otherwise surface as an nft syntax error, or as a rule that matches nothing
+- name: Check the firewall settings
+  ansible.builtin.assert:
+    that:
+      - host_firewall_mode in ['log', 'enforce']
+      - (host_firewall_open_tcp + host_firewall_allow | map(attribute='port', default='') | list)
+        | map('string') | reject('match', '^[0-9]+(-[0-9]+)?$') | list | length == 0
+      - host_firewall_allow | map(attribute='proto', default='tcp') | reject('in', ['tcp', 'udp']) | list | length == 0
+      - (host_firewall_ssh_sources + host_firewall_allow | map(attribute='from', default=[]) | flatten)
+        | map('string') | reject('match', '^[0-9A-Fa-f:.]+(/[0-9]+)?$') | list | length == 0
+    fail_msg: >-
+      host_firewall_mode must be log or enforce; ports must be numbers or ranges like 8000-8010; proto tcp or udp;
+      sources plain addresses or networks. Nothing was changed on {{ inventory_hostname }}.
+    quiet: true
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+
+# Written beside the rules in use and checked by nft, so a bad file never reaches the kernel
+- name: Write the new rules
+  ansible.builtin.template:
+    src: rules.nft.j2
+    dest: "{{ host_firewall_rules_file }}.next"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+
+# In check mode the new file is not written, so there is nothing to load
+- name: Switch to the new rules
+  when: not ansible_check_mode
+  block:
+    - name: Compare with the rules in use
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: ["{{ host_firewall_rules_file }}", "{{ host_firewall_rules_file }}.next"]
+      register: host_firewall_files
+
+    # The file can match while the table is gone, e.g. after someone stopped the unit
+    - name: Check the table is loaded
+      ansible.builtin.command:
+        argv: [nft, list, table, inet, host_firewall]
+      register: host_firewall_loaded
+      changed_when: false
+      failed_when: false
+
+    - name: Load and confirm the new rules
+      when: >-
+        host_firewall_loaded.rc != 0 or not host_firewall_files.results[0].stat.exists
+        or host_firewall_files.results[0].stat.checksum != host_firewall_files.results[1].stat.checksum
+      vars:
+        # Back to the last confirmed rules, or no table at all on a first run
+        host_firewall_revert_cmd: >-
+          if [ -f {{ host_firewall_rules_file }} ]; then nft -f {{ host_firewall_rules_file }};
+          else nft delete table inet host_firewall; fi
+      block:
+        # A leftover from a run that never finished would block the new timer's name
+        - name: Clear an old revert timer
+          ansible.builtin.systemd_service:
+            name: host-firewall-revert.timer
+            state: stopped
+          failed_when: false
+
+        # Fires unless cancelled below, so rules that lock the runner out undo themselves
+        - name: Arm the revert
+          ansible.builtin.command:
+            argv:
+              - systemd-run
+              - --collect
+              - --unit=host-firewall-revert
+              - "--on-active={{ host_firewall_revert_seconds | int }}"
+              - /bin/sh
+              - -c
+              - "{{ host_firewall_revert_cmd }}"
+          changed_when: true
+
+        - name: Load the new rules
+          ansible.builtin.command:
+            argv: [nft, -f, "{{ host_firewall_rules_file }}.next"]
+          changed_when: true
+
+        # A fresh connection from the runner, the path every later run will need; this session is already established and would pass anyway
+        - name: Check the runner can still reach SSH
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host | default(inventory_hostname) }}"
+            port: "{{ ansible_port | default(host_firewall_ssh_port) }}"
+            timeout: 20
+          delegate_to: localhost
+          become: false
+
+        - name: Cancel the revert
+          ansible.builtin.systemd_service:
+            name: host-firewall-revert.timer
+            state: stopped
+
+        # Only now do the rules become the ones the unit loads at boot
+        - name: Keep the new rules
+          ansible.builtin.copy:
+            src: "{{ host_firewall_rules_file }}.next"
+            dest: "{{ host_firewall_rules_file }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+      rescue:
+        # This session survives on its established connection, so there is no need to wait for the timer
+        - name: Put the previous rules back now
+          ansible.builtin.command:
+            argv: [/bin/sh, -c, "{{ host_firewall_revert_cmd }}"]
+          changed_when: true
+
+        - name: Cancel the revert after undoing it by hand
+          ansible.builtin.systemd_service:
+            name: host-firewall-revert.timer
+            state: stopped
+          failed_when: false
+
+        - name: Stop after the new rules were undone
+          ansible.builtin.fail:
+            msg: >-
+              The new rules on {{ inventory_hostname }} failed to load or blocked the runner's SSH, so the previous rules are back.
+              The rejected rules are in {{ host_firewall_rules_file }}.next.
+
+# Loads the kept rules at boot, before the network is up; stopping it removes the table, so it is also the off switch
+- name: Install the firewall unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/host-firewall.service
+    content: |
+      # Managed by Ansible (role host_firewall): loads {{ host_firewall_rules_file }}; stop it to remove the table
+      [Unit]
+      Description=Baseline inbound firewall (nftables table inet host_firewall)
+      DefaultDependencies=no
+      Wants=network-pre.target
+      Before=network-pre.target shutdown.target
+      Conflicts=shutdown.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft -f {{ host_firewall_rules_file }}
+      ExecReload=/usr/sbin/nft -f {{ host_firewall_rules_file }}
+      ExecStop=/usr/sbin/nft delete table inet host_firewall
+
+      [Install]
+      WantedBy=sysinit.target
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_firewall_unit
+
+# Started, not restarted: the rules above are already live, and the unit loads the same file
+- name: Enable the firewall unit
+  ansible.builtin.systemd_service:
+    name: host-firewall.service
+    enabled: true
+    state: started
+    daemon_reload: "{{ host_firewall_unit is changed }}"
+  # In check mode a new unit is not written yet
+  when: not (ansible_check_mode and host_firewall_unit is changed)

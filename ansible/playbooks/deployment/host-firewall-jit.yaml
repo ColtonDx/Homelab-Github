@@ -1,0 +1,60 @@
+---
+# Opens one TCP port on a host to one address for a limited time, through the host firewall's jit sets; the kernel removes the
+# entry when it expires, so nothing needs closing afterwards. Rerunning for the same address and port restarts the clock
+# Needs: target_hosts and jit_address; optional jit_port (default 443) and jit_minutes (default 60, at most 1440)
+# Reloading the host's firewall rules (Host | Firewall with changes) clears every opening
+# A run naming no host, or a host the inventory doesn't have, must fail rather than report success having opened nothing
+- name: Check the target
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check the host exists
+      ansible.builtin.assert:
+        that:
+          - target_hosts | default('') | length > 0
+          - query('inventory_hostnames', target_hosts) | length > 0
+        fail_msg: "Set target_hosts to a host (or group) in the inventory."
+        quiet: true
+
+- name: Open a port to one address for a while
+  hosts: "{{ target_hosts | default('jit_no_target') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    jit_port: 443
+    jit_minutes: 60
+    jit_family: "{{ 'v6' if ':' in (jit_address | default('') | string) else 'v4' }}"
+    jit_element: "{ {{ jit_address }} . {{ jit_port | int }} }"
+
+  tasks:
+    # Only a single address, never a network, and a bounded time
+    - name: Check the request
+      ansible.builtin.assert:
+        that:
+          - jit_address | default('') | string is match('^[0-9A-Fa-f:.]+$')
+          - jit_port | int >= 1 and jit_port | int <= 65535
+          - jit_minutes | int >= 1 and jit_minutes | int <= 1440
+        fail_msg: "Give jit_address as one IPv4 or IPv6 address, jit_port 1-65535 and jit_minutes 1-1440."
+        quiet: true
+
+    # A host without the firewall, or with an older rules file, has no set to add to
+    - name: Check the host firewall is loaded
+      ansible.builtin.command:
+        argv: [nft, list, set, inet, host_firewall, "jit_{{ jit_family }}"]
+      changed_when: false
+      check_mode: false
+
+    # Add, delete and add again in one transaction, so an existing entry gets a fresh timeout and a new one is simply created
+    - name: Open the port
+      ansible.builtin.command:
+        argv: [nft, -f, "-"]
+        stdin: |
+          add element inet host_firewall jit_{{ jit_family }} { {{ jit_address }} . {{ jit_port | int }} timeout {{ jit_minutes | int }}m }
+          delete element inet host_firewall jit_{{ jit_family }} {{ jit_element }}
+          add element inet host_firewall jit_{{ jit_family }} { {{ jit_address }} . {{ jit_port | int }} timeout {{ jit_minutes | int }}m }
+      changed_when: true
+
+    - name: Report the opening
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: TCP {{ jit_port | int }} open to {{ jit_address }} for {{ jit_minutes | int }} minutes"

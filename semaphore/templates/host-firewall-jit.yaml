@@ -1,0 +1,35 @@
+---
+# Semaphore task template Host | Firewall JIT; see docs/semaphore/templates.md for the project resources it names
+# Each run is the record of who opened what, when; the opening closes itself
+name: Host | Firewall JIT
+description: Opens one TCP port (default 443) on a host to one address for a limited time; the firewall removes it when the time is up
+app: ansible
+playbook: ansible/playbooks/deployment/host-firewall-jit.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+allow_override_branch_in_task: false
+environments:
+  - Empty
+survey_vars:
+  - name: target_hosts
+    title: Host
+    description: The host to open, e.g. hashicorp-vault
+    type: string
+    required: true
+    default_value: hashicorp-vault
+  - name: jit_address
+    title: Your address
+    description: The one IPv4 or IPv6 address to let in
+    type: string
+    required: true
+  - name: jit_port
+    title: Port
+    type: int
+    required: true
+    default_value: '443'
+  - name: jit_minutes
+    title: Minutes
+    description: How long it stays open, 1 to 1440
+    type: int
+    required: true
+    default_value: '60'

@@ -172,3 +172,7 @@
     group: root
     mode: "0440"
     validate: visudo -cf %s
+
+# Where the account may log in from; its own file so the host firewall playbook can run it on its own
+- name: Limit where the account may log in from
+  ansible.builtin.include_tasks: sources.yaml

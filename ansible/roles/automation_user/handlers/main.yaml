@@ -1,0 +1,6 @@
+---
+# Reload keeps existing sessions; used when a setting is removed, which cannot lock anyone out
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded

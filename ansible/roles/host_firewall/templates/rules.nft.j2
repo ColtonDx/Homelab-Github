@@ -1,0 +1,77 @@
+{#- Each rule as (proto, port, sources, comment); split below into one accept per address family, no sources meaning any -#}
+{%- set rules = [] -%}
+{%- if host_firewall_open_tcp | length > 0 -%}
+{%-   set _ = rules.append(['tcp', '{ ' ~ (host_firewall_open_tcp | join(', ')) ~ ' }', [], 'open on every host']) -%}
+{%- endif -%}
+{%- set _ = rules.append(['tcp', host_firewall_ssh_port, host_firewall_ssh_sources, 'ssh']) -%}
+{%- for r in host_firewall_allow -%}
+{%-   set _ = rules.append([r.proto | default('tcp'), r.port, r.from | default([]), r.comment | default('')]) -%}
+{%- endfor -%}
+{%- set lines = [] -%}
+{%- for proto, port, sources, comment in rules -%}
+{%-   set note = (' comment "' ~ (comment | regex_replace('[^A-Za-z0-9 ._:/-]', '')) ~ '"') if comment else '' -%}
+{%-   set match = 'meta l4proto ' ~ proto ~ ' ct original proto-dst ' ~ port ~ ' accept' ~ note -%}
+{%-   set v4 = sources | map('string') | reject('search', ':') | list -%}
+{%-   set v6 = sources | map('string') | select('search', ':') | list -%}
+{%-   if sources | length == 0 -%}{%- set _ = lines.append(match) -%}{%- endif -%}
+{%-   if v4 | length > 0 -%}{%- set _ = lines.append('ip saddr { ' ~ (v4 | join(', ')) ~ ' } ' ~ match) -%}{%- endif -%}
+{%-   if v6 | length > 0 -%}{%- set _ = lines.append('ip6 saddr { ' ~ (v6 | join(', ')) ~ ' } ' ~ match) -%}{%- endif -%}
+{%- endfor -%}
+{%- set enforce = host_firewall_mode == 'enforce' -%}
+{%- set log_prefix = 'host-firewall drop: ' if enforce else 'host-firewall would drop: ' -%}
+# Managed by Ansible (role host_firewall), mode {{ host_firewall_mode }}
+# Inbound rules only, in a table of their own, so Docker's tables and any others are left alone. The table is created, deleted
+# and rebuilt, so loading this file replaces it in one step
+table inet host_firewall
+delete table inet host_firewall
+table inet host_firewall {
+  # Temporary openings (address . port) added by host-firewall-jit.yaml; each entry removes itself when its timeout runs out,
+  # and reloading these rules clears them
+  set jit_v4 {
+    type ipv4_addr . inet_service
+    flags timeout
+  }
+  set jit_v6 {
+    type ipv6_addr . inet_service
+    flags timeout
+  }
+
+  # What may connect in. Ports are matched as first addressed, so a Docker-published or redirected port uses its outside number
+  chain allowed {
+    meta l4proto tcp ip saddr . ct original proto-dst @jit_v4 accept comment "jit"
+    meta l4proto tcp ip6 saddr . ct original proto-dst @jit_v6 accept comment "jit"
+{% for line in lines %}
+    {{ line }}
+{% endfor %}
+  }
+
+  # Connections to the host itself, including rootless containers' ports
+  chain input {
+    type filter hook input priority filter; policy accept;
+    iif lo accept
+    ct state established,related accept
+    # ICMP keeps ping, path MTU discovery and IPv6 neighbour discovery working
+    meta l4proto { icmp, ipv6-icmp } accept
+    jump allowed
+    # Broadcast and multicast chatter would only fill the log
+    fib daddr type { broadcast, multicast } {{ 'drop' if enforce else 'accept' }}
+    limit rate {{ host_firewall_log_per_minute | int }}/minute burst {{ host_firewall_log_per_minute | int }} packets log prefix "{{ log_prefix }}" level info
+{% if enforce %}
+    drop
+{% endif %}
+  }
+
+  # Docker-published ports are sent on to containers before input sees them, so new connections Docker forwarded are checked here.
+  # Containers' own outbound traffic and traffic between containers pass untouched
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    ct state established,related accept
+    ct status dnat iifname "docker0" accept
+    ct status dnat iifname "br-*" accept
+    ct status dnat jump allowed
+    ct status dnat limit rate {{ host_firewall_log_per_minute | int }}/minute burst {{ host_firewall_log_per_minute | int }} packets log prefix "{{ log_prefix }}" level info
+{% if enforce %}
+    ct status dnat drop
+{% endif %}
+  }
+}

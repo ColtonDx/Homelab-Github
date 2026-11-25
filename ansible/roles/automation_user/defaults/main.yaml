@@ -12,3 +12,8 @@ automation_user_ca_public_key: ""
 automation_user_ca_file: /etc/ssh/automation-user-ca.pub
 automation_user_principals_dir: /etc/ssh/auth_principals
 automation_user_sshd_dropin: /etc/ssh/sshd_config.d/60-automation-user-ca.conf
+# Addresses or networks the account may log in from, enforced by sshd for keys and certificates alike (e.g. the automation runners);
+# empty allows any source and removes the restriction
+automation_user_sources: []
+# Where that restriction is kept
+automation_user_sources_dropin: /etc/ssh/sshd_config.d/61-automation-user-sources.conf
