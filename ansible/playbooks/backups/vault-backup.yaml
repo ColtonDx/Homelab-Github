@@ -1,0 +1,76 @@
+---
+# Backs up HashiCorp Vault: its storage folder, config and TLS files, encrypted with age, then copied to the backup server (folder Hashicorp)
+# Vault's own storage is already encrypted, so restoring also needs the unseal keys; restore = stop Vault, unpack over the same paths, start, unseal
+# The file storage backend has no snapshot command, so this copies the folder while Vault runs; Vault writes each entry as its own small file,
+# so a copy taken between writes restores cleanly. Moving to raft storage would allow consistent `vault operator raft snapshot` backups instead
+# Extra vars: target_hosts (default vault)
+# Inventory: vault_backup_paths (default /opt/vault/data, /etc/vault.d, /opt/vault/tls), vault_backup_dest (default /var/backups/vault),
+# vault_backup_keep (default 3, the history lives in the backup server's snapshots), backup_age_recipients (required), backup_push_host and backup_push_root
+- name: Back up Vault
+  hosts: "{{ target_hosts | default('vault') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_paths: "{{ vault_backup_paths | default(['/opt/vault/data', '/etc/vault.d', '/opt/vault/tls']) }}"
+    backup_dest: "{{ vault_backup_dest | default('/var/backups/vault') }}"
+    backup_archive: "{{ backup_dest }}/vault_{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz.age"
+    backup_keep: "{{ vault_backup_keep | default(3) | int }}"
+
+  tasks:
+    - name: Require the age recipients
+      ansible.builtin.assert:
+        that: backup_age_recipients | default([]) | length > 0
+        fail_msg: Set backup_age_recipients (age public keys) in the inventory; Vault backups are always encrypted.
+        quiet: true
+
+    # age encrypts to public keys, so this host can write backups but never read them back; rsync copies them to the backup server
+    - name: Install age and rsync
+      ansible.builtin.package:
+        name: [age, rsync]
+        state: present
+
+    # Only root may read the directory
+    - name: Ensure the backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dest }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    # tar streams straight into age, so no plaintext copy touches the disk; absolute paths are kept so a restore unpacks into place
+    - name: Create the encrypted archive
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail && umask 077 &&
+          tar -czf - --absolute-names {% for p in backup_paths %}{{ p | quote }} {% endfor %}
+          | age {% for r in backup_age_recipients %}-r {{ r | quote }} {% endfor %}-o {{ backup_archive | quote }}
+        executable: /bin/bash
+      changed_when: true
+
+    # Off the VM to the backup server, which replicates offsite and to the cloud
+    - name: Copy the backup to the backup server
+      ansible.builtin.include_tasks: ../../tasks/push_backup.yaml
+      vars:
+        backup_push_folder: Hashicorp
+        backup_push_files: ["{{ backup_archive }}"]
+
+    # Keep the newest archives only, once this run's copy is safely on the server
+    - name: Find the archives
+      ansible.builtin.find:
+        paths: "{{ backup_dest }}"
+        patterns: ["vault_*.tar.gz.age"]
+      register: vault_archives
+
+    - name: Remove archives beyond the ones kept
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ (vault_archives.files | sort(attribute='mtime', reverse=true))[backup_keep | int :] }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: Report the backup
+      ansible.builtin.debug:
+        msg: "Vault data, config and TLS files encrypted to {{ backup_archive | basename }} and copied to the backup server; the VM keeps the newest {{ backup_keep }}."
