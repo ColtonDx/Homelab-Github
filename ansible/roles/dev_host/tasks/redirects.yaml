@@ -57,7 +57,10 @@
     enabled: true
     state: "{{ 'restarted' if (dev_host_redirect_rules is changed or dev_host_redirect_unit is changed) else 'started' }}"
     daemon_reload: "{{ dev_host_redirect_unit is changed }}"
-  when: dev_host_port_redirects | length > 0
+  # In check mode a new unit is not written yet, so there is nothing to start
+  when:
+    - dev_host_port_redirects | length > 0
+    - not (ansible_check_mode and dev_host_redirect_unit is changed)
 
 # With no redirects listed, a unit left from an earlier run is stopped (dropping the table) and removed
 - name: Check for a port redirect unit to remove
