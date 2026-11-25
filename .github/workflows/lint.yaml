@@ -38,7 +38,7 @@ jobs:
       - name: Run yamllint
         run: yamllint -s -f github .
 
-      # Warns (never fails, for now) about compose services missing the standard hardening block in docs/docker/hardening.md
+      # Fails when a compose service is missing the standard hardening block in docs/docker/hardening.md
       - name: Check compose hardening
         run: python ci/compose-hardening.py
 

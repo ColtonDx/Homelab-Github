@@ -54,6 +54,20 @@ services:
       - TRUSTED_PROXIES=*
     volumes:
       - data:/2fauth
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it already runs as an unprivileged user on port 8000
+    # Not read-only: Laravel writes its caches inside the app folder
+    # hardening: healthcheck skipped, Kuma's HTTP check covers it and the image's tools are not documented
+    mem_limit: 512m # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=2fauth" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job

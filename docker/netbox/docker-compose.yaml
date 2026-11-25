@@ -23,6 +23,30 @@ services:
       - REDIS_DB_CACHE=0
     volumes:
       - data:/config
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What its init needs to hand its folders to the app's user and drop to it:
+      - CHOWN # give its folders to that user
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the app's user
+      - SETGID # and its group
+    # Not read-only: linuxserver's init writes its user and service files at start-up
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/login/"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 2m
+    mem_limit: 2g # A runaway process cannot take the host's memory
+    pids_limit: 1024 # Nor fork without limit; the limit counts threads
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job
@@ -43,6 +67,29 @@ services:
       POSTGRES_DB: netbox
     volumes:
       - db:/var/lib/postgresql/18/docker
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What the postgres image's start script needs before it drops to the postgres user:
+      - CHOWN # give the data folder to postgres
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the postgres user
+      - SETGID # and its group
+    # Not read-only: Postgres writes its socket and lock files outside the data volume
+    healthcheck: # Lets Docker see a database that stopped answering
+      test: ["CMD", "pg_isready", "-U", "netbox"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)
@@ -55,6 +102,27 @@ services:
       - default
     volumes:
       - redis:/data
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What the redis image's start script needs before it drops to the redis user:
+      - CHOWN # give /data to redis
+      - SETUID # switch to the redis user
+      - SETGID # and its group
+    # Not read-only: kept writable for its start-up ownership fix
+    healthcheck: # Lets Docker see a cache that stopped answering
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m # A runaway process cannot take the host's memory
+    pids_limit: 100 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=netbox" # Sets the DVBM Backup Job Label
       - "Kuma.DockerHost=truenas-scale" # Uptime Kuma container check on this Docker host (inventory name)

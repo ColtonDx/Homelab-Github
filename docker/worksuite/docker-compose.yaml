@@ -14,6 +14,17 @@ services:
     volumes:
       - data:/data
 #      - app:/app/app
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    # hardening: cap_drop skipped: our own image, whose capabilities are set with the project
+    # hardening: healthcheck skipped until the image documents one; Kuma's HTTP check covers it
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 512 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     labels:
       - "Backup=worksuite" # Sets the DVBM Backup Job Label
       - "AppPort=8000" # Sets the Application Port for the Reverse Proxy Job

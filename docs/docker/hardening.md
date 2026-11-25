@@ -1,6 +1,6 @@
 # Compose hardening
 
-Every service in `docker/*/docker-compose.yaml` carries the same block of settings, each with a one-line comment in the file saying what it does. `ci/compose-hardening.py` warns about any service missing one; it only warns until every stack has been rolled out, then it will fail.
+Every service in `docker/*/docker-compose.yaml` carries the same block of settings, each with a one-line comment in the file saying what it does. `ci/compose-hardening.py` fails CI for any service missing one, unless the file records an exception.
 
 | Setting | What it does |
 |---|---|
@@ -17,6 +17,8 @@ Images are pinned by digest separately, through Renovate.
 
 When an app cannot take a setting (for example it writes its own files at start-up, so it cannot be read-only), the file says so in a comment next to where the setting would be. A comment starting `# hardening:` and naming the setting (e.g. `# hardening: healthcheck comes from the image itself`) also tells the CI check to skip it.
 
-## Rollout
+## Lessons from the rollout
 
-Stacks are hardened a few at a time, low-risk apps first and the password manager and anything holding secrets last. Each batch is one pull request; after it deploys, the stacks are checked for a healthy container and a green Kuma monitor, and a stack that breaks is reverted on its own.
+- nginx images: check health on `127.0.0.1`, not `localhost`; on a read-only root nginx listens on IPv4 only.
+- `pids_limit` counts threads, not just processes: Node.js, Go and Java apps need around 1024.
+- Every stack was rolled out in batches, each checked afterwards for a healthy container and a green Kuma monitor.
