@@ -1,0 +1,19 @@
+---
+# log: load the rules but let everything through, logging what enforce would drop, to learn what a host needs before enforcing
+# enforce: drop it. Each switch to new rules is undone after host_firewall_revert_seconds unless the runner can still reach SSH
+host_firewall_mode: log
+# TCP ports open to every source on every host
+host_firewall_open_tcp: [443]
+# Addresses or networks (IPv4 or IPv6, CIDR allowed) that may reach SSH; empty leaves SSH open to all
+host_firewall_ssh_sources: []
+# The SSH port the sources above apply to
+host_firewall_ssh_port: 22
+# This host's other inbound rules: a list of { port, proto (tcp or udp, default tcp), from (list of addresses or networks; omitted means
+# anywhere), comment }. port may be a range such as "8000-8010". Rules apply to host services and to Docker-published ports alike
+host_firewall_allow: []
+# Most would-drop or dropped packets logged per minute, so a scan cannot flood the journal
+host_firewall_log_per_minute: 10
+# Seconds new rules stay loaded if the runner cannot reach SSH through them before the previous rules come back
+host_firewall_revert_seconds: 120
+# Where the rules live; the unit loads this file at boot
+host_firewall_rules_file: /etc/host-firewall.nft

@@ -1,0 +1,102 @@
+---
+# Limits where the automation account may log in from with an sshd Match block, so a copied key or certificate is useless elsewhere
+# Before sshd reloads, it is asked how it would treat this run's own connection and an outside address; unless this connection
+# still gets in and the outside one does not, the file is taken back out
+
+- name: Check the source settings
+  ansible.builtin.assert:
+    that:
+      - automation_user_sources | map('string') | reject('match', '^[0-9A-Fa-f:.]+(/[0-9]+)?$') | list | length == 0
+    fail_msg: "automation_user_sources must be plain addresses or networks. Nothing was changed on {{ inventory_hostname }}."
+    quiet: true
+
+- name: Restrict the account's sources
+  when: automation_user_sources | length > 0
+  block:
+    # Read as the login user, since sudo drops SSH_CONNECTION; its first field is the address this run connects from
+    - name: Find the address this run connects from
+      ansible.builtin.command:
+        argv: [printenv, SSH_CONNECTION]
+      become: false
+      register: automation_user_connection
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Write the source restriction
+      ansible.builtin.copy:
+        dest: "{{ automation_user_sources_dropin }}"
+        content: |
+          # Managed by Ansible (role automation_user): {{ automation_user_name }} may log in only from the listed sources
+          Match User {{ automation_user_name }} Address *,{{ automation_user_sources | map('regex_replace', '^', '!') | join(',') }}
+              PubkeyAuthentication no
+              PasswordAuthentication no
+              KbdInteractiveAuthentication no
+              HostbasedAuthentication no
+              GSSAPIAuthentication no
+          # Ends the block, so settings in files read after this one apply to everyone again
+          Match all
+        owner: root
+        group: root
+        mode: "0644"
+      register: automation_user_sources_file
+
+    # A block rather than a handler, since a handler cannot undo the change when a check fails
+    - name: Check and reload sshd  # noqa: no-handler
+      when:
+        - automation_user_sources_file is changed
+        - not ansible_check_mode
+      vars:
+        automation_user_own_address: "{{ (automation_user_connection.stdout | default('')).split(' ')[0] }}"
+      block:
+        - name: Check the sshd configuration
+          ansible.builtin.command: /usr/sbin/sshd -t
+          changed_when: false
+
+        # Without the address the lock-out check below cannot run, so stop rather than guess
+        - name: Check this run's address is known
+          ansible.builtin.assert:
+            that: automation_user_own_address | length > 0
+            fail_msg: "Could not read this run's own SSH address, so the restriction was not applied."
+            quiet: true
+
+        # What sshd would allow for this connection's address, and for 192.0.2.1 (a documentation address no runner uses)
+        - name: Ask sshd how it would treat both addresses
+          ansible.builtin.command:
+            argv: [/usr/sbin/sshd, -T, -C, "user={{ automation_user_name }},host=check,addr={{ item }}"]
+          loop: ["{{ automation_user_own_address }}", 192.0.2.1]
+          register: automation_user_sshd_view
+          changed_when: false
+
+        - name: Check this run gets in and an outside address does not
+          ansible.builtin.assert:
+            that:
+              - "'pubkeyauthentication yes' in automation_user_sshd_view.results[0].stdout_lines"
+              - "'pubkeyauthentication no' in automation_user_sshd_view.results[1].stdout_lines"
+            fail_msg: >-
+              With the restriction, {{ automation_user_own_address }} (this run) would be refused or an outside address
+              still allowed; add the runner to automation_user_sources.
+            quiet: true
+
+        # Reload keeps existing sessions, including this one
+        - name: Reload sshd
+          ansible.builtin.systemd_service:
+            name: ssh
+            state: reloaded
+      rescue:
+        - name: Take the restriction back out
+          ansible.builtin.file:
+            path: "{{ automation_user_sources_dropin }}"
+            state: absent
+
+        - name: Stop after the restriction failed its checks
+          ansible.builtin.fail:
+            msg: "The source restriction failed its checks, so it was removed again and sshd was left as it was."
+
+# With no sources listed, a restriction from an earlier run comes out
+- name: Remove the source restriction
+  ansible.builtin.file:
+    path: "{{ automation_user_sources_dropin }}"
+    state: absent
+  when: automation_user_sources | length == 0
+  notify: Reload sshd

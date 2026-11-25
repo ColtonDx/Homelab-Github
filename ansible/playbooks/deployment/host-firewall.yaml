@@ -1,0 +1,19 @@
+---
+# Loads the baseline inbound firewall on Linux hosts and limits the automation account to its listed sources; safe to re-run
+# Inventory: hosts in host_firewall (or target_hosts); settings in docs/inventory/host-firewall.md and the two roles' defaults
+- name: Baseline host firewall
+  hosts: "{{ target_hosts | default('host_firewall') }}"
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Paths rather than names, so the roles resolve however Semaphore starts the run
+    - name: Load the firewall
+      ansible.builtin.include_role:
+        name: ../../roles/host_firewall  # noqa: role-name[path]
+
+    # Only the sshd part of the role, so keys and sudo are left to the jobs that manage them
+    - name: Limit where the automation account logs in from
+      ansible.builtin.include_role:
+        name: ../../roles/automation_user  # noqa: role-name[path]
+        tasks_from: sources.yaml

@@ -54,6 +54,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Backup \| OPNsense | Backups | [backup-opnsense.yaml](../../semaphore/templates/backup-opnsense.yaml) | `ansible/playbooks/backups/opnsense-backup.yaml` |
 | Host \| Docker | (none) | [host-docker.yaml](../../semaphore/templates/host-docker.yaml) | `ansible/playbooks/deployment/host-docker.yaml` |
 | Host \| Dev | (none) | [host-dev.yaml](../../semaphore/templates/host-dev.yaml) | `ansible/playbooks/deployment/host-dev.yaml` |
+| Host \| Firewall | (none) | [host-firewall.yaml](../../semaphore/templates/host-firewall.yaml) | `ansible/playbooks/deployment/host-firewall.yaml` |
 | Linux Updates | (none) | [linux-updates.yaml](../../semaphore/templates/linux-updates.yaml) | `ansible/playbooks/maintenance/update-linux.yaml` |
 | Portainer Stack Creation | (none) | [portainer-stack-creation.yaml](../../semaphore/templates/portainer-stack-creation.yaml) | `ansible/playbooks/portainer/deploy-stack.yaml` |
 | Portainer Stack Update | (none) | [portainer-stack-update.yaml](../../semaphore/templates/portainer-stack-update.yaml) | `ansible/playbooks/portainer/update-stack.yaml` |

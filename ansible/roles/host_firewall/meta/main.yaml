@@ -1,0 +1,14 @@
+---
+# Role metadata, for ansible-lint and Galaxy-style tooling
+galaxy_info:
+  role_name: host_firewall
+  author: homelab
+  description: Baseline inbound nftables firewall in its own table, covering host services and Docker-published ports
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

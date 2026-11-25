@@ -1,0 +1,20 @@
+---
+# Semaphore task template Host | Firewall; see docs/semaphore/templates.md for the project resources it names
+# Run check mode first; each host's new rules undo themselves if the runner cannot reach SSH through them
+name: Host | Firewall
+description: Loads the baseline inbound firewall (log or enforce, per inventory) on Linux hosts and limits the ansible account to the runners
+app: ansible
+playbook: ansible/playbooks/deployment/host-firewall.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+# A task may run another branch, for check-mode runs of a PR before merge; real runs use main
+allow_override_branch_in_task: true
+environments:
+  - Empty
+survey_vars:
+  - name: target_hosts
+    title: Hosts
+    description: A host or group name from the inventory; start with one host when changing a mode
+    type: string
+    required: true
+    default_value: host_firewall
