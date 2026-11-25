@@ -3,6 +3,29 @@ services:
     container_name: changedetection
     restart: unless-stopped
     image: lscr.io/linuxserver/changedetection.io:latest
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add: # What linuxserver's init needs to hand /config to the app's user and drop to it:
+      - CHOWN # give /config to that user
+      - DAC_OVERRIDE # read and fix files it does not own yet
+      - FOWNER # change permissions on them
+      - SETUID # switch to the app's user
+      - SETGID # and its group
+    # Not read-only: linuxserver's init writes its user and service files at start-up
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - reverseproxy-nw
     environment:

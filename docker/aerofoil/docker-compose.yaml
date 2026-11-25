@@ -5,6 +5,21 @@ services:
     environment:
       - USER_ADMIN_NAME=${USERNAME}
       - USER_ADMIN_PASSWORD=${AEROFOIL_ADMIN_PASSWORD}
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    # hardening: cap_drop and read_only skipped: its start script adds a user to /etc/passwd, chowns /app and switches user with sudo
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container (the image has Python but no curl or wget)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8465/', timeout=4)"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     volumes:
       - games:/games
       - config:/app/config
