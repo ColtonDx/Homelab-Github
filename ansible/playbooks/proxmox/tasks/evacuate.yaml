@@ -1,6 +1,7 @@
 ---
 # Empties one node before its reboot, for update_node.yaml: moves the running guests that can move, and shuts down the ones that should stay
-# A guest stays when it has a tag in proxmox_stay_tags (default talos) or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
+# A guest stays when it has a tag in proxmox_stay_tags (default talos), is named in proxmox_stay_names, or uses PCI or USB passthrough; the rest move, HA-managed ones through ha-manager
+# A VM only moves to a node that has every storage its disks are on; the whole plan is checked before anything moves
 
 # Running VMs on this node
 - name: List the node's VMs
@@ -47,6 +48,32 @@
   changed_when: false
   check_mode: false
 
+# Local disks can only move to a node with a storage of the same name, so each VM's disk storages are noted (CD drives skipped)
+- name: Note the storages each VM's disks are on
+  ansible.builtin.set_fact:
+    proxmox_guest_storages: >-
+      {{ proxmox_guest_storages | default({}) | combine({(item.item.vmid | string): (item.stdout | from_json | dict2items
+         | selectattr('key', 'match', '^((scsi|virtio|sata|ide)[0-9]+|efidisk0|tpmstate0)$') | map(attribute='value') | map('string')
+         | reject('search', 'media=cdrom') | select('search', ':') | map('regex_replace', ':.*$', '') | unique | list)}) }}
+  loop: "{{ proxmox_vm_configs.results | selectattr('stdout', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name | default(item.item.vmid) }}"
+
+# Which storages each node can use right now
+- name: Read the storages on each node
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/resources, --type, storage, --output-format, json]
+  register: proxmox_storage_list
+  changed_when: false
+  check_mode: false
+
+- name: Note the storages on each node
+  ansible.builtin.set_fact:
+    proxmox_node_storages: >-
+      {{ proxmox_node_storages | default({}) | combine({item: (proxmox_storage_list.stdout | from_json | selectattr('node', 'equalto', item)
+         | selectattr('status', 'equalto', 'available') | map(attribute='storage') | list)}) }}
+  loop: "{{ proxmox_storage_list.stdout | from_json | map(attribute='node') | unique | list }}"
+
 # Split into what moves and what stays; tags come as a semicolon-separated list
 - name: Decide which guests move and which stay
   ansible.builtin.set_fact:
@@ -57,12 +84,13 @@
       {{ proxmox_running | selectattr('tags', 'defined')
          | selectattr('tags', 'search', '(^|;)(' ~ (proxmox_stay_tags | default(['talos']) | join('|')) ~ ')(;|$)')
          | map(attribute='vmid') | list }}
+    proxmox_stay_name_ids: "{{ proxmox_running | selectattr('name', 'defined') | selectattr('name', 'in', proxmox_stay_names | default([])) | map(attribute='vmid') | list }}"
 
 # The two lists, with the reason each stays
 - name: List the guests to move and to stay
   ansible.builtin.set_fact:
-    proxmox_movers: "{{ proxmox_running | rejectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids) | list }}"
-    proxmox_stayed: "{{ proxmox_running | selectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids) | list }}"
+    proxmox_movers: "{{ proxmox_running | rejectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids + proxmox_stay_name_ids) | list }}"
+    proxmox_stayed: "{{ proxmox_running | selectattr('vmid', 'in', proxmox_pinned_ids + proxmox_stay_tag_ids + proxmox_stay_name_ids) | list }}"
 
 # The other online nodes' free memory, to be sure everything fits before anything moves
 - name: Read the other nodes' free memory
@@ -72,18 +100,46 @@
   changed_when: false
   check_mode: false
 
-# Stopping here is better than leaving guests half-moved when memory runs out part way
-- name: Require room on the other nodes
-  ansible.builtin.assert:
-    that:
-      - proxmox_need <= proxmox_free
-    fail_msg: >-
-      Moving {{ proxmox_movers | length }} guest(s) off {{ proxmox_node }} needs {{ (proxmox_need / 1073741824) | round(1) }} GiB,
-      but the other online nodes have {{ (proxmox_free / 1073741824) | round(1) }} GiB free. Stop or move some guests first.
+# Starting point for the plan: each other online node's memory size and what is in use now
+- name: Start the plan
+  ansible.builtin.set_fact:
+    proxmox_plan_max: "{{ dict(proxmox_others | map(attribute='node') | zip(proxmox_others | map(attribute='maxmem') | map('int'))) }}"
+    proxmox_plan_used: "{{ dict(proxmox_others | map(attribute='node') | zip(proxmox_others | map(attribute='mem') | map('int'))) }}"
+    proxmox_unplaced: []
   vars:
     proxmox_others: "{{ proxmox_nodes_now.stdout | from_json | selectattr('status', 'equalto', 'online') | rejectattr('node', 'equalto', proxmox_node) | list }}"
-    proxmox_need: "{{ proxmox_movers | map(attribute='maxmem') | map('int') | sum }}"
-    proxmox_free: "{{ (proxmox_others | map(attribute='maxmem') | map('int') | sum) - (proxmox_others | map(attribute='mem') | map('int') | sum) }}"
+
+# Places each guest the way migrate_guest.yaml will (in order, most free memory among nodes with its storages), so a guest
+# that fits nowhere stops the run here instead of leaving guests half-moved
+- name: Plan where each guest goes
+  ansible.builtin.set_fact:
+    proxmox_plan_used: >-
+      {{ proxmox_plan_used | combine({proxmox_plan_target: proxmox_plan_used[proxmox_plan_target] + (item.maxmem | int)}) if proxmox_plan_target | length > 0 else proxmox_plan_used }}
+    proxmox_unplaced: "{{ proxmox_unplaced + ([] if proxmox_plan_target | length > 0 else [item.name | default(item.vmid)]) }}"
+  vars:
+    proxmox_plan_storages: "{{ proxmox_guest_storages[item.vmid | string] | default([]) }}"
+    proxmox_plan_target: >-
+      {%- set ns = namespace(best='', free=-1) -%}
+      {%- for node in proxmox_plan_max -%}
+      {%- set free = proxmox_plan_max[node] - proxmox_plan_used[node] -%}
+      {%- if free >= (item.maxmem | int) and free > ns.free
+            and (proxmox_plan_storages | difference(proxmox_node_storages[node] | default([]))) | length == 0 -%}
+      {%- set ns.best = node -%}
+      {%- set ns.free = free -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.best }}
+  loop: "{{ proxmox_movers }}"
+  loop_control:
+    label: "{{ item.name | default(item.vmid) }}"
+
+- name: Require a place for every guest
+  ansible.builtin.assert:
+    that:
+      - proxmox_unplaced | length == 0
+    fail_msg: >-
+      {{ proxmox_unplaced | join(', ') }} cannot move off {{ proxmox_node }}: no other online node has both the memory and the storage its disks are on.
+      Add them to proxmox_stay_names so they shut down for the reboot instead, or make room first. Nothing was moved.
   when: proxmox_movers | length > 0
 
 # Names only, so the run log shows the plan before anything moves
