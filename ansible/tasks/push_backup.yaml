@@ -1,7 +1,7 @@
 ---
 # Task file: copies encrypted backup files to the backup server over SSH (rsync), into one folder only, with this host's own key
-# The first run makes the key; the server must hold its public key behind a restriction (rrsync -wo <folder>), so this key can only
-# write into its own folder: it cannot read, delete or reach any other app's backups. Until that line is added, the run fails and prints it.
+# The first run makes the key; the server must hold its public key behind a restriction (rrsync -wo -no-del <folder>), so this key can only
+# write into its own folder: it cannot read or delete anything, or reach any other app's backups. Until that line is added, the run fails and prints it.
 # Expects: backup_push_files (local paths), backup_push_folder (the folder under backup_push_root, e.g. Gitlab)
 # Inventory: backup_push_host (the backup server), backup_push_user (default backup), backup_push_root (the backups dataset),
 # backup_push_key (default ~/.ssh/backup_push_<folder>_ed25519 of the user running this: one key per folder, since the server limits each key to one)
@@ -39,11 +39,11 @@
     src: "{{ backup_push_key_path }}.pub"
   register: backup_push_pub
 
-# The exact line for the backup user's SSH keys: rrsync -wo limits this key to writing into its one folder
+# The exact line for the backup user's SSH keys: rrsync -wo -no-del limits this key to adding files to its one folder
 - name: Work out the line the backup server needs
   ansible.builtin.set_fact:
     backup_push_authorized: >-
-      command="rrsync -wo {{ backup_push_root }}/{{ backup_push_folder }}",restrict {{ backup_push_pub.content | b64decode | trim }}
+      command="rrsync -wo -no-del {{ backup_push_root }}/{{ backup_push_folder }}",restrict {{ backup_push_pub.content | b64decode | trim }}
 
 # Its own known_hosts, so the first connection records the server's key and later ones must match it
 - name: Copy the backups to the server
