@@ -8,6 +8,12 @@
     dest: "{{ age_workdir }}/age.tar.gz"
     checksum: sha256:cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
     mode: "0600"
+    # GitHub's download servers are sometimes slow to answer; a backup should not fail on one slow moment
+    timeout: 60
+  register: age_download_result
+  retries: 3
+  delay: 10
+  until: age_download_result is not failed
 
 - name: Unpack age
   ansible.builtin.unarchive:
