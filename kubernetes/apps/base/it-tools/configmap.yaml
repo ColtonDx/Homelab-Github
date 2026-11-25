@@ -1,0 +1,21 @@
+---
+# The image's nginx site, moved from port 80 to 8080 so nginx can run as a non-root user
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: it-tools-nginx
+  namespace: it-tools
+  labels:
+    app: it-tools
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        server_name localhost;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }
