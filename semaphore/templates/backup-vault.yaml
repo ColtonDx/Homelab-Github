@@ -1,0 +1,12 @@
+---
+# Semaphore task template Backup | Vault; see docs/semaphore/templates.md for the project resources it names
+# Vault's data, config and TLS folders, encrypted with age, copied to the backup server's Hashicorp folder
+# Scheduled nightly at 09:15 UTC (03:15 Central)
+name: Backup | Vault
+view: Backups
+app: ansible
+playbook: ansible/playbooks/backups/vault-backup.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+environments:
+  - Hashicorp Secrets
