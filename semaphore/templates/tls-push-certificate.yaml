@@ -1,0 +1,24 @@
+---
+# Semaphore task template TLS | Push Certificate; see docs/semaphore/templates.md for the project resources it names
+# Scheduled weekly (Mondays 11:00 UTC); it only issues when a host's certificate is missing, within 30 days of expiry or missing a domain
+name: TLS | Push Certificate
+description: Issues a Let's Encrypt certificate on the runner and copies it to hosts in tls_push (key first, then fullchain) when theirs is missing, within 30 days of expiry or missing a domain; the DNS token stays on the runner
+app: ansible
+playbook: ansible/playbooks/tls/push-certificate.yaml
+repository: Github-Homelab
+inventory: Gitlab Ansible Inventory
+allow_override_branch_in_task: false
+environments:
+  - Hashicorp Secrets
+survey_vars:
+  - name: tls_push_force
+    title: Force renewal
+    description: Leave false. True issues a new certificate whatever the expiry (Let's Encrypt allows 5 identical a week)
+    type: enum
+    required: true
+    default_value: 'false'
+    values:
+      - name: 'false'
+        value: 'false'
+      - name: 'true'
+        value: 'true'
