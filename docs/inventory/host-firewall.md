@@ -17,6 +17,10 @@ Read by the **Host | Firewall** job (`ansible/playbooks/deployment/host-firewall
 
 Run `log` until the logs show everything a host needs, add it to `host_firewall_allow`, then switch that host to `enforce`. Every switch to new rules arms a timer first: if the runner cannot open a new SSH connection through them, the previous rules come back at once (or after `host_firewall_revert_seconds` if the run is cut off).
 
+## Temporary openings
+
+The **Host | Firewall JIT** job (`ansible/playbooks/deployment/host-firewall-jit.yaml`) opens one TCP port (default 443) to one address for `jit_minutes` (default 60, at most 1440), for example to reach Vault from a device with a changing address. Entries live in the table's `jit_v4` / `jit_v6` sets with a timeout, so the kernel removes them when time is up; rerunning restarts the clock. Reloading the rules clears every opening, and the Semaphore task history records who opened what.
+
 ## Automation account sources
 
 With `automation_user_sources` set, sshd accepts the automation account (`automation_user_name`, default `ansible`) only from those addresses, for keys and certificates alike. Before sshd reloads, the role asks sshd how it would treat this run's own address and an outside one, and takes the setting back out unless the run would still get in. An empty list removes the restriction.

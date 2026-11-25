@@ -25,8 +25,21 @@
 table inet host_firewall
 delete table inet host_firewall
 table inet host_firewall {
+  # Temporary openings (address . port) added by host-firewall-jit.yaml; each entry removes itself when its timeout runs out,
+  # and reloading these rules clears them
+  set jit_v4 {
+    type ipv4_addr . inet_service
+    flags timeout
+  }
+  set jit_v6 {
+    type ipv6_addr . inet_service
+    flags timeout
+  }
+
   # What may connect in. Ports are matched as first addressed, so a Docker-published or redirected port uses its outside number
   chain allowed {
+    meta l4proto tcp ip saddr . ct original proto-dst @jit_v4 accept comment "jit"
+    meta l4proto tcp ip6 saddr . ct original proto-dst @jit_v6 accept comment "jit"
 {% for line in lines %}
     {{ line }}
 {% endfor %}
