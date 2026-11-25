@@ -1,6 +1,6 @@
 ---
 # Task file: reserves addresses in OPNsense Dnsmasq, one host record per entry giving both the DNS name and the DHCP reservation; called after Terraform applies and by dnsmasq-reserve-ip.yaml
-# Needs opnsense_reservations, a list of {name, ip, mac} with an optional domain each; an empty list does nothing; otherwise opnsense_domain, else domain from the inventory, is the record's domain
+# Needs opnsense_reservations, a list of {name, ip} with an optional mac and domain each (no mac = DNS record only, name * = wildcard for the whole domain); an empty list does nothing; otherwise opnsense_domain, else domain from the inventory, is the record's domain
 # Records are matched by their description, which is the full name, so a re-run updates the record in place, including a new IP or MAC
 # Firewall: opnsense_firewall, else the firewalls group's first host's ansible_host; opnsense_ssl_verify (default true)
 # Vault: automation/API_KEY and automation/API_SECRET at opnsense, the key of its own OPNsense user with Dnsmasq rights
@@ -18,10 +18,10 @@
     - name: Validate the reservations
       ansible.builtin.assert:
         that:
-          - item.name | default('') is match('^[A-Za-z0-9][A-Za-z0-9-]*$')
+          - item.name | default('') is match('^([A-Za-z0-9][A-Za-z0-9-]*|\*)$')
           - item.ip | default('') is match('^([0-9]{1,3}\.){3}[0-9]{1,3}$')
-          - item.mac | default('') is match('^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')
-        fail_msg: "Reservation {{ item.name | default('(no name)') }}: needs a host name (letters, digits and dashes), an IPv4 ip and a MAC address."
+          - item.mac | default('') | length == 0 or item.mac is match('^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')
+        fail_msg: "Reservation {{ item.name | default('(no name)') }}: needs a host name (letters, digits and dashes, or * for a wildcard), an IPv4 ip and, if given, a valid MAC address."
         quiet: true
       loop: "{{ opnsense_reservations }}"
       loop_control:
@@ -64,13 +64,13 @@
         host: "{{ item.name }}"
         domain: "{{ item.domain | default(opnsense_domain | default(domain)) }}"
         ip: ["{{ item.ip }}"]
-        hardware_addr: ["{{ item.mac | lower | replace('-', ':') }}"]
-        comments: "Managed by Ansible after a Terraform build"
+        hardware_addr: "{{ [item.mac | lower | replace('-', ':')] if item.mac | default('') | length > 0 else [] }}"
+        comments: "Managed by Ansible"
         state: present
         reload: false
       loop: "{{ opnsense_reservations }}"
       loop_control:
-        label: "{{ item.name }} {{ item.ip }}"
+        label: "{{ item.name }}.{{ item.domain | default(opnsense_domain | default(domain)) }} {{ item.ip }}"
       register: opnsense_records
 
     # Applies every change at once; skipped when nothing changed

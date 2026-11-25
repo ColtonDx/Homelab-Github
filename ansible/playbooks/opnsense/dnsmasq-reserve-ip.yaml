@@ -2,6 +2,7 @@
 # Reserves addresses in OPNsense Dnsmasq by hand: a host record giving the DNS name and the DHCP reservation; Terraform builds do this themselves after an apply
 # Either reserve_hosts, inventory host names (a list or comma-separated) whose dnsmasq_reservation the inventory sets, or reserve_name (host name without the domain), reserve_ip and reserve_mac for one address
 # An inventory host's dnsmasq_reservation holds mac and optional name (default the inventory name) and domain (default opnsense_domain, else domain); the address is its ansible_host
+# An inventory host's dnsmasq_wildcards lists domains whose every name resolves to it (a DNS-only * record per domain, no DHCP reservation)
 # Re-running with the same name updates its address or MAC; firewall and Vault settings are listed in tasks/dnsmasq_reserve_ip.yaml
 - name: Reserve addresses in OPNsense Dnsmasq
   hosts: localhost
@@ -23,27 +24,36 @@
         fail_msg: "Set reserve_hosts, or reserve_name, reserve_ip and reserve_mac."
         quiet: true
 
-    # Each named host must be in the inventory with a reservation, or its entry would be half empty
+    # Each named host must be in the inventory with a reservation or wildcard domains, or there is nothing to write
     - name: Check the inventory hosts
       ansible.builtin.assert:
         that:
           - item in hostvars
-          - hostvars[item].dnsmasq_reservation.mac | default('') | length > 0
-        fail_msg: "{{ item }} needs to be an inventory host with dnsmasq_reservation.mac set."
+          - hostvars[item].dnsmasq_reservation.mac | default('') | length > 0 or hostvars[item].dnsmasq_wildcards | default([]) | length > 0
+        fail_msg: "{{ item }} needs to be an inventory host with dnsmasq_reservation.mac or dnsmasq_wildcards set."
         quiet: true
       loop: "{{ reserve_host_list }}"
 
-    # One entry per inventory host, with the defaults filled in
+    # One entry per inventory host with a reservation, with the defaults filled in
     - name: List the inventory hosts' reservations
       ansible.builtin.set_fact:
         reserve_entries: "{{ reserve_entries | default([]) + [reserve_entry] }}"
-      loop: "{{ reserve_host_list }}"
+      loop: "{{ reserve_host_list | select('in', hostvars) | list }}"
+      when: hostvars[item].dnsmasq_reservation.mac | default('') | length > 0
       vars:
         reserve_entry:
           name: "{{ hostvars[item].dnsmasq_reservation.name | default(item) }}"
           ip: "{{ hostvars[item].ansible_host }}"
           mac: "{{ hostvars[item].dnsmasq_reservation.mac }}"
           domain: "{{ hostvars[item].dnsmasq_reservation.domain | default(opnsense_domain | default(domain)) }}"
+
+    # One * record per wildcard domain, pointing at the host's address
+    - name: List the inventory hosts' wildcard records
+      ansible.builtin.set_fact:
+        reserve_entries: "{{ reserve_entries | default([]) + [{'name': '*', 'ip': item.0.ansible_host, 'domain': item.1}] }}"
+      loop: "{{ reserve_host_list | select('in', hostvars) | map('extract', hostvars) | list | subelements('dnsmasq_wildcards', skip_missing=True) }}"
+      loop_control:
+        label: "*.{{ item.1 }}"
 
     # Writes the records and reloads Dnsmasq once
     - name: Reserve the addresses
