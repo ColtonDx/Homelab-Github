@@ -3,7 +3,8 @@
 # Needs opnsense_reservations, a list of {name, ip, mac} with an optional domain each; an empty list does nothing; otherwise opnsense_domain, else domain from the inventory, is the record's domain
 # Records are matched by their description, which is the full name, so a re-run updates the record in place, including a new IP or MAC
 # Firewall: opnsense_firewall, else the firewalls group's first host's ansible_host; opnsense_ssl_verify (default true)
-# Vault: FIREWALL_KEY and FIREWALL_SECRET at opnsense (vault_opnsense_path renames it); reads Vault through VAULT_ADDR and VAULT_TOKEN
+# Vault: automation/API_KEY and automation/API_SECRET at opnsense, the key of its own OPNsense user with Dnsmasq rights
+# (vault_opnsense_path and vault_opnsense_user rename them); reads Vault through VAULT_ADDR and VAULT_TOKEN
 # Needs the oxlorg.opnsense collection and the httpx package on the runner
 
 # Everything below needs at least one entry
@@ -27,16 +28,16 @@
         label: "{{ item.name | default('(no name)') }}"
 
 
-    # The same API key the DHCP-to-NetBox sync uses
+    # Its own OPNsense user, with rights to Dnsmasq only, like every app that calls the OPNsense API
     - name: Load the OPNsense API key
       ansible.builtin.include_tasks: ../../../tasks/var_lookup.yaml
       vars:
         vault_secrets:
           - path: "{{ vault_opnsense_path | default('opnsense') }}"
-            field: FIREWALL_KEY
+            field: "{{ vault_opnsense_user | default('automation') }}/API_KEY"
             var: opnsense_api_key
           - path: "{{ vault_opnsense_path | default('opnsense') }}"
-            field: FIREWALL_SECRET
+            field: "{{ vault_opnsense_user | default('automation') }}/API_SECRET"
             var: opnsense_api_secret
 
     # The firewall the inventory already describes, unless the caller names another
