@@ -47,12 +47,13 @@
       ansible.builtin.command:
         argv: [ha-manager, migrate, "{{ ('vm:' if proxmox_guest.type == 'qemu' else 'ct:') ~ proxmox_guest.vmid }}", "{{ proxmox_target }}"]
 
-    # HA moves it in the background, so wait until the guest is reported on the target
+    # HA moves it in the background, so wait until the guest is reported on the target; a dry run moved nothing, so it skips the wait
     - name: Wait for HA to finish the move
       ansible.builtin.command:
         argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
       register: proxmox_ha_move
       changed_when: false
+      when: not ansible_check_mode
       retries: 60
       delay: 10
       until: >-
