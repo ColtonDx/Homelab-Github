@@ -19,10 +19,7 @@ services:
       - data:/data
     security_opt:
       - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
-    cap_drop:
-      - ALL # Start with no Linux capabilities at all
-    cap_add:
-      - NET_BIND_SERVICE # listen on port 80
+    # hardening: cap_drop skipped, dropping ALL stops it writing its own files in /data (exit 12)
     # Not read-only: kept writable while this is the password manager's first hardening step
     # hardening: healthcheck comes from the image itself (/healthcheck.sh)
     mem_limit: 512m # A runaway process cannot take the host's memory
