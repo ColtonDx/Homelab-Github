@@ -16,11 +16,34 @@ spec:
       labels:
         app: it-tools
     spec:
+      automountServiceAccountToken: false # Static pages only: no reason to talk to the Kubernetes API
+      securityContext: # nginx runs as the image's own nginx user (101) instead of root
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: it-tools
           image: corentinth/it-tools:latest
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe: # Only receive traffic once nginx answers
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe: # Restart a hung web server
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
           resources:
             requests:
               memory: "64Mi"
@@ -28,3 +51,23 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+          volumeMounts:
+            - name: nginx-site # Site config listening on 8080
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: nginx-cache # nginx's temp files
+              mountPath: /var/cache/nginx
+            - name: run # nginx's pid file
+              mountPath: /run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-site
+          configMap:
+            name: it-tools-nginx
+        - name: nginx-cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
