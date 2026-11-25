@@ -1,0 +1,121 @@
+---
+# Task file: marks the monitors and groups this sync manages with a Kuma tag, then finds tagged ones the code no longer defines; used by
+# sync-monitors.yaml after add_monitors.yaml, which leaves kuma_monitors (everything wanted) and kuma_group_pairs (the groups it made)
+# Only tagged monitors are ever removed, so monitors made by hand in Kuma are never touched
+# Inventory: kuma_prune (default false: report only) deletes the orphans; kuma_prune_max (default 5) is the most one run may delete,
+# so a broken read that makes everything look orphaned stops instead; kuma_prune_force=true lifts that cap for one run
+# kuma_owner_tag (default iac) names the tag
+
+- name: Mark and prune the monitors this sync owns
+  when: kuma_connected
+  # Every call in here runs from the controller without privilege escalation
+  delegate_to: localhost
+  become: false
+  vars:
+    kuma_tag: "{{ kuma_owner_tag | default('iac') }}"
+    kuma_wanted_groups: "{{ kuma_group_pairs | default([]) | map('split', '|') | map('first') | unique | list }}"
+    kuma_wanted_names: "{{ kuma_monitors | map(attribute='name') | list + kuma_wanted_groups }}"
+  block:
+    # The tag that marks a monitor as defined in code
+    - name: Ensure the ownership tag exists
+      lucasheld.uptime_kuma.tag:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+        name: "{{ kuma_tag }}"
+        color: "#2563eb"
+        state: present
+      register: kuma_tag_result
+      retries: 3
+      delay: 5
+      until: kuma_tag_result is not failed
+
+    # Read Kuma once to see which monitors already carry the tag, so only new ones are tagged
+    - name: Read every monitor
+      lucasheld.uptime_kuma.monitor_info:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+      register: kuma_all_info
+      retries: 3
+      delay: 5
+      until: kuma_all_info is not failed
+
+    - name: Work out what is tagged and what is wanted
+      ansible.builtin.set_fact:
+        kuma_existing: "{{ kuma_all_info.monitors | map(attribute='name') | list }}"
+        # Each monitor's name paired with its tag names, keeping the ones that carry the ownership tag
+        kuma_tagged: >-
+          {{ kuma_all_info.monitors | map(attribute='name')
+             | zip(kuma_all_info.monitors | map(attribute='tags', default=[]) | map('map', attribute='name') | map('list'))
+             | selectattr('1', 'contains', kuma_tag) | map(attribute='0') | list }}
+
+    # Wanted monitors that exist but are not yet marked; skipped container checks on unknown hosts simply do not exist yet
+    - name: Tag the monitors and groups the code defines
+      lucasheld.uptime_kuma.monitor_tag:
+        api_url: "{{ kuma_api_url }}"
+        api_token: "{{ kuma_login.token }}"
+        monitor_name: "{{ item }}"
+        tag_name: "{{ kuma_tag }}"
+        state: present
+      loop: "{{ kuma_wanted_names | select('in', kuma_existing) | reject('in', kuma_tagged) | list }}"
+      register: kuma_tag_results
+      retries: 3
+      delay: 5
+      until: kuma_tag_results is not failed
+
+    - name: Find the orphans and the unmanaged monitors
+      ansible.builtin.set_fact:
+        kuma_orphan_monitors: >-
+          {{ kuma_all_info.monitors | selectattr('name', 'in', kuma_tagged) | rejectattr('name', 'in', kuma_wanted_names)
+             | rejectattr('type', 'equalto', 'group') | map(attribute='name') | list }}
+        kuma_orphan_groups: >-
+          {{ kuma_all_info.monitors | selectattr('name', 'in', kuma_tagged) | rejectattr('name', 'in', kuma_wanted_names)
+             | selectattr('type', 'equalto', 'group') | list }}
+        kuma_unmanaged: >-
+          {{ kuma_existing | reject('in', kuma_tagged) | reject('in', kuma_wanted_names) | list }}
+
+    # Shown every run, so the log always says what pruning would remove and what Kuma has that the code does not
+    - name: Report the orphans
+      ansible.builtin.debug:
+        msg:
+          - "Tagged but no longer in code ({{ 'deleting' if kuma_prune | default(false) | bool else 'report only' }}): {{ kuma_orphan_monitors + (kuma_orphan_groups | map(attribute='name') | list) }}"
+          - "In Kuma without the {{ kuma_tag }} tag, so never touched (made by hand, or left over from before tagging): {{ kuma_unmanaged }}"
+
+    - name: Delete the orphans
+      when: kuma_prune | default(false) | bool
+      block:
+        # A source that failed to read would make its monitors look orphaned; this caps the damage of any such mistake
+        - name: Refuse to delete more than the cap
+          ansible.builtin.assert:
+            that: kuma_orphan_monitors | length <= kuma_prune_max | default(5) | int or kuma_prune_force | default(false) | bool
+            fail_msg: >-
+              {{ kuma_orphan_monitors | length }} monitors would be deleted, more than kuma_prune_max ({{ kuma_prune_max | default(5) }}).
+              Nothing was deleted. Check the sources read correctly, then re-run with kuma_prune_force=true if this is intended.
+            quiet: true
+
+        # Deleting a monitor also deletes its history
+        - name: Delete orphan monitors
+          lucasheld.uptime_kuma.monitor:
+            api_url: "{{ kuma_api_url }}"
+            api_token: "{{ kuma_login.token }}"
+            name: "{{ item }}"
+            state: absent
+          loop: "{{ kuma_orphan_monitors }}"
+          register: kuma_deleted
+          retries: 3
+          delay: 5
+          until: kuma_deleted is not failed
+
+        # Only groups nothing lives in any more, so a group never takes a monitor with it; one emptied this run goes on the next
+        - name: Delete empty orphan groups
+          lucasheld.uptime_kuma.monitor:
+            api_url: "{{ kuma_api_url }}"
+            api_token: "{{ kuma_login.token }}"
+            name: "{{ item.name }}"
+            state: absent
+          loop: "{{ kuma_orphan_groups | rejectattr('id', 'in', kuma_all_info.monitors | map(attribute='parent', default=0) | select | list) | list }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: kuma_deleted_groups
+          retries: 3
+          delay: 5
+          until: kuma_deleted_groups is not failed
