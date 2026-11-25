@@ -14,13 +14,15 @@
   ansible.builtin.set_fact:
     proxmox_candidates: []
 
-# Every other online node with its free memory
+# Every other online node with its free memory that has all the storages the guest's disks are on
 - name: Work out each node's free memory
   ansible.builtin.set_fact:
     proxmox_candidates: "{{ proxmox_candidates + [{'node': item.node, 'free': (item.maxmem | int) - (item.mem | int)}] }}"
   loop: "{{ proxmox_nodes_mem.stdout | from_json | selectattr('status', 'equalto', 'online') | rejectattr('node', 'equalto', proxmox_node) | list }}"
   loop_control:
     label: "{{ item.node }}"
+  when: >-
+    (proxmox_guest_storages[proxmox_guest.vmid | string] | default([]) | difference(proxmox_node_storages[item.node] | default([]))) | length == 0
 
 # The node with the most free memory that still fits the guest
 - name: Pick the target node
