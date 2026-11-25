@@ -1,6 +1,7 @@
 ---
 # Installs HashiCorp Vault from HashiCorp's apt repository, or updates it to vault_version, then issues its TLS certificate once Vault is unsealed; safe to re-run
 # Inventory: vault_domain (required); vault_version (e.g. 2.1.1) to install or move to that release, otherwise an installed version is left alone
+# Inventory: vault_port (default 8200) is the HTTPS port Vault listens on and advertises
 # A restart seals Vault, so a new binary or config only takes effect when run with -e vault_restart=true; unseal it by hand afterwards
 # Never initialises or unseals Vault: a new Vault is left for vault operator init, since its unseal keys must not pass through Ansible
 # vault_config_overwrite=true replaces a vault.hcl that differs from the one below; without it the run stops so a hand-made config is never lost
@@ -14,20 +15,20 @@
     vault_config_path: /etc/vault.d/vault.hcl
     # Talk to the local server; the certificate is issued for vault_domain, not 127.0.0.1
     vault_local_env:
-      VAULT_ADDR: https://127.0.0.1:8200
+      VAULT_ADDR: "https://127.0.0.1:{{ vault_port | default(8200) }}"
       VAULT_SKIP_VERIFY: "true"
     # The package's own layout, which the TLS play below installs certificates into
     vault_config: |
       # Managed by ansible/playbooks/deployment/app-vault.yaml
       ui = true
-      api_addr = "https://{{ vault_domain }}:8200"
+      api_addr = "https://{{ vault_domain }}:{{ vault_port | default(8200) }}"
 
       storage "file" {
         path = "/opt/vault/data"
       }
 
       listener "tcp" {
-        address       = "0.0.0.0:8200"
+        address       = "0.0.0.0:{{ vault_port | default(8200) }}"
         tls_cert_file = "/opt/vault/tls/tls.crt"
         tls_key_file  = "/opt/vault/tls/tls.key"
       }
