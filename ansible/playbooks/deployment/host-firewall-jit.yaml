@@ -37,7 +37,6 @@
           - jit_minutes | int >= 1 and jit_minutes | int <= 1440
         fail_msg: "Give jit_address as one IPv4 or IPv6 address, jit_port 1-65535 and jit_minutes 1-1440."
         quiet: true
-      run_once: true
 
     # A host without the firewall, or with an older rules file, has no set to add to
     - name: Check the host firewall is loaded
