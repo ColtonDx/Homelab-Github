@@ -38,7 +38,7 @@
     - name: List the inventory hosts' reservations
       ansible.builtin.set_fact:
         reserve_entries: "{{ reserve_entries | default([]) + [reserve_entry] }}"
-      loop: "{{ reserve_host_list | select('in', hostvars) | list }}"
+      loop: "{{ reserve_host_list }}"
       when: hostvars[item].dnsmasq_reservation.mac | default('') | length > 0
       vars:
         reserve_entry:
@@ -50,10 +50,12 @@
     # One * record per wildcard domain, pointing at the host's address
     - name: List the inventory hosts' wildcard records
       ansible.builtin.set_fact:
-        reserve_entries: "{{ reserve_entries | default([]) + [{'name': '*', 'ip': item.0.ansible_host, 'domain': item.1}] }}"
-      loop: "{{ reserve_host_list | select('in', hostvars) | map('extract', hostvars) | list | subelements('dnsmasq_wildcards', skip_missing=True) }}"
-      loop_control:
-        label: "*.{{ item.1 }}"
+        reserve_entries: "{{ reserve_entries | default([]) + (wildcard_json | from_json) }}"
+      loop: "{{ reserve_host_list }}"
+      when: hostvars[item].dnsmasq_wildcards | default([]) | length > 0
+      vars:
+        wildcard_json: >-
+          [{% for d in hostvars[item].dnsmasq_wildcards %}{{ {'name': '*', 'ip': hostvars[item].ansible_host, 'domain': d} | to_json }}{{ ',' if not loop.last }}{% endfor %}]
 
     # Writes the records and reloads Dnsmasq once
     - name: Reserve the addresses
