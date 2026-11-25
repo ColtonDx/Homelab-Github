@@ -3,6 +3,21 @@ services:
     container_name: withoutbg
     restart: unless-stopped
     image: withoutbg/app:latest
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    cap_add:
+      - NET_BIND_SERVICE # listen on port 80
+    # Not read-only: it downloads and caches its background-removal model at runtime
+    # hardening: healthcheck comes from the image itself (curl on /api/health, which falls back to IPv4)
+    mem_limit: 3g # Room for the model, while a runaway process still cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - reverseproxy-nw
     labels:

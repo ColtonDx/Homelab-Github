@@ -9,6 +9,13 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    mem_limit: 64m # A runaway process cannot take the host's memory
+    pids_limit: 50 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       # Only the addresses allowed to call the API (Uptime Kuma), from the inventory; everyone else is refused
       SP_ALLOWFROM: ${DOCKER_API_CLIENTS}

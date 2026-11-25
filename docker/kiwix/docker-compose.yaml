@@ -6,6 +6,26 @@ services:
     image: ghcr.io/kiwix/kiwix-serve:3.8.2
     # The image runs as uid 1001, which cannot read the ZIM files (owned 3000:0, mode 770), so it runs as their owner
     user: "3000:0"
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it already runs as an unprivileged user on port 8080
+    read_only: true # The app cannot change its own files; only its data volume and /tmp are writable
+    tmpfs:
+      - /tmp # In-memory scratch space
+    healthcheck: # Lets Docker and Kuma see a hung app, not just a running container
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m # A runaway process cannot take the host's memory
+    pids_limit: 100 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     networks:
       - reverseproxy-nw
     volumes:
