@@ -43,6 +43,23 @@
           vars:
             age_workdir: "{{ ha_tmp.path }}"
 
+        # Any valid token can read the API root, so a failure here means the token itself, not the backup route, is the problem
+        - name: Check Home Assistant accepts the token
+          ansible.builtin.uri:
+            url: "{{ ha_url }}/api/"
+            headers:
+              Authorization: "Bearer {{ ha_backup_token }}"
+          register: ha_api_check
+          failed_when: false
+          no_log: true
+
+        - name: Stop when the token is not accepted
+          ansible.builtin.fail:
+            msg: >-
+              Home Assistant refused the token on its basic API (HTTP {{ ha_api_check.status | default('no answer') }}): check BACKUP_TOKEN
+              at Vault {{ vault_homeassistant_path | default('homeassistant') }} is the whole long-lived token of the backup user, without spaces or line breaks.
+          when: ha_api_check.status | default(0) != 200
+
         # Waits until Home Assistant has finished writing it; a large media or database folder can take several minutes
         - name: Ask Home Assistant for a full backup
           ansible.builtin.uri:
