@@ -14,6 +14,19 @@ services:
       - /cryptpad/config:uid=4001,gid=4001,mode=0750
     networks:
       - reverseproxy-nw
+    security_opt:
+      - no-new-privileges:true # No process can gain more privileges than it started with (blocks setuid tricks)
+    cap_drop:
+      - ALL # Start with no Linux capabilities at all
+    # No capabilities added back: it runs as its own user (4001) on port 3000
+    # hardening: healthcheck comes from the image itself (curl on port 3000)
+    mem_limit: 1g # A runaway process cannot take the host's memory
+    pids_limit: 200 # Nor fork without limit
+    logging: # Rotate container logs so they cannot fill the disk
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       # With these set, CryptPad builds its config from them and listens on all interfaces; both domains are proxied to port 3000
       - CPAD_MAIN_DOMAIN=https://cryptpad.${DOCKER_DOMAIN}
