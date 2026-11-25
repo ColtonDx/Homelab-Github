@@ -61,6 +61,7 @@ Optional: `NETBOX_URL` is the fallback when the inventory has no `netbox_url`, f
 | Semaphore \| Scheduled Job Alerts | (none) | [semaphore-scheduled-job-alerts.yaml](../../semaphore/templates/semaphore-scheduled-job-alerts.yaml) | `ansible/playbooks/semaphore/scheduled-job-alerts.yaml` |
 | SSH Key Rotation | (none) | [ssh-key-rotation.yaml](../../semaphore/templates/ssh-key-rotation.yaml) | `ansible/playbooks/maintenance/rotate-ssh-keys.yaml` |
 | TLS \| Renew Certificates | (none) | [tls-renew-certificates.yaml](../../semaphore/templates/tls-renew-certificates.yaml) | `ansible/playbooks/tls/renew-certificates.yaml` |
+| TLS \| Push Certificate | (none) | [tls-push-certificate.yaml](../../semaphore/templates/tls-push-certificate.yaml) | `ansible/playbooks/tls/push-certificate.yaml` |
 | Uptime Kuma \| Sync Monitors | (none) | [uptime-kuma-sync-monitors.yaml](../../semaphore/templates/uptime-kuma-sync-monitors.yaml) | `ansible/playbooks/uptime-kuma/sync-monitors.yaml` |
 | Uptime Kuma \| Maintenance Window | (none) | [uptime-kuma-maintenance-window.yaml](../../semaphore/templates/uptime-kuma-maintenance-window.yaml) | `ansible/playbooks/uptime-kuma/set-maintenance-window.yaml` |
 | OPNsense \| Reserve IP | (none) | [opnsense-dnsmasq-reserve-ip.yaml](../../semaphore/templates/opnsense-dnsmasq-reserve-ip.yaml) | `ansible/playbooks/opnsense/dnsmasq-reserve-ip.yaml` |
