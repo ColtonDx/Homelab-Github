@@ -23,6 +23,8 @@ survey_vars:
         value: terraform/proxmox/kasm
       - name: Vault VM
         value: terraform/proxmox/vault
+      - name: Vault cluster VMs
+        value: terraform/proxmox/vault-cluster
       - name: Talos cluster
         value: terraform/proxmox/talos
       - name: Malcolm VM
