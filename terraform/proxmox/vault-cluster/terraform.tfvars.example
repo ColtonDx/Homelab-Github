@@ -7,6 +7,7 @@ template_name = "debian-cloud-template"
 nodes = [
   { name = "vault-1", vm_id = 401, target_node = "pve-node-1", address = "192.0.2.41" },
   { name = "vault-2", vm_id = 402, target_node = "pve-node-2", address = "192.0.2.42" },
-  # A host whose template sits on its own local storage names it by VMID, and can use different storage
-  { name = "vault-3", vm_id = 403, target_node = "pve-node-3", address = "192.0.2.43", template_id = 9003, storage_pool = "local" },
+  # A host with no copy of the template: build on a host that has one, on storage with the same name on both
+  # hosts, then change target_node and apply again; the provider migrates the VM with its local disks
+  { name = "vault-3", vm_id = 403, target_node = "pve-node-1", address = "192.0.2.43", storage_pool = "local" },
 ]

@@ -5,7 +5,7 @@
 
 terraform {
   # optional() attributes in the node list need Terraform 1.3 or later
-  required_version = ">= 1.3.0"
+  required_version = ">= 1.5.0"
 
   # Garage stores the state; its endpoint and credentials come from the AWS_* environment variables
   backend "s3" {
@@ -38,6 +38,15 @@ provider "proxmox" {
 
 locals {
   nodes = { for n in var.nodes : n.name => n }
+}
+
+# Two members on one host lose quorum together when that host goes down; a warning rather than an error,
+# so a member can be built on another host first and moved by changing its target_node
+check "one_member_per_host" {
+  assert {
+    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.target_node]))
+    error_message = "More than one member shares a Proxmox host; move one by changing its target_node."
+  }
 }
 
 # One VM per Proxmox host, so losing a host costs the cluster one member and never its quorum (two of three)

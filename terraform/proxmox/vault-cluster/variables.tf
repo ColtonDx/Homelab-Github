@@ -44,12 +44,6 @@ variable "nodes" {
     condition     = length(var.nodes) % 2 == 1
     error_message = "Use an odd number of members (3 or 5)."
   }
-
-  # Two members on one host would lose quorum together when that host goes down
-  validation {
-    condition     = length(var.nodes) == length(distinct([for n in var.nodes : n.target_node]))
-    error_message = "Every member needs its own Proxmox host."
-  }
 }
 
 variable "template_name" {
