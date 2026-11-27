@@ -50,6 +50,8 @@ table inet host_firewall {
     type filter hook input priority filter; policy accept;
     iif lo accept
     ct state established,related accept
+    # Late packets of connections conntrack has already forgotten (closing ACK/FIN, resets): never a new connection, so not logged
+    ct state invalid {{ 'drop' if enforce else 'accept' }}
     # ICMP keeps ping, path MTU discovery and IPv6 neighbour discovery working
     meta l4proto { icmp, ipv6-icmp } accept
     jump allowed
